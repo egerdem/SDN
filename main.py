@@ -4,6 +4,7 @@ import plot_room as pp
 from sdn_path_calculator import SDNCalculator, ISMCalculator
 import matplotlib.pyplot as plt
 import path_tracker
+import random
 
 # Define the Room
 room_parameters = {'width': 9, 'depth': 7, 'height': 4,
@@ -45,30 +46,37 @@ pp.plot_room(room)
 # Calculate paths up to order 10 (ISM for 0-2, RT for 3-10)
 # sdn_calc.calculate_paths_up_to_order(10)
 
-# Calculate both SDN and ISM paths
+# Create shared path tracker
+path_tracker = path_tracker.PathTracker()
+
+# Initialize calculators with shared tracker
 sdn_calc = SDNCalculator(room.walls, room.source.srcPos, room.micPos)
 ism_calc = ISMCalculator(room.walls, room.source.srcPos, room.micPos)
+sdn_calc.set_path_tracker(path_tracker)
+ism_calc.set_path_tracker(path_tracker)
 
 # Calculate paths up to order 3
 sdn_calc.calculate_paths_up_to_order(3)
 ism_calc.calculate_paths_up_to_order(3)
 
-# Print individual path lists
-print("\nSDN Paths:")
-sdn_calc.path_tracker.print_all_paths()
+# Print path comparison using shared tracker
+path_tracker.print_path_comparison()
 
-# Create a combined path tracker for comparison
-combined_tracker = path_tracker.PathTracker()
-for order in range(4):
-    sdn_paths = sdn_calc.path_tracker.get_paths_by_order(order, 'SDN')
-    ism_paths = ism_calc.path_tracker.get_paths_by_order(order, 'ISM')
-    for path in sdn_paths:
-        combined_tracker.add_path(path.nodes, path.distance, 'SDN', path.is_valid)
-    for path in ism_paths:
-        combined_tracker.add_path(path.nodes, path.distance, 'ISM', path.is_valid)
-
-# Print side-by-side comparison
-combined_tracker.print_path_comparison()
+# Get all invalid ISM paths
+# invalid_paths = []
+# for order in range(4):  # Up to order 3
+#     paths = path_tracker.get_paths_by_order(order, 'ISM')
+#     invalid_paths.extend([p.nodes for p in paths if not p.is_valid])
+#
+# # Select 10 random paths (or all if less than 10 exist)
+# num_examples = min(10, len(invalid_paths))
+# example_paths = random.sample(invalid_paths, num_examples)
+#
+# print("\nVisualizing random invalid paths:")
+# for path in example_paths:
+#     print(f"\nExamining invalid path: {' → '.join(path)}")
+#     pp.plot_ism_path(room, ism_calc, path)
+#     plt.show()
 
 # Visualize some example paths
 example_paths = [

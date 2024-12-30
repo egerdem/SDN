@@ -131,6 +131,7 @@ def plot_ism_path(room, ism_calc, path: List[str], ax=None):
         intermediate_key = tuple(intermediate_path)
         if intermediate_key not in ism_calc.image_sources:
             # Calculate if not already cached
+            print("this print should never be necessary")
             image_source = ism_calc.calculate_image_source(intermediate_path)
         else:
             image_source = ism_calc.image_sources[intermediate_key]
@@ -153,48 +154,51 @@ def plot_ism_path(room, ism_calc, path: List[str], ax=None):
                   color=reflection_colors[i], s=100,
                   label=f'Reflection Point {i+1} ({path[i+1]} wall)')
     
-    # Draw path segments with decreasing intensity
+    # Get the path object from shared tracker
+    path_obj = next(p for p in ism_calc.path_tracker.paths['ISM'][len(path)-2] 
+                   if p.nodes == path)
+    
+    # Draw path segments with decreasing intensity and show lengths
     points = [room.source.srcPos] + reflection_points + [room.micPos]
     segment_colors = plt.cm.Reds(np.linspace(0.3, 0.7, len(points)-1))
     linewidths = np.linspace(3, 1, len(points)-1)
     alphas = np.linspace(1.0, 0.6, len(points)-1)
     
+    # Plot segments with length labels
     for i in range(len(points)-1):
         p1, p2 = points[i], points[i+1]
+        
+        # Draw the line segment
         ax.plot([p1.x, p2.x], [p1.y, p2.y], [p1.z, p2.z],
                 '--',
                 color=segment_colors[i],
                 linewidth=linewidths[i],
                 alpha=alphas[i],
                 label=f'Path Segment {i+1}' if i==0 else None)
+        
+        # Calculate segment length
+        segment_length = p1.getDistance(p2)
+        
+        # Calculate midpoint for label position
+        mid_x = (p1.x + p2.x) / 2
+        mid_y = (p1.y + p2.y) / 2
+        mid_z = (p1.z + p2.z) / 2
+        
+        # Add length label with small offset
+        offset = 0.1  # Adjust this value to change label position
+        ax.text(mid_x + offset, mid_y + offset, mid_z + offset, 
+                f'{segment_length:.2f}m',
+                color=segment_colors[i],
+                alpha=alphas[i])
     
-    # Calculate and print path segment distances
-    points = [room.source.srcPos] + reflection_points + [room.micPos]
-    segment_distances = []
-    total_distance = 0
-    
+    # Print path details using stored information
     print(f"\nPath: {' → '.join(path)}")
-    print("Segment distances:")
-    
-    for i in range(len(points)-1):
-        p1, p2 = points[i], points[i+1]
-        distance = p1.getDistance(p2)
-        segment_distances.append(distance)
-        total_distance += distance
-        
-        # Get segment description
-        if i == 0:
-            desc = "Source → First reflection"
-        elif i == len(points)-2:
-            desc = f"Reflection {i} → Mic"
-        else:
-            desc = f"Reflection {i} → Reflection {i+1}"
-        
-        print(f"  {desc}: {distance:.2f}m")
-    
-    # Print equation-style total
-    equation = " + ".join([f"{d:.2f}" for d in segment_distances])
-    print(f"Total distance: {equation} = {total_distance:.2f}m")
+    print(f"Image source total distance: {path_obj.distance:.2f}m")
+    print(f"Segment distances: {' + '.join(f'{d:.2f}' for d in path_obj.segment_distances)}m")
+    print(f"Sum of segments distance: {path_obj.total_segment_distance:.2f}m")
+    print(f"Difference: {abs(path_obj.distance - path_obj.total_segment_distance):.6f}m")
+    if not path_obj.is_valid:
+        print("(INVALID PATH)")
     
     plt.legend()
     return ax

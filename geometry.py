@@ -32,9 +32,18 @@ class Room:
 
     def set_source(self, sx, sy, sz, signal, Fs=44100):
         self.source = Source(sx, sy, sz, signal, Fs)
-        # Calculate image sources for all walls immediately
-        img_sources = ImageSource(self.walls, self.source.srcPos, self.micPos)
-        img_sources.findImageSources()
+        self.srcPos = Point(sx, sy, sz)
+        # Calculate SDN node positions (first-order reflection points)
+        self._calculate_sdn_nodes()
+
+    def _calculate_sdn_nodes(self):
+        """Calculate fixed SDN node positions (first-order reflection points)"""
+        for wall_label, wall in self.walls.items():
+            # Calculate image source for this wall
+            img_source = ImageSource({wall_label: wall}, self.srcPos, self.micPos)
+            img_source.findImageSources()
+            # Find intersection point between image source and mic
+            wall.node_positions = img_source.findLineIntersection()
 
 
 class Source:
@@ -59,8 +68,6 @@ class ImageSource:
         for wall_label, wall in self.walls.items():
             self.imageSourcePos = self.IS_1st_order(wall)
             wall.IMS = self.imageSourcePos
-            wall.node_positions = self.findLineIntersection()
-            print(f"Set node position for {wall_label}: {wall.node_positions.__dict__}")  # Debug print
 
     def IS_1st_order(self, wall):
         # find image source locations along the plane
@@ -72,7 +79,8 @@ class ImageSource:
         # Compute the distance from the point to the plane
         # Distance formula: (ax + by + cz + d) / sqrt(a^2 + b^2 + c^2)
         norm = self.a ** 2 + self.b ** 2 + self.c ** 2
-        dist_to_plane = (self.a * self.srcPos.x + self.b * self.srcPos.y + self.c * self.srcPos.z + self.d) / norm
+        dist_to_plane = (self.a * self.srcPos.x + self.b * self.srcPos.y + 
+                        self.c * self.srcPos.z + self.d) / norm
 
         # Compute the reflection point
         self.ImageSource_Pos = Point(0.0, 0.0, 0.0)
@@ -83,35 +91,20 @@ class ImageSource:
         return self.ImageSource_Pos
 
     def findLineIntersection(self):
-        # two points are enough to define a line
-        # equation of a line is (x-x1)/l = (y-y1)/m = (z-z1)/n = k
-        posA = self.ImageSource_Pos
-        posB = self.micPos
-        l = posB.x - posA.x
-        m = posB.y - posA.y
-        n = posB.z - posA.z
+        """Find intersection point between image source and mic."""
+        return self._find_intersection_point(self.imageSourcePos, self.micPos)
 
-        # replace x with kl + x1 etc and plug into ax + by + cz + d = 0 to find k
-        k = -(self.a * posA.x + self.b * posA.y + self.c * posA.z +
-              self.d) / (self.a * l + self.b * m + self.c * n)
-
-        # plug in value of k into x = kl+x1 etc to find point of intersection
-        interPos = Point(0.0, 0.0, 0.0)
-        interPos.x = k * l + posA.x
-        interPos.y = k * m + posA.y
-        interPos.z = k * n + posA.z
-
-        return interPos
-
-    def findIntersectionPoint(self, point1: Point, point2: Point, wall: 'Wall') -> Point:
-        """New method for ISM - takes explicit points"""
-        # two points are enough to define a line
-        # equation of a line is (x-x1)/l = (y-y1)/m = (z-z1)/n = k
+    def _find_intersection_point(self, point1: Point, point2: Point) -> Point:
+        """Find intersection point between line segment and wall plane."""
+        # Get first wall's plane coefficients (we only have one wall)
+        wall = next(iter(self.walls.values()))
+        
+        # Get direction vector of the line
         l = point2.x - point1.x
         m = point2.y - point1.y
         n = point2.z - point1.z
 
-        # replace x with kl + x1 etc and plug into ax + by + cz + d = 0 to find k
+        # Calculate intersection parameter k
         k = -(wall.plane_coeffs.a * point1.x + 
               wall.plane_coeffs.b * point1.y + 
               wall.plane_coeffs.c * point1.z +
@@ -119,7 +112,7 @@ class ImageSource:
                                     wall.plane_coeffs.b * m + 
                                     wall.plane_coeffs.c * n)
 
-        # plug in value of k into x = kl+x1 etc to find point of intersection
+        # Calculate intersection point
         interPos = Point(0.0, 0.0, 0.0)
         interPos.x = k * l + point1.x
         interPos.y = k * m + point1.y
