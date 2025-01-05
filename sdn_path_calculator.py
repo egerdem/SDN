@@ -54,13 +54,18 @@ class SDNCalculator(PathCalculator):
     
     def calculate_paths_up_to_order(self, max_order: int):
         """Calculate all SDN paths up to specified order."""
+
+        # Zeroth order paths: Direct sound
+        self._calculate_zeroth_order_paths()
+
         # First order paths
         self._calculate_first_order_paths()
         
         # Higher order paths
         for order in range(2, max_order + 1):
             self._calculate_nth_order_paths(order)
-    
+
+
     def _calculate_first_order_paths(self):
         """Calculate direct wall reflection paths."""
         for wall_id in self.walls:
@@ -110,6 +115,19 @@ class SDNCalculator(PathCalculator):
         """Calculate total distance along a path."""
         return sum(self._get_distance(path[i], path[i+1]) 
                   for i in range(len(path)-1))
+    
+    def _calculate_zeroth_order_paths(self):
+        """Calculate direct sound path from source to microphone."""
+        path = ['s', 'm']
+        # Calculate direct distance using the pre-computed distance matrix
+        d0 = self._get_distance('s', 'm')  # source to mic
+        
+        self.path_tracker.add_path(
+            nodes=path,
+            distance=d0,
+            method='SDN',
+            segment_distances=[d0]
+        )
 
 class ISMCalculator(PathCalculator):
     """
@@ -192,7 +210,7 @@ class ISMCalculator(PathCalculator):
         for wall_id in path[1:]:  # Skip 's' in path
             wall = self.walls[wall_id]
             img_source_calc = geometry.ImageSource({'wall': wall}, current_source, self.mic_pos)
-            current_source = img_source_calc.IS_1st_order(wall)
+            current_source = img_source_calc.get_first_order_image(wall)
         return current_source
     
     def _calculate_reflection_points(self, path: List[str], final_image_source: Point) -> tuple[List[Point], bool]:

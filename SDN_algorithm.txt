@@ -1,0 +1,190 @@
+# Chapter 3: Scattering Delay Networks
+
+## 3.1 Design Overview
+
+The artificial reverberator proposed in this paper uses one scattering node for each wall of the modelled enclosure. These nodes are connected to each other via bidirectional, absorptive delay lines. In addition, a source injection node and a microphone node are connected to the scattering nodes by unidirectional attenuating delay lines. The direct path is modelled by the connection between the source injection node and the microphone node. Due to the nature of the operations carried out to obtain reverberation, we call this reverberator the **Scattering Delay Network (SDN)** reverberator, and the scattering nodes as **SDN nodes**. There are four types of connections in the proposed model:
+
+1. Connections between SDN nodes.
+2. Connections between the source node and SDN nodes.
+3. Connections between SDN nodes and the microphone node.
+4. Connections between the source node and the microphone node.
+
+Figure 3 shows a conceptual depiction of the SDN reverberator.
+
+### 3.1.1 SDN Nodes
+
+Each SDN node is positioned on a wall of the modelled enclosure and is connected to other nodes by absorptive bidirectional delay lines. These nodes carry out a scattering operation on their inputs from other nodes to obtain the outputs. This scattering operation is carried out using a unitary (i.e., energy-preserving) scattering matrix. For a room with \(N\) walls, the number of neighbours that an SDN node has is \(N-1\). The scattering matrix employed in this paper is the DWM scattering matrix:
+
+\[
+\mathbf{S} = \frac{2}{N-1} \mathbf{1}_{(N-1) \times (N-1)} - \mathbf{I},
+\]
+
+which is common to all the SDN nodes in the reverberator. While results presented in this paper were obtained with (5), other unitary matrices could be used as well. The pressure at the SDN node is a combination of incoming wave variables, \(p_{ki}^{+}(n)\), from neighbouring nodes and the pressure, \(p_{Sk}(n)\), due to the source as observed at the node:
+
+\[
+p_{k}(n) = p_{Sk}(n) + \frac{2}{N-1} \sum_{i=1}^{N-1} p_{ki}^{+}(n).
+\]
+
+In order to simplify the calculation, input from the source can be distributed to incoming wave variables such that:
+
+\[
+\hat{p}_{ki}^{+}(n) = p_{ki}^{+}(n) + 0.5 \, p_{Sk}(n),
+\]
+
+which provides the intended node pressure.
+
+### 3.1.2 SDN Interconnections
+
+The connections between the SDN nodes consist of a bidirectional delay element modelling the propagation path delay and two absorption filters which model the wall absorption associated with the two interconnected nodes. These interconnections, due to their recirculating nature, are responsible for the modelling of the room reverberation by facilitating the simulation of energy exchange between walls. The connection between two SDN nodes is depicted in Figure 4.
+
+The length of the delay lines connecting these individual nodes is determined by the actual positions of the nodes. These positions are calculated so as to provide first-order early reflections having the correct delay and the correct angle of incidence at a microphone position at \(\mathbf{x}_{M}\) for a source positioned at \(\mathbf{x}_{S}\). This can be done by calculating the point at which a **sound ray** emitted from the sound source and received at the microphone hits the wall. This calculation is trivial for simple geometries such as shoebox enclosures.
+
+For a volume with \(N\) walls, the number of bidirectional inter-node connections is \(\binom{N}{2}\). The length of the integer delay line between the \(k\)-th and \(m\)-th node is calculated as:
+
+\[
+D_{km} = \left\lfloor \frac{F_s \| \mathbf{x}_k - \mathbf{x}_m \|}{c} \right\rfloor,
+\]
+
+where \(c\) is the speed of sound, \(F_s\) is the sampling rate, and \(\mathbf{x}_i\) is the position vector of the \(i\)-th SDN node.
+
+The losses due to wall absorption can be incorporated into the model via filters, \(H_k(z)\) and \(H_m(z)\), modelling the absorptive properties of the walls, \(k\) and \(m\), respectively. These can be selected as minimum-phase IIR filters to reduce computational load without affecting the phase response of the simulated reflection [21].
+
+### 3.1.3 Source to SDN Connections
+
+The input to the system from an individual source is provided by a source injection node connected to SDN nodes via unidirectional attenuating delay lines (see Figure 5).
+
+The length of the delay line between the source at \(\mathbf{x}_S\) and the SDN node positioned at \(\mathbf{x}_k\) is determined by the propagation delay:
+
+\[
+D_{Sk} = \left\lfloor \frac{F_s \| \mathbf{x}_S - \mathbf{x}_k \|}{c} \right\rfloor.
+\]
+
+As there is no backscattering to the source node or spreading of energy by the source node in the proposed model, the attenuation due to spherical spreading (\(1/r\) law) should also be incorporated into this delay line as:
+
+\[
+g_{Sk} = \frac{G}{\| \mathbf{x}_S - \mathbf{x}_k \|},
+\]
+
+where \(G\) is the unit-distance in the model, i.e., \(c/F_s\), where \(F_s\) is the sampling frequency.
+
+Another important simulation parameter is the source directivity. The sparse sampling of the simulated enclosure prohibits the simulation of source directivity in great detail. However, a coarse approximation is easily incorporated by weighting the outgoing signals by \(\Gamma_S(\theta_{Sk})\), where \(\Gamma_S(\theta)\) is the source directivity, and \(\theta_{Sk}\) is the angle formed between the source reference axis and the line connecting the source and the \(k\)-th node. The pressure at the SDN node due to the source is then:
+
+\[
+p_{Sk}(n) = g_{Sk} \Gamma_S(\theta_{Sk}) p_S(n - D_{Sk}).
+\]
+
+This value is input to an SDN node by first scaling it with \(1/2\) and adding it to each incoming internode connection to the SDN node, as explained in equation (7).
+
+### 3.1.4 SDN to Microphone Connections
+
+The connection between the SDN node and the microphone node consists of a unidirectional attenuating delay line (see Figure 6). The input signal is taken as the summation of the outgoing pressure variables at the node (after passing through the wall filters) multiplied by \(2/(N-1)\). The delay from the \(k\)-th SDN node to the microphone node is:
+
+\[
+D_{kM} = \left\lfloor \frac{F_s \| \mathbf{x}_k - \mathbf{x}_M \|}{c} \right\rfloor.
+\]
+
+As with source directivity, the microphone directivity is also modelled using a simple gain element. The attenuation on the delay line is set as:
+
+\[
+g_{kM} = \frac{1}{1 + \frac{\| \mathbf{x}_k - \mathbf{x}_M \|}{\| \mathbf{x}_S - \mathbf{x}_k \|}},
+\]
+
+such that:
+
+\[
+g_{Sk} g_{Mk} = \frac{G}{\| \mathbf{x}_S - \mathbf{x}_k \| + \| \mathbf{x}_k - \mathbf{x}_M \|},
+\]
+
+which yields the correct attenuation for the first-order reflection according to the \(1/r\) law.
+
+## 3.2 Scalability and Interactivity
+
+The proposed method is scalable to different audio reproduction formats. For coincident microphone formats (e.g., Ambisonics), only the microphone gains \(\Gamma_{Mk}(\theta)\) have to be adjusted. For setups involving spatially separated microphones, one SDN reverberator has to be employed for each microphone. For near-coincident microphone setups, the same SDN node structure can be used, while creating new, dedicated node-to-microphone delay lines for each microphone, at the cost of reducing the accuracy of the system slightly. It is also possible to obtain approximate virtual binaural recordings. For this, a pair of head-related transfer function (HRTF) filters for each SDN node and source injection node needs to be used.
+
+The SDN reverberator also allows interactive operation. This is done via updating the model to reflect changes in the positions and rotations of the source and the microphone. This requires adjusting the positions of the nodes and updating the delay line lengths and gains accordingly.
+
+## 3.3 Transfer Function of the SDN Reverberator
+
+While the SDN reverberator is inspired by the combination of DWM models and FDN reverberators, its overall structure is different. Figure 7 shows the simplified block diagram of the SDN reverberator. In the figure,
+
+\[
+\gamma_S = \underbrace{\left[ \Gamma_S(\theta_{S1}) \cdots \Gamma_S(\theta_{S1}) \right]}_{N-1},
+\]
+
+\[
+\gamma_M = \underbrace{\left[ \Gamma_M(\theta_{1M}) \cdots \Gamma_M(\theta_{1M}) \right]}_{N-1},
+\]
+
+are the \(N(N-1) \times 1\) source and microphone directivity vectors,
+
+\[
+\mathbf{D}_S(z) = \text{diag}(z^{-D_{S1}} \cdots z^{-D_{S1}}),
+\]
+
+\[
+\mathbf{D}_M(z) = \text{diag}(z^{-D_{M1}} \cdots z^{-D_{M1}}),
+\]
+
+are \(N(N-1) \times N(N-1)\) source and microphone delay matrices,
+
+\[
+\mathbf{G}_S = \text{diag}(g_{S1} \cdots g_{S1}),
+\]
+
+\[
+\mathbf{G}_M = \text{diag}(g_{M1} \cdots g_{M1}),
+\]
+
+are the source and microphone attenuation matrices,
+
+\[
+\overline{\mathbf{S}} = \text{diag}(\mathbf{S}, \mathbf{S}, \cdots, \mathbf{S}),
+\]
+
+is a \(N(N-1) \times N(N-1)\) (unitary) block diagonal matrix representing the overall scattering operation with \(\mathbf{S} = \frac{1}{N-1} \mathbf{I}_{N-1 \times N-1} - \mathbf{I}\),
+
+\[
+\mathbf{D}_f(z) = \text{diag}(z^{-D_{12}}, \cdots, z^{-D_{NN-1}}),
+\]
+
+is the \(N(N-1) \times N(N-1)\) delay matrix representing the internode delays,
+
+\[
+\mathbf{H}(z) = \text{diag}(H_1(z) \cdots H_1(z), H_2(z) \cdots H_N(z)),
+\]
+
+is the \(N(N-1) \times N(N-1)\) wall absorption matrix, \(\mathbf{P}\) is a permutation matrix whose elements are determined based on adjacency of SDN nodes, \(g_{SM}\) is the direct path attenuation from source to microphone, and \(z^{-D_{SM}}\) is the direct path delay.
+
+From inspection of Figure 7, the system output can be expressed as:
+
+\[
+y = \frac{2}{N-1} \gamma_M^T \mathbf{D}_M \mathbf{G}_M \mathbf{q} + \overline{g} z^{-D_{SM}},
+\]
+
+where \(\overline{g} = g_{SM} \Gamma_S(\theta_{SM}) \Gamma_M(\theta_{MS})\), and \(\mathbf{q}\) is the state vector, which is given by:
+
+\[
+\mathbf{q} = \mathbf{H} \overline{\mathbf{S}} \left( \mathbf{P} \mathbf{D}_f \mathbf{q} + \frac{1}{2} \mathbf{G}_S \mathbf{D}_S \gamma_S x \right).
+\]
+
+The transfer function of SDN reverberators can therefore be expressed as:
+
+\[
+H(z) = \overline{g} z^{-D_{SM}} + \frac{1}{N-1} \mathbf{k}_M(z) \left( \mathbf{H}(z^{-1}) - \overline{\mathbf{S}} \mathbf{P} \mathbf{D}_f(z) \right)^{-1} \overline{\mathbf{S}} \mathbf{k}_S(z),
+\]
+
+where \(\mathbf{k}_M = \gamma_M^T \mathbf{D}_M \mathbf{G}_M\) and \(\mathbf{k}_S = \mathbf{G}_S \mathbf{D}_S \gamma_S\).
+
+It may be observed that, unlike FDN-type reverberators, different acoustical aspects such as the direct path and reflection delays are clearly delineated so as to allow a direct correspondence to the acoustics of the modelled room and complete flexibility with respect to source and microphone positions and directivities. In addition, the inclusion of first-order reflections directly into the model makes using a separate early-reflection module unnecessary.
+
+## 3.4 Relation to Previous Work
+
+An artificial reverberator using a similar sparse network of scattering nodes was also proposed by Smith [12], and further developed by Karjalainen et al. [13]. While this reverberator, which we will refer to as DWN reverberator, has similarities with the SDN reverberator proposed in this paper, there are also significant differences:
+
+1. In the DWN reverberator, the microphone node is itself a scattering node connected to the sparse DWM network, whereas the microphone node in the SDN reverberator is a passive element, which is actually the case for a real microphone.
+
+2. In the DWN reverberator, additional waveguides co-directional with the room axes are connected to the microphone node, and these nodes are interconnected with some of the other scattering nodes. While accuracy of axial frequency modes is improved by this, it also increases the computational complexity.
+
+3. The absorptive losses are modelled by loading the DWN wall nodes with frequency-dependent admittance via self-connections. It was reported that in order to control reverberation time and improve naturalness, these admittance loads have to be tuned heuristically. The SDN nodes do not have self-connections, and absorptive losses are modelled by short, minimum-phase IIR filters on the bidirectional delay lines. This allows the incorporation of wall materials with known absorption coefficients directly.
+
+4. In the DWN reverberator, only source-to-node and source-to-microphone attenuations were included. This causes inaccuracies in the magnitudes of the first-order reflections, particularly when the source is close to one of the wall nodes. This problem was circumvented by adding separate delay lines from source to microphone according to the image source principle. SDN reverberators do not suffer from the same problem, as they are able to render first-order reflections correctly.

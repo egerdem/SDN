@@ -5,7 +5,7 @@ from typing import Dict, List
 
 class Room:
     """
-    Class defining a room with some propoerties that can be controlled
+    Class defining a room with some properties that can be controlled
     """
 
     def __init__(self, lx, ly, lz):
@@ -16,13 +16,17 @@ class Room:
         self.z = lz
         self.wallAttenuation = []  # this is a list
         self.wallFilters = dict()  # this is a dictionary
-        self.walls = {}
-        self.walls['south'] = Wall(Point(0, 0, 0), Point(self.x, 0, 0), Point(0, 0, self.z))
-        self.walls['north'] = Wall(Point(0, self.y, 0), Point(0, self.y, self.z), Point(self.x, self.y, 0))
-        self.walls['west'] = Wall(Point(0, 0, 0), Point(0, self.y, 0), Point(0, 0, self.z))
-        self.walls['east'] = Wall(Point(self.x, 0, 0), Point(self.x, self.y, 0), Point(self.x, self.y, self.z))
-        self.walls['ceiling'] = Wall(Point(0, 0, self.z), Point(0, self.y, self.z), Point(self.x, self.y, self.z))
-        self.walls['floor'] = Wall(Point(0, 0, 0), Point(0, self.y, 0), Point(self.x, self.y, 0))
+        self._setup_walls()
+
+    def _setup_walls(self):
+        # Setting up walls (internal use only)
+        self.walls = {
+        'south': Wall(Point(0, 0, 0), Point(self.x, 0, 0), Point(0, 0, self.z)),
+        'north': Wall(Point(0, self.y, 0), Point(0, self.y, self.z), Point(self.x, self.y, 0)),
+        'west' : Wall(Point(0, 0, 0), Point(0, self.y, 0), Point(0, 0, self.z)),
+        'east' : Wall(Point(self.x, 0, 0), Point(self.x, self.y, 0), Point(self.x, self.y, self.z)),
+        'ceiling' : Wall(Point(0, 0, self.z), Point(0, self.y, self.z), Point(self.x, self.y, self.z)),
+        'floor' : Wall(Point(0, 0, 0), Point(0, self.y, 0), Point(self.x, self.y, 0))}
 
     def set_microphone(self, mx, my, mz):
         self.mx = mx
@@ -39,11 +43,10 @@ class Room:
     def _calculate_sdn_nodes(self):
         """Calculate fixed SDN node positions (first-order reflection points)"""
         for wall_label, wall in self.walls.items():
-            # Calculate image source for this wall
+            # Calculate image source for "wall"
             img_source = ImageSource({wall_label: wall}, self.srcPos, self.micPos)
-            img_source.findImageSources()
-            # Find intersection point between image source and mic
-            wall.node_positions = img_source.findLineIntersection()
+            # Find intersection point between IM-mic line segment and the wall
+            wall.node_positions = img_source._find_intersection_point(img_source.imageSourcePos, img_source.micPos)
 
 
 class Source:
@@ -62,14 +65,15 @@ class ImageSource:
         self.walls = walls
         self.srcPos = srcPos
         self.micPos = micPos
-        self.imageSourcePos = None  # Will be set by IS_1st_order
+        self.imageSourcePos = None  # Will be set by get_first_order_image
+        self._findImageSources()  # Calculate image sources during initialization
 
-    def findImageSources(self):
+    def _findImageSources(self):
         for wall_label, wall in self.walls.items():
-            self.imageSourcePos = self.IS_1st_order(wall)
+            self.imageSourcePos = self.get_first_order_image(wall)
             wall.IMS = self.imageSourcePos
 
-    def IS_1st_order(self, wall):
+    def get_first_order_image(self, wall):
         # find image source locations along the plane
         self.d = wall.plane_coeffs.d
         self.a = wall.plane_coeffs.a
@@ -90,12 +94,8 @@ class ImageSource:
 
         return self.ImageSource_Pos
 
-    def findLineIntersection(self):
-        """Find intersection point between image source and mic."""
-        return self._find_intersection_point(self.imageSourcePos, self.micPos)
-
     def _find_intersection_point(self, point1: Point, point2: Point) -> Point:
-        """Find intersection point between line segment and wall plane."""
+        """Find intersection point between IM-mic line segment and wall plane."""
         # Get first wall's plane coefficients (we only have one wall)
         wall = next(iter(self.walls.values()))
         
@@ -129,12 +129,11 @@ class Wall:
     def __init__(self, posA: Point, posB: Point, posC: Point):
         self.plane_coeffs = Plane(posA, posB, posC)
         self.IMS = None
-        self.node_positions = None
+        self.node_positions = None  # simple attribute instead of property
         # Store wall boundaries
         self.corners = [posA, posB, posC]
         # Calculate wall dimensions
-        self.width = posB.getDistance(posA)
-        self.height = posC.getDistance(posA)
+
 
     def is_point_within_bounds(self, point: Point) -> bool:
         """Check if a point lies within the wall boundaries"""
@@ -153,14 +152,6 @@ class Wall:
         
         # Point is within bounds if both projections are between 0 and 1
         return (0 <= proj1 <= 1) and (0 <= proj2 <= 1)
-
-    @property
-    def node_positions(self):
-        return self._node_positions
-
-    @node_positions.setter
-    def node_positions(self, pos):
-        self._node_positions = pos
 
 
 class Point:

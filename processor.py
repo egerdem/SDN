@@ -17,6 +17,7 @@ class SDNProcessor:
         self.Fs = Fs
         self.c = c
         self.num_samples = int(Fs * duration)
+        self.G = self.c / self.Fs
         
         # Initialize nodes (one per wall)
         self.N = len(room.walls)  # Number of nodes (6 for cuboid)
@@ -58,7 +59,7 @@ class SDNProcessor:
             self.g_sk[wall_id] = 1.0 / src_dist
             
             # Node to mic attenuation
-            self.g_km[wall_id] = 1.0 / (1 + mic_dist/src_dist)
+            self.g_km[wall_id] = 1.0 * self.G / (1 + mic_dist/src_dist)
 
     def process_sample(self, n: int):
         """Process a single time step."""
@@ -114,20 +115,8 @@ class SDNOrderProcessor:
         # Initialize RIR buffer
         self.rir = np.zeros(self.max_samples)
         
-        # Initialize nodes (one per wall)
-        self.N = len(room.walls)  # 6 for cuboid
-        self.N_connections = self.N - 1  # 5 connections per node
-        
-        # Calculate scattering matrix (5x5 for 6 walls)
-        self.S = (2/self.N_connections) * np.ones((self.N_connections, self.N_connections)) - np.eye(self.N_connections)
-        
-        # Create index mapping for scattering matrix (excluding self-connections)
-        self.wall_to_idx = {}
-        for wall_id in room.walls:
-            other_walls = [w for w in room.walls if w != wall_id]
-            self.wall_to_idx[wall_id] = {
-                other: idx for idx, other in enumerate(other_walls)
-            }
+        # Use natural wall ordering from room.walls
+        self.wall_order = list(room.walls.keys())
         
         # Calculate attenuations
         self.g_sk = {}  # source to node attenuations
@@ -162,21 +151,25 @@ class SDNOrderProcessor:
         else:
             # First wall hit
             first_wall = path.nodes[1]
-            attenuation = self.g_sk[first_wall]  # Source to first node
+            SK_attenuation = 0.5 * self.g_sk[first_wall]  # Source to first node with 1/2 factor
             
-            # Process scattering between nodes
-            if path.order > 1:
-                nodes = path.nodes[1:-1]  # Skip source and mic
-                for i in range(len(nodes)-1):
-                    current_node = nodes[i]
-                    next_node = nodes[i+1]
+            # Initialize attenuation
+            attenuation = SK_attenuation
+
+
+
+            if path.order >= 2:
+                # Apply varying weights for each middle segment
+                for i in range(1, len(path.nodes) - 2):
+                    current_node = path.nodes[i]
+                    next_node = path.nodes[i + 1]
                     
-                    # Get index for next node in current node's connection list
-                    next_idx = self.wall_to_idx[current_node][next_node]
+                    # Use a random weight between -1 and 1
+                    weight = np.random.uniform(-0.4, 1)
                     
-                    # Apply scattering coefficient from matrix
-                    # Note: Using the element that maps from current to next node
-                    attenuation *= self.S[next_idx][0]  # First column since we have single input
+                    # Apply wall reflection coefficient
+                    wall_reflection = 0.89
+                    attenuation *= wall_reflection * weight
             
             # Final node to mic attenuation
             last_wall = path.nodes[-2]  # Last wall before mic
@@ -195,3 +188,4 @@ class SDNOrderProcessor:
                 self.process_path(path)
         
         return self.rir
+

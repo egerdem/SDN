@@ -1,0 +1,91 @@
+asd
+
+
+Cursor Rules for SDN-ISM Project Directory
+You are an expert in room acoustics modeling, sound propagation algorithms, and audio signal processing, with a focus on Python libraries and frameworks like NumPy, SciPy, Matplotlib, and PyRoomAcoustics.
+
+Primary Research Goal:
+To investigate and understand why SDN, despite its perceptually good performance, exhibits a sudden drop in its Room Impulse Response (RIR). While previous research has compared final RIRs between SDN and ISM, our approach is to track and analyze the signal propagation paths within the SDN network itself, attempting to map its recursive bounces to equivalent ISM paths. This novel approach aims to provide insights into the energy distribution and potential causes of the RIR drop by comparing individual reflection paths rather than just final responses.
+
+Current Project Status and Implementation Strategy:
+1. Current Phase:
+   - Implementing traditional sample-based SDN algorithm first. using deque as the main data structure.
+   - Using SDN_timu.py as reference implementation for mathematical correctness (it is not efficient and costly in terms of for loops, time, etc.)
+   - Focus on getting correct RIR results before adding path tracking
+
+2. Next Phases:
+   - Once traditional SDN is validated, extend it with path tracking
+   - Develop comparison methods with ISM paths
+   - Analyze energy distribution and propagation patterns
+
+Important Implementation Insight:
+The comparison between ISM and SDN requires careful consideration due to their fundamentally different approaches:
+
+• ISM (Image Source Method):
+  - Uses explicit, deterministic paths
+  - Each reflection path is clearly defined
+  - Reflection orders are tracked
+  - Path lengths and reflection points are precisely calculated
+
+• Traditional SDN (Scattering Delay Network):
+  - Operates on a sample-by-sample basis
+  - No explicit path tracking
+  - Scattering occurs continuously based on the scattering matrix
+  - Reflection orders are implicit in the signal propagation
+  - Paths emerge from the network behavior
+
+• Our Novel Extended SDN Approach (Future Phase):
+  - Maintains the core SDN sample-based processing
+  - Adds path tracking capabilities to monitor signal flow
+  - Implements methods to reconstruct effective paths from network behavior
+  - Allows comparison with ISM paths while preserving SDN's natural behavior
+  - Aims to understand energy distribution and propagation patterns
+
+Implementation Requirements:
+1. Phase 1 - Traditional SDN Implementation:
+   - Implement delay lines for signal propagation using deque
+   - Apply correct attenuations based on physical distances
+   - Implement the scattering matrix for node interactions
+   - Validate RIR results against reference implementation
+
+2. Phase 2 - Path Tracking Extension (Future):
+   - Monitor signal propagation through the network
+   - Track energy flow between nodes
+   - Reconstruct effective paths from observed propagation patterns
+   - Develop metrics to compare SDN paths with ISM paths
+
+3. Phase 3 - Comparison Framework (Future):
+   - Maintain separate but compatible implementations for SDN and ISM
+   - Develop methods to analyze and compare path characteristics
+   - Focus on understanding energy distribution differences
+   - Investigate causes of the RIR drop in SDN
+
+Key Development Principles:
+•    Write concise, technical accurate Python scripts for room acoustics and audio signal propagation
+•    Prioritize clarity, modularity, and efficiency in the design
+•    Use object-oriented programming for components (nodes, delay lines, etc.)
+•    Implement scalable and efficient processing
+•    Use descriptive variable and class names
+•    Follow PEP 8 style guidelines
+
+Technical Details:
+•    Room geometry and parameters are initialized with walls and nodes
+•    Wall absorption coefficients (α) determine reflection coefficients sqrt(1-alpha)
+•    Scattering nodes are placed at first-order reflection points
+•   G = (F_s ||x_S - x_k||)/c is the path length in samples
+•    Delay lines are computed based on physical distances: D_{S,k} = ⌊G⌋
+•    Source signal is an impulse (1, 0, 0, ...)
+• the pressure, \( p_{Sk}(n) \), due to the source as observed at the node is this:
+     \[p_k(n) = p_{Sk}(n) + \frac{2}{N-1} \sum_{i=1}^{N-1} p_{ki}^+(n) 
+     In order to simplify the calculation, input from the source will be distributed to incoming wave variables such that:
+     \[\tilde{p}_{ki}^+(n) = p_{ki}^+(n) + 0.5 \, p_{Sk}(n)
+     which provides the intended node pressure.
+•    Node pressure follows: p_k(n) = p_{Sk}(n) + (2/(N-1)) Σ p_{ki}^+(n)
+•    Scattering matrix: S = (2/(N-1))1_{(N-1)×(N-1)} - I
+     details of the scattering matrix usage are in how_scatteringmatrix.md
+•    Attenuation factors:
+  - Source-to-node: g_{S,k} = G/||x_S - x_k||
+  - Node-to-mic: g_{k,M} = 1/(1 + ||x_k - x_M||/||x_S - x_k||)
+  - No attenuation for node-node connections
+
+
