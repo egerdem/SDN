@@ -36,7 +36,7 @@ pp.plot_room(room)
 sdn = DelayNetwork(room)
 
 # Calculate RIR
-duration = 0.15  # seconds
+duration = 0.02  # seconds
 rir = sdn.calculate_rir(duration)
 
 # Plot RIR

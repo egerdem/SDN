@@ -16,12 +16,14 @@ class DelayNetwork:
         self.scattering_matrix = self._create_scattering_matrix()
         
         # Initialize delay lines with public access using descriptive keys
+        self.source_to_mic = {}  # Direct source to microphone
         self.source_to_nodes = {}    # Format: "src_to_{wall_id}"
         self.node_to_mic = {}        # Format: "{wall_id}_to_mic"
         self.node_to_node = {}       # Format: "{wall1_id}_to_{wall2_id}"
         self._setup_delay_lines()
         
         # Initialize attenuation factors with matching keys
+        # self.source_to_mic_gain is added inside the _calculate_attenuations() function
         self.source_to_node_gains = {}  # g_sk, Format: "src_to_{wall_id}"
         self.node_to_mic_gains = {}     # g_km, Format: "{wall_id}_to_mic"
         self._calculate_attenuations()
@@ -47,6 +49,13 @@ class DelayNetwork:
     
     def _setup_delay_lines(self):
         """Initialize all delay lines in the network."""
+
+        # Direct source to microphone
+        key = "src_to_mic"
+        src_mic_distance = self.room.srcPos.getDistance(self.room.micPos)
+        direct_sound_delay = int(np.floor((self.Fs * src_mic_distance) / self.c))
+        self.source_to_mic[key] = deque([0.0] * direct_sound_delay, maxlen=direct_sound_delay)
+
         # Source to nodes
         for wall_id, wall in self.room.walls.items():
             key = f"src_to_{wall_id}"
@@ -75,6 +84,10 @@ class DelayNetwork:
         """Calculate attenuation factors for all connections."""
         G = self.c / self.Fs  # unit distance
         
+        # Direct sound attenuation (1/r law)
+        src_mic_distance = self.room.srcPos.getDistance(self.room.micPos)
+        # self.source_to_mic_gain = G / src_mic_distance
+        self.source_to_mic_gain = 0.02 # no gain for direct sound
         for wall_id, wall in self.room.walls.items():
             node_pos = wall.node_positions
             src_dist = node_pos.getDistance(self.room.source.srcPos)
@@ -98,56 +111,81 @@ class DelayNetwork:
         4. Calculate microphone output
         """
         output_sample = 0.0
-        
+        print(f"\nProcessing sample {self.current_sample} (input: {input_sample})")
+
+        # Step 0: Source to mic direct sound
+        self.source_to_mic["src_to_mic"].append(input_sample)
+        direct_contribution = self.source_to_mic["src_to_mic"][0] * self.source_to_mic_gain
+        output_sample += direct_contribution
+        print(f"Direct sound contribution: {direct_contribution}")
+
         # Step 1: Distribute input to nodes
+        print("\nStep 1: Source to nodes distribution:")
         for wall_id in self.room.walls:
             src_key = f"src_to_{wall_id}"
-            # Calculate source pressure contribution with attenuation
+            # Calculate new source pressure and add to delay line
             source_pressure = input_sample * self.source_to_node_gains[src_key]
             self.source_to_nodes[src_key].append(source_pressure)
+            print(f"{src_key}: Input {input_sample} * Gain {self.source_to_node_gains[src_key]:.4f} = {source_pressure:.4f}")
         
         # Step 2: Process each node
+        print("\nStep 2: Node processing:")
         for wall_id in self.room.walls:
-            # Get source contribution
+            print(f"\nProcessing {wall_id} wall:")
+            # Get source contribution from delay line (could be from previous inputs)
             src_key = f"src_to_{wall_id}"
             source_pressure = self.source_to_nodes[src_key][0]
+            print(f"Source pressure from delay line: {source_pressure:.4f}")
             
             # Collect incoming wave variables from other nodes (excluding self)
             incoming_waves = []
             other_nodes = []
+            print("Incoming waves from other nodes:")
             for other_id in self.room.walls:
                 if other_id != wall_id:
                     other_nodes.append(other_id)
-                    # Read from delay line and add half of source pressure
+                    # Read from delay line
                     p = self.node_to_node[other_id][wall_id][0]
-                    p_tilde = p + 0.5 * source_pressure  # Eq. (7) from paper
+                    # Always add half source pressure to incoming waves (Eq. 7)
+                    p_tilde = p + 0.5 * source_pressure
                     incoming_waves.append(p_tilde)
+                    print(f"  From {other_id}: base={p:.4f}, with source={p_tilde:.4f}")
             
             # Apply scattering matrix to get outgoing waves
             outgoing_waves = np.dot(self.scattering_matrix, incoming_waves)
+            print(f"Outgoing waves after scattering: {outgoing_waves}")
             
             # Store outgoing waves for each connection
             for idx, other_id in enumerate(other_nodes):
                 self.outgoing_waves[wall_id][other_id] = outgoing_waves[idx]
             
             # Calculate node pressure: p_k(n) = p_Sk(n) + 2/(N-1) * Σ p_ki^+(n)
+            # Calculate node pressure using incoming waves
             node_pressure = source_pressure + (2/(self.num_nodes-1)) * sum(incoming_waves)
             self.node_pressures[wall_id] = node_pressure
+            print(f"Final node pressure: {node_pressure:.4f}")
             
             # Send to microphone (using outgoing waves)
             mic_key = f"{wall_id}_to_mic"
             mic_pressure = (2/(self.num_nodes-1)) * sum(outgoing_waves) * self.node_to_mic_gains[mic_key]
             self.node_to_mic[mic_key].append(mic_pressure)
             output_sample += self.node_to_mic[mic_key][0]
+            print(f"Contribution to mic: {self.node_to_mic[mic_key][0]:.4f}")
+
+        print(f"\nFinal output sample: {output_sample:.4f}")
         
         # Step 3: Update node-to-node connections using stored outgoing waves
+        print("\nStep 3: Updating node-to-node connections:")
         for wall_id in self.room.walls:
             for other_id in self.room.walls:
                 if wall_id != other_id:
-                    # Get outgoing wave and apply wall attenuation
                     outgoing_wave = self.outgoing_waves[wall_id][other_id]
-                    attenuated_wave = outgoing_wave * self.room.wallAttenuation[0]
+                    # Apply sending and receiving walls' attenuations
+                    sending_wall_atten = self.room.wallAttenuation[self.room.walls[wall_id].wall_index]
+                    receiving_wall_atten = self.room.wallAttenuation[self.room.walls[other_id].wall_index]
+                    attenuated_wave = outgoing_wave * sending_wall_atten * receiving_wall_atten
                     self.node_to_node[wall_id][other_id].append(attenuated_wave)
+                    print(f"{wall_id}->{other_id}: wave={outgoing_wave:.4f}, attenuated={attenuated_wave:.4f}")
         
         self.current_sample += 1
         return output_sample
@@ -162,6 +200,7 @@ class DelayNetwork:
         
         # Process remaining samples
         for n in range(1, num_samples):
+
             rir[n] = self.process_sample(0.0)
         
         return rir 

@@ -489,18 +489,16 @@ class DelayLine(object):
 class SoundFileRW(object):
     def __init__(self, rate, data):
         self.data = None
-        self.rate = None
+        self.rate = SAMPLING_RATE  # Set default rate to SAMPLING_RATE for impulse response
 
     def read_sound_file(self, filename, source):
         # If you want to feed a wav file:
         # self.rate, self.data = wavfile.read(filename)
-        # self.data.flags. writeable = True
+        # self.data.flags.writeable = True
         # self.data = self.data.astype(float)
 
-        # If you want to feed an impulse:
-        self.rate, self.data = wavfile.read(filename)
+        # For impulse response:
         self.data = sig.unit_impulse(1)
-
         source.input = col.deque(np.flip(self.data))
 
     def write_sound_file(self, filename, microphone):
@@ -510,45 +508,26 @@ class SoundFileRW(object):
 
         time_passed_one = np.arange(0, len(self.data) / SAMPLING_RATE, (1 / SAMPLING_RATE))
 
-
-        # signal_ned = np.zeros(len(self.data))
-
-        # window_size = round(44100 * 0.01)
-        # window = np.hanning(window_size)
-        # window = window / sum(window)
-        # window_length = len(window)
-
-
-        # for i in range(0, len(self.data) - window_length):
-        #     values = self.data[i:(i + window_length)]
-        #     sigma = math.sqrt(sum(np.multiply(window, np.square(values))))
-        #
-        #     sumValues = 0
-        #     for value in values:
-        #         if abs(value) > sigma:
-        #             sumValues += window[values.tolist().index(value)]
-        #
-        #     signal_ned[i] = (1 / math.erfc(1 / math.sqrt(2))) * sumValues
-
+        # Plot time domain response
         plt.figure()
         plt.axis([-0.005, 0.06, -0.1, 1.2])
         plt.plot(time_passed_one, self.data)
-        # plt.plot(time_passed_one,signal_ned)
         plt.show()
 
-        Fs = self.rate
-        Fs = float(Fs)
+        # Calculate and plot energy decay curve
         Lp = len(self.data)
-        Tp = np.arange(0, Lp / Fs, (1 / Fs))
+        Tp = np.arange(0, Lp / SAMPLING_RATE, (1 / SAMPLING_RATE))
 
         pEnergy = (np.cumsum(self.data[::-1] ** 2) / np.sum(self.data[::-1]))[::-1]
         pEdB = 10.0 * np.log10(pEnergy / np.max(pEnergy))
         Tp = Tp[:len(pEdB)]  # Trim Tp
 
         plt.figure()
-        plt.plot(Tp, pEdB, ls = 'solid', color = 'b', label= 'Energy decay curve', linewidth = 1)
+        plt.plot(Tp, pEdB, ls='solid', color='b', label='Energy decay curve', linewidth=1)
         plt.show()
-        self.data = np.asarray(microphone.output, dtype=np.int16)
+
+        # Write to wav file (commented out for impulse response)
+        # self.data = np.asarray(microphone.output, dtype=np.int16)
         # wavfile.write(filename, self.rate, self.data)
 
 

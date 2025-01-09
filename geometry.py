@@ -20,13 +20,21 @@ class Room:
 
     def _setup_walls(self):
         # Setting up walls (internal use only)
+        # Wall order: south, north, west, east, ceiling, floor
+        wall_order = ['south', 'north', 'west', 'east', 'ceiling', 'floor']
         self.walls = {
-        'south': Wall(Point(0, 0, 0), Point(self.x, 0, 0), Point(0, 0, self.z)),
-        'north': Wall(Point(0, self.y, 0), Point(0, self.y, self.z), Point(self.x, self.y, 0)),
-        'west' : Wall(Point(0, 0, 0), Point(0, self.y, 0), Point(0, 0, self.z)),
-        'east' : Wall(Point(self.x, 0, 0), Point(self.x, self.y, 0), Point(self.x, self.y, self.z)),
-        'ceiling' : Wall(Point(0, 0, self.z), Point(0, self.y, self.z), Point(self.x, self.y, self.z)),
-        'floor' : Wall(Point(0, 0, 0), Point(0, self.y, 0), Point(self.x, self.y, 0))}
+            'south': Wall(Point(0, 0, 0), Point(self.x, 0, 0), Point(0, 0, self.z)),
+            'north': Wall(Point(0, self.y, 0), Point(0, self.y, self.z), Point(self.x, self.y, 0)),
+            'west': Wall(Point(0, 0, 0), Point(0, self.y, 0), Point(0, 0, self.z)),
+            'east': Wall(Point(self.x, 0, 0), Point(self.x, self.y, 0), Point(self.x, self.y, self.z)),
+            'ceiling': Wall(Point(0, 0, self.z), Point(0, self.y, self.z), Point(self.x, self.y, self.z)),
+            'floor': Wall(Point(0, 0, 0), Point(0, self.y, 0), Point(self.x, self.y, 0))
+        }
+        
+        # Add wall indices based on the defined order
+        for i, wall_id in enumerate(wall_order):
+            if wall_id in self.walls:
+                self.walls[wall_id].wall_index = i
 
     def set_microphone(self, mx, my, mz):
         self.mx = mx
@@ -132,8 +140,8 @@ class Wall:
         self.node_positions = None  # simple attribute instead of property
         # Store wall boundaries
         self.corners = [posA, posB, posC]
-        # Calculate wall dimensions
-
+        # Wall index for attenuation lookup
+        self.wall_index = None
 
     def is_point_within_bounds(self, point: Point) -> bool:
         """Check if a point lies within the wall boundaries"""
