@@ -30,29 +30,69 @@ room_parameters['reflection'] = np.sqrt(1 - room_parameters['absorption'])
 room.wallAttenuation = [room_parameters['reflection']] * 6
 
 # Visualize the room setup
-pp.plot_room(room)
+# pp.plot_room(room)
 
-# Initialize SDN
-sdn = DelayNetwork(room)
+# Initialize SDN for reference (with all physics enabled)
+reference_sdn = DelayNetwork(room,
+                           use_identity_scattering=False,
+                           ignore_wall_absorption=False,
+                           ignore_src_node_atten=False,
+                           ignore_node_mic_atten=False)
 
-# Calculate RIR
-duration = 0.02  # seconds
+# Calculate reference RIR
+duration = 0.2  # seconds
+
+reference_rir = reference_sdn.calculate_rir(duration)
+reference_rir = reference_rir / np.max(np.abs(reference_rir))
+
+# Initialize SDN with test flags
+sdn = DelayNetwork(room, source_pressure_injection_coeff=1.0,
+                   use_identity_scattering=False,
+                   ignore_wall_absorption=False,
+                   ignore_src_node_atten=False,
+                   ignore_node_mic_atten=False)
+
+# Calculate test RIR
 rir = sdn.calculate_rir(duration)
+rir = rir / np.max(np.abs(rir))
+
+# Create list of enabled flags
+enabled_flags = []
+if sdn.use_identity_scattering:
+    enabled_flags.append("Identity Scattering")
+if sdn.ignore_wall_absorption:
+    enabled_flags.append("No Wall Absorption")
+if sdn.ignore_src_node_atten:
+    enabled_flags.append("No Src-Node Atten")
+if sdn.ignore_node_mic_atten:
+    enabled_flags.append("No Node-Mic Atten")
 
 # Plot RIR
 plt.figure(figsize=(12, 6))
-plt.plot(rir)
+
+
+# Plot test RIR
+plt.plot(rir, label='Test RIR')
+
+# Plot reference RIR with reduced opacity
+plt.plot(reference_rir, color='orange', alpha=0.6, label='Reference RIR')
+
 plt.title('Room Impulse Response (SDN)')
 plt.xlabel('Sample')
 plt.ylabel('Amplitude')
 plt.grid(True)
-plt.show()
+plt.legend()
 
-# Example: Access and inspect specific delay lines
-print("\nDelay line lengths:")
-print("Source to north wall:", len(sdn.source_to_nodes['src_to_north']))
-print("North wall to microphone:", len(sdn.node_to_mic['north_to_mic']))
-print("North wall to east wall:", len(sdn.node_to_node['north']['east']))
+# Add flags to top-right corner
+if enabled_flags:
+    flag_text = '\n'.join(enabled_flags)
+    plt.text(0.98, 0.98, flag_text,
+             transform=plt.gca().transAxes,
+             verticalalignment='top',
+             horizontalalignment='right',
+             bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
+
+plt.show()
 
 # The code below is the order-based implementation that we'll revisit later
 # after implementing and validating the traditional sample-based SDN.
@@ -97,5 +137,3 @@ print("North wall to east wall:", len(sdn.node_to_node['north']['east']))
 # for path in example_paths:
 #     pp.plot_ism_path(room, ism_calc, path)
 #     plt.show()
-
-# Next step: Implement traditional sample-based SDN using SDN_timu.py as reference

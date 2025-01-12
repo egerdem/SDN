@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from sdn_core import DelayNetwork
 import sys
 import os
+import time  # Add time import
 
 # Add SDN_algo3 to path for imports
 sys.path.append(os.path.join(os.path.dirname(__file__), 'SDN_algo3'))
@@ -15,8 +16,15 @@ import Simulation as sim
 import Geometry as geom
 from SDN_timu import Room as TimuRoom, Source as TimuSource, Microphone as TimuMicrophone, SoundFileRW
 
-def run_comparison(room_parameters, duration=0.05):
-    """Run and compare SDN implementations."""
+def run_comparison(room_parameters, duration=0.05, time_comparison=False):
+    """Run and compare SDN implementations.
+    
+    Args:
+        room_parameters: Dictionary containing room setup parameters
+        duration: Duration of simulation in seconds
+        time_comparison: If True, print timing information for each implementation
+    """
+    timing_results = {}
 
     # SDN-EGE CALCULATIONS ****************************************************
 
@@ -39,12 +47,22 @@ def run_comparison(room_parameters, duration=0.05):
 
     room.wallAttenuation = [room_parameters['reflection']] * 6
 
+    if time_comparison:
+        start_time = time.time()
+
     # Initialize and run our SDN implementation
-    sdn = DelayNetwork(room)
+    sdn = DelayNetwork(room, source_pressure_injection_coeff = 0.5, use_identity_scattering=False,
+                        ignore_wall_absorption=False,
+                        ignore_src_node_atten=False,
+                        ignore_node_mic_atten = False)
     our_rir = sdn.calculate_rir(duration)
     our_rir = our_rir / np.max(np.abs(our_rir))
 
+    if time_comparison:
+        timing_results['SDN-Ege'] = time.time() - start_time
+
     # SDN-BASE CALCULATIONS ****************************************************
+
     # Setup and run reference implementation
     Fs = 44100
     length = int(duration * Fs)
@@ -82,10 +100,16 @@ def run_comparison(room_parameters, duration=0.05):
     # Run reference simulation
     frameSize = 8
     nSamples = length
+
+    if time_comparison:
+        start_time = time.time()
+
     simulate = sim.Simulation(ref_room, source, microphone, frameSize, nSamples)
     ref_rir = simulate.run()
     ref_rir = ref_rir / np.max(np.abs(ref_rir))
 
+    if time_comparison:
+        timing_results['SDN-Base'] = time.time() - start_time
 
     # SDN-TIMU CALCULATIONS ****************************************************
 
@@ -101,6 +125,9 @@ def run_comparison(room_parameters, duration=0.05):
                         room_parameters['absorption'],
                         timu_mic,
                         timu_src)
+
+    if time_comparison:
+        start_time = time.time()
 
     # Find images and nodes
     timu_room.find_images()
@@ -120,6 +147,14 @@ def run_comparison(room_parameters, duration=0.05):
     timu_rir = np.array(timu_mic.output)
     timu_rir = timu_rir / np.max(np.abs(timu_rir))
 
+    if time_comparison:
+        timing_results['SDN-Timu'] = time.time() - start_time
+        print("\nTiming Results:")
+        print("-" * 40)
+        for impl, duration in timing_results.items():
+            print(f"{impl:10s}: {duration:.4f} seconds")
+        print("-" * 40)
+
     return our_rir, ref_rir, timu_rir, room
 
 if __name__ == "__main__":
@@ -129,18 +164,20 @@ if __name__ == "__main__":
                        'mic x': 2, 'mic y': 2, 'mic z': 1.5,
                        'absorption': 0.2,
                        }
-    # Run comparison
-    our_rir, ref_rir, timu_rir, room = run_comparison(room_parameters)
+
+    # Run comparison with timing enabled
+    duration = 1
+    our_rir, ref_rir, timu_rir, room = run_comparison(room_parameters, duration = duration, time_comparison=True)
 
     # Visualize room setup
-    pp.plot_room(room)
+    # pp.plot_room(room)
 
     # Plot RIR comparison
     pp.plot_rir_comparison(
         [our_rir, ref_rir, timu_rir],
-        labels=['SDN-Ege', 'SDN-Base', 'Timu Implementation'],
+        labels=['SDN-Ege', 'SDN-Base', 'SDN-Timu'],
         fs=44100,
-        duration=0.05,
+        duration=duration,
         room_dim=[room_parameters['width'], 
                  room_parameters['depth'], 
                  room_parameters['height']],

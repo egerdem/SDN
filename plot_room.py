@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from typing import List
+import pyroomacoustics as pra
 
 def plot_room(room, ax=None):
     """Plot room geometry with source, mic, and walls."""
@@ -202,4 +203,108 @@ def plot_ism_path(room, ism_calc, path: List[str], ax=None):
     
     plt.legend()
     return ax
+
+def calculate_rt60_theoretical(room_dim, absorption):
+    """Calculate theoretical RT60 using Sabine and Eyring formulas.
+    
+    Args:
+        room_dim: Room dimensions [width, depth, height] in meters
+        absorption: Average absorption coefficient
+    
+    Returns:
+        rt60_sabine: Reverberation time using Sabine's formula
+        rt60_eyring: Reverberation time using Eyring's formula
+    """
+    # Room volume and surface area
+    V = room_dim[0] * room_dim[1] * room_dim[2]  # Volume
+    S = 2 * (room_dim[0]*room_dim[1] + room_dim[1]*room_dim[2] + room_dim[0]*room_dim[2])  # Surface area
+    
+    # Sabine's formula
+    rt60_sabine = 0.161 * V / (S * absorption)
+    
+    # Eyring's formula
+    rt60_eyring = 0.161 * V / (-S * np.log(1 - absorption))
+    
+    return rt60_sabine, rt60_eyring
+
+def calculate_rt60_from_rir(rir, fs):
+    """Calculate RT60 from RIR using pyroomacoustics.
+    
+    Args:
+        rir: Room impulse response
+        fs: Sampling frequency
+    
+    Returns:
+        rt60: Estimated RT60 value
+    """
+    # Normalize RIR
+    rir = rir / np.max(np.abs(rir))
+
+    # Estimate RT60
+    rt60 = pra.experimental.rt60.measure_rt60(rir, fs)
+    return rt60
+
+def plot_rir_comparison(rirs, labels=None, fs=44100, duration=None, room_dim=None, absorption=None):
+    """Plot multiple RIRs for comparison and calculate RT60 values.
+    
+    Args:
+        rirs: List of RIR arrays to compare
+        labels: List of labels for each RIR
+        fs: Sampling frequency (Hz)
+        duration: Duration to plot (seconds). If None, plots entire RIRs
+        room_dim: Room dimensions [width, depth, height] for theoretical calculations
+        absorption: Average absorption coefficient for theoretical calculations
+    """
+    if labels is None:
+        labels = [f'RIR {i+1}' for i in range(len(rirs))]
+    
+    if duration:
+        samples = int(duration * fs)
+        rirs = [rir[:samples] if len(rir) > samples else rir for rir in rirs]
+    
+    # Create time axis
+    times = [np.arange(len(rir)) / fs for rir in rirs]
+    
+    # Plot RIRs
+    plt.figure(figsize=(12, 6))
+    for t, rir, label in zip(times, rirs, labels):
+        plt.plot(t, rir, label=label, alpha=0.7)
+    
+    plt.title('Room Impulse Response Comparison')
+    plt.xlabel('Time (s)')
+    plt.ylabel('Amplitude')
+    plt.grid(True)
+    plt.legend()
+    
+    # Plot energy decay curves (matching SDN_timu implementation)
+    plt.figure(figsize=(12, 6))
+    for rir, label in zip(rirs, labels):
+        # Calculate EDC exactly as in SDN_timu
+        pEnergy = (np.cumsum(rir[::-1] ** 2) / np.sum(rir[::-1]))[::-1]
+        pEdB = 10.0 * np.log10(pEnergy / np.max(pEnergy))
+        plt.plot(np.arange(len(pEdB)) / fs, pEdB, label=label, alpha=0.7)
+    
+    plt.title('Energy Decay Curves')
+    plt.xlabel('Time (s)')
+    plt.ylabel('Energy (dB)')
+    plt.grid(True)
+    plt.legend()
+    plt.ylim(-60, 5)
+    
+    # Calculate and print RT60 values
+    print("\nReverberation Time Analysis:")
+    print("-" * 50)
+    
+    # Theoretical RT60 if room dimensions and absorption are provided
+    if room_dim is not None and absorption is not None:
+        rt60_sabine, rt60_eyring = calculate_rt60_theoretical(room_dim, absorption)
+        print(f"\nTheoretical RT60 values:")
+        print(f"Sabine: {rt60_sabine:.3f} s")
+        print(f"Eyring: {rt60_eyring:.3f} s")
+    
+    # Calculate RT60 from RIRs
+    print("\nMeasured RT60 values:")
+    for rir, label in zip(rirs, labels):
+        rt60 = calculate_rt60_from_rir(rir, fs)
+        print(f"{label}: {rt60:.3f} s")
 
