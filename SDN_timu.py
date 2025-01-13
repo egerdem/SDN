@@ -522,8 +522,8 @@ class SoundFileRW(object):
         pEdB = 10.0 * np.log10(pEnergy / np.max(pEnergy))
         Tp = Tp[:len(pEdB)]  # Trim Tp
 
-        plt.figure()
-        plt.plot(Tp, pEdB, ls='solid', color='b', label='Energy decay curve', linewidth=1)
+        # plt.figure()
+        # plt.plot(Tp, pEdB, ls='solid', color='b', label='Energy decay curve', linewidth=1)
         plt.show()
 
         # Write to wav file (commented out for impulse response)

@@ -40,7 +40,7 @@ room.wallAttenuation = [room_parameters['reflection']] * 6
 #                            ignore_node_mic_atten=False)
 #
 # Calculate reference RIR
-duration = 0.05  # seconds
+duration = 0.15  # seconds
 
 # reference_rir = reference_sdn.calculate_rir(duration)
 # reference_rir = reference_rir / np.max(np.abs(reference_rir))
@@ -50,11 +50,18 @@ sdn = DelayNetwork(room, source_pressure_injection_coeff=1,
                    use_identity_scattering=True,
                    ignore_wall_absorption=True,
                    ignore_src_node_atten=True,
-                   ignore_node_mic_atten=True)
+                   ignore_node_mic_atten=True, 
+                   enable_path_logging=True)
 
 # Calculate test RIR
 rir = sdn.calculate_rir(duration)
 rir = rir / np.max(np.abs(rir))
+
+# Analyze paths
+sdn.get_path_summary()  # Print all paths
+# sdn.get_path_summary('src->ceiling->mic')  # Print specific path
+# sdn.get_paths_through_node('ceiling')  # Get all paths through ceiling
+sdn.get_active_paths_at_sample(305)  # Get paths active at sample 305
 
 # Create list of enabled flags
 enabled_flags = []
