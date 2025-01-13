@@ -33,24 +33,24 @@ room.wallAttenuation = [room_parameters['reflection']] * 6
 # pp.plot_room(room)
 
 # Initialize SDN for reference (with all physics enabled)
-reference_sdn = DelayNetwork(room,
-                           use_identity_scattering=False,
-                           ignore_wall_absorption=False,
-                           ignore_src_node_atten=False,
-                           ignore_node_mic_atten=False)
-
+# reference_sdn = DelayNetwork(room,
+#                            use_identity_scattering=False,
+#                            ignore_wall_absorption=False,
+#                            ignore_src_node_atten=False,
+#                            ignore_node_mic_atten=False)
+#
 # Calculate reference RIR
-duration = 0.2  # seconds
+duration = 0.05  # seconds
 
-reference_rir = reference_sdn.calculate_rir(duration)
-reference_rir = reference_rir / np.max(np.abs(reference_rir))
+# reference_rir = reference_sdn.calculate_rir(duration)
+# reference_rir = reference_rir / np.max(np.abs(reference_rir))
 
 # Initialize SDN with test flags
-sdn = DelayNetwork(room, source_pressure_injection_coeff=1.0,
-                   use_identity_scattering=False,
-                   ignore_wall_absorption=False,
-                   ignore_src_node_atten=False,
-                   ignore_node_mic_atten=False)
+sdn = DelayNetwork(room, source_pressure_injection_coeff=1,
+                   use_identity_scattering=True,
+                   ignore_wall_absorption=True,
+                   ignore_src_node_atten=True,
+                   ignore_node_mic_atten=True)
 
 # Calculate test RIR
 rir = sdn.calculate_rir(duration)
@@ -75,7 +75,7 @@ plt.figure(figsize=(12, 6))
 plt.plot(rir, label='Test RIR')
 
 # Plot reference RIR with reduced opacity
-plt.plot(reference_rir, color='orange', alpha=0.6, label='Reference RIR')
+# plt.plot(reference_rir, color='orange', alpha=0.6, label='Reference RIR')
 
 plt.title('Room Impulse Response (SDN)')
 plt.xlabel('Sample')

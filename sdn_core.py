@@ -134,13 +134,11 @@ class DelayNetwork:
         # Step 0: Source to mic direct sound
         self.source_to_mic["src_to_mic"].append(input_sample)
         output_sample += self.source_to_mic["src_to_mic"][0] * self.source_to_mic_gain
-
+        print("sdfsdf: ", self.source_to_mic_gain)
         # Step 1: Distribute input to nodes
         for wall_id in self.room.walls:
             src_key = f"src_to_{wall_id}"
             source_pressure = input_sample * self.source_to_node_gains[src_key]
-            if input_sample != 0:  # Only print for first sample
-                print(f"\n Source to {wall_id} pressure (G/dist): {source_pressure:.4f}")
             self.source_to_nodes[src_key].append(source_pressure)
 
         # Step 2: Process each node
@@ -148,10 +146,25 @@ class DelayNetwork:
             src_key = f"src_to_{wall_id}"
             source_pressure = self.source_to_nodes[src_key][0]  # Get current source pressure
 
-            if n == 305 or n == 333:
-                print(f"\n=== Node {wall_id} ===")
-                print(f"index: {n} impulse reaches ceiling / floor")
-                print(f"arriving pressure: {source_pressure}\n")
+            # Debug prints for ceiling node
+            if wall_id == 'ceiling':
+                # Check for any non-zero incoming waves
+                has_nonzero_input = False
+                for other_id in self.room.walls:
+                    if other_id != wall_id:
+                        if abs(self.node_to_node[other_id][wall_id][0]) > 1e-10 or abs(source_pressure) > 1e-10:
+                            has_nonzero_input = True
+                            break
+                
+                if has_nonzero_input:
+                    print(f"\n=== Ceiling Node at sample {n} ===")
+                    print(f"Direct source pressure: {source_pressure:.6f}")
+                    print("\nIncoming waves from other nodes:")
+                    for other_id in self.room.walls:
+                        if other_id != wall_id:
+                            wave = self.node_to_node[other_id][wall_id][0]
+                            if abs(wave) > 1e-10:  # Only print non-negligible waves
+                                print(f"  From {other_id}: {wave:.6f}")
 
             # Collect incoming wave variables
             incoming_waves = []
@@ -160,24 +173,42 @@ class DelayNetwork:
                 if other_id != wall_id:
                     other_nodes.append(other_id)
                     # Read from delay line and add half of source pressure
-                    p = self.node_to_node[other_id][wall_id][0]
-                    p_tilde = p + self.source_pressure_injection_coeff * source_pressure  # Eq. (7) from paper, 0.5
+                    pki = self.node_to_node[other_id][wall_id][0] # incoming wave from other node
+                    psk = self.source_pressure_injection_coeff * source_pressure
+                    p_tilde = pki + psk  # Eq. (7) from paper, 0.5
+
                     incoming_waves.append(p_tilde)
 
             # Apply scattering matrix to get outgoing waves
             outgoing_waves = np.dot(self.scattering_matrix, incoming_waves)
+
+            # Debug prints for ceiling node (continued)
+            if wall_id == 'ceiling' and has_nonzero_input:
+                print("\nProcessed waves:")
+                print(f"Source injection coefficient: {self.source_pressure_injection_coeff}")
+                print("Incoming waves after source injection:")
+                for i, other_id in enumerate(other_nodes):
+                    print(f"  To {other_id}: {incoming_waves[i]:.6f}")
+                print("\nOutgoing waves after scattering:")
+                for i, other_id in enumerate(other_nodes):
+                    print(f"  To {other_id}: {outgoing_waves[i]:.6f}")
+                print(f"total incoming waves: {sum(incoming_waves):.6f}")
+                print(f"total outgoing waves: {sum(outgoing_waves):.6f}")
+                print("-" * 50)
 
             # Store outgoing waves for each connection
             for idx, other_id in enumerate(other_nodes):
                 self.outgoing_waves[wall_id][other_id] = outgoing_waves[idx]
 
             # Calculate node pressure: p_k(n) = p_Sk(n) + 2/(N-1) * Σ p_ki^+(n)
-            node_pressure = self.source_pressure_injection_coeff + (2/(self.num_nodes-1)) * sum(incoming_waves)
+            # node_pressure =  (2/(self.num_nodes-1)) * sum(incoming_waves) # I removed the src contribution (as already done above?)
+            node_pressure =  1 * sum(incoming_waves) # I removed the src contribution (as already done above?)
             self.node_pressures[wall_id] = node_pressure
 
             # Send to microphone (using outgoing waves)
             mic_key = f"{wall_id}_to_mic"
-            mic_pressure = (2/(self.num_nodes-1)) * sum(outgoing_waves) * self.node_to_mic_gains[mic_key]
+            # mic_pressure = (2/(self.num_nodes-1)) * sum(outgoing_waves) * self.node_to_mic_gains[mic_key]
+            mic_pressure = 1 * sum(outgoing_waves) * self.node_to_mic_gains[mic_key]
             self.node_to_mic[mic_key].append(mic_pressure)
             output_sample += self.node_to_mic[mic_key][0]
 
@@ -192,7 +223,8 @@ class DelayNetwork:
                     else:
                         sending_wall_atten = self.room.wallAttenuation[self.room.walls[wall_id].wall_index]
                         receiving_wall_atten = self.room.wallAttenuation[self.room.walls[other_id].wall_index]
-                    
+                        # receiving_wall_atten = 1
+
                     attenuated_wave = outgoing_wave * sending_wall_atten * receiving_wall_atten
                     self.node_to_node[wall_id][other_id].append(attenuated_wave)
         

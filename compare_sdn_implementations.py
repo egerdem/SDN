@@ -51,7 +51,7 @@ def run_comparison(room_parameters, duration=0.05, time_comparison=False):
         start_time = time.time()
 
     # Initialize and run our SDN implementation
-    sdn = DelayNetwork(room, source_pressure_injection_coeff = 0.5, use_identity_scattering=False,
+    sdn = DelayNetwork(room, use_identity_scattering=False,
                         ignore_wall_absorption=False,
                         ignore_src_node_atten=False,
                         ignore_node_mic_atten = False)
@@ -166,7 +166,7 @@ if __name__ == "__main__":
                        }
 
     # Run comparison with timing enabled
-    duration = 1
+    duration = 0.05
     our_rir, ref_rir, timu_rir, room = run_comparison(room_parameters, duration = duration, time_comparison=True)
 
     # Visualize room setup
