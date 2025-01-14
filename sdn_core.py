@@ -2,7 +2,7 @@ from collections import deque
 import numpy as np
 from typing import Dict, List, Optional
 from geometry import Room, Point
-from path_logger import PathLogger
+from path_logger import PathLogger, PressurePacket
 
 class DelayNetwork:
     """Core SDN implementation focusing on sample-based processing with accessible delay lines."""
@@ -86,18 +86,28 @@ class DelayNetwork:
         # Direct source to microphone
         key = "src_to_mic"
         src_mic_distance = self.room.srcPos.getDistance(self.room.micPos)
-        direct_sound_delay = int(np.floor((self.Fs * src_mic_distance) / self.c))
-        self.source_to_mic[key] = deque([0.0] * direct_sound_delay, maxlen=direct_sound_delay)
-        
+        self.direct_sound_delay = int(np.floor((self.Fs * src_mic_distance) / self.c))
+
         if self.enable_path_logging:
-            self.direct_sound_delay = direct_sound_delay
+            initial_packet = PressurePacket(value=0.0, path_history=['src', 'mic'], birth_sample=0, delay=self.direct_sound_delay)
+            self.source_to_mic[key] = deque([initial_packet] * self.direct_sound_delay, maxlen=self.direct_sound_delay)
+        else:
+            self.source_to_mic[key] = deque([0.0] * self.direct_sound_delay, maxlen=self.direct_sound_delay)
+        
+        # if self.enable_path_logging:
+        #     self.direct_sound_delay = direct_sound_delay
 
         # Source to nodes
         for wall_id, wall in self.room.walls.items():
             key = f"src_to_{wall_id}"
             dist = wall.node_positions.getDistance(self.room.source.srcPos)
             delay_samples = int(np.floor((self.Fs * dist) / self.c))
-            self.source_to_nodes[key] = deque([0.0] * delay_samples, maxlen=delay_samples)
+            
+            if self.enable_path_logging:
+                initial_packet = PressurePacket(value=0.0, path_history=['src', wall_id], birth_sample=0, delay=delay_samples)
+                self.source_to_nodes[key] = deque([initial_packet] * delay_samples, maxlen=delay_samples)
+            else:
+                self.source_to_nodes[key] = deque([0.0] * delay_samples, maxlen=delay_samples)
             
             if self.enable_path_logging:
                 setattr(self, f'src_to_{wall_id}_delay', delay_samples)
@@ -107,7 +117,12 @@ class DelayNetwork:
             key = f"{wall_id}_to_mic"
             dist = wall.node_positions.getDistance(self.room.micPos)
             delay_samples = int(np.floor((self.Fs * dist) / self.c))
-            self.node_to_mic[key] = deque([0.0] * delay_samples, maxlen=delay_samples)
+            
+            if self.enable_path_logging:
+                initial_packet = PressurePacket(value=0.0, path_history=[wall_id, 'mic'], birth_sample=0, delay=delay_samples)
+                self.node_to_mic[key] = deque([initial_packet] * delay_samples, maxlen=delay_samples)
+            else:
+                self.node_to_mic[key] = deque([0.0] * delay_samples, maxlen=delay_samples)
             
             if self.enable_path_logging:
                 setattr(self, f'{wall_id}_to_mic_delay', delay_samples)
@@ -119,7 +134,12 @@ class DelayNetwork:
                 if wall1_id != wall2_id:
                     dist = wall1.node_positions.getDistance(wall2.node_positions)
                     delay_samples = int(np.floor((self.Fs * dist) / self.c))
-                    self.node_to_node[wall1_id][wall2_id] = deque([0.0] * delay_samples, maxlen=delay_samples)
+                    
+                    if self.enable_path_logging:
+                        initial_packet = PressurePacket(value=0.0, path_history=[wall1_id, wall2_id], birth_sample=0, delay=delay_samples)
+                        self.node_to_node[wall1_id][wall2_id] = deque([initial_packet] * delay_samples, maxlen=delay_samples)
+                    else:
+                        self.node_to_node[wall1_id][wall2_id] = deque([0.0] * delay_samples, maxlen=delay_samples)
                     
                     if self.enable_path_logging:
                         setattr(self, f'{wall1_id}_to_{wall2_id}_delay', delay_samples)
@@ -150,106 +170,117 @@ class DelayNetwork:
         output_sample = 0.0
 
         # Step 0: Source to mic direct sound
-        self.source_to_mic["src_to_mic"].append(input_sample)
-        direct_sound = self.source_to_mic["src_to_mic"][0] * self.source_to_mic_gain
-        output_sample += direct_sound
-        
-        if self.enable_path_logging and abs(direct_sound) > 1e-10:
-            self.path_logger.log_direct_path(n, direct_sound, self.direct_sound_delay, 
-                                           self.source_to_mic_gain)
+        if self.enable_path_logging:
+            packet = PressurePacket(
+                value=input_sample * self.source_to_mic_gain,
+                path_history=['src', 'mic'],
+                birth_sample=n,
+                delay=self.direct_sound_delay
+            )
+            self.source_to_mic["src_to_mic"].append(packet if input_sample != 0 else 0.0)
+            direct_sound = packet.value if input_sample != 0 else 0.0
+            if abs(direct_sound) > 1e-10:
+                self.path_logger.log_packet(packet)
+        else:
+            direct_sound = input_sample * self.source_to_mic_gain
+            self.source_to_mic["src_to_mic"].append(direct_sound)
+
+        output_sample += self.source_to_mic["src_to_mic"][0] if not isinstance(self.source_to_mic["src_to_mic"][0], PressurePacket) else self.source_to_mic["src_to_mic"][0].value
 
         # Step 1: Distribute input to nodes
         for wall_id in self.room.walls:
             src_key = f"src_to_{wall_id}"
             source_pressure = input_sample * self.source_to_node_gains[src_key]
-            self.source_to_nodes[src_key].append(source_pressure)
             
-            if self.enable_path_logging and abs(source_pressure) > 1e-10:
-                delay = getattr(self, f'src_to_{wall_id}_delay')
-                self.path_logger.log_source_to_node(n, wall_id, source_pressure, delay,
-                                                  self.source_to_node_gains[src_key])
+            if self.enable_path_logging:
+                packet = PressurePacket(
+                    value=source_pressure,
+                    path_history=['src', wall_id],
+                    birth_sample=n,
+                    delay=getattr(self, f'src_to_{wall_id}_delay')
+                )
+                self.source_to_nodes[src_key].append(packet if input_sample != 0 else 0.0)
+                if abs(source_pressure) > 1e-10:
+                    self.path_logger.log_packet(packet)
+            else:
+                self.source_to_nodes[src_key].append(source_pressure)
 
         # Step 2: Process each node
         for wall_id in self.room.walls:
             src_key = f"src_to_{wall_id}"
-            source_pressure = self.source_to_nodes[src_key][0]  # Get current source pressure
-
-            # Debug prints for ceiling node
-            # if wall_id == 'ceiling':
-            #     # Check for any non-zero incoming waves
-            #     has_nonzero_input = False
-            #     for other_id in self.room.walls:
-            #         if other_id != wall_id:
-            #             if abs(self.node_to_node[other_id][wall_id][0]) > 1e-10 or abs(source_pressure) > 1e-10:
-            #                 has_nonzero_input = True
-            #                 break
-            #
-            #     if has_nonzero_input:
-            #         print(f"\n=== Ceiling Node at sample {n} ===")
-            #         print(f"Direct source pressure: {source_pressure:.6f}")
-            #         print("\nIncoming waves from other nodes:")
-            #         for other_id in self.room.walls:
-            #             if other_id != wall_id:
-            #                 wave = self.node_to_node[other_id][wall_id][0]
-            #                 if abs(wave) > 1e-10:  # Only print non-negligible waves
-            #                     print(f"  From {other_id}: {wave:.6f}")
+            if self.enable_path_logging:
+                source_pressure = self.source_to_nodes[src_key][0].value if isinstance(self.source_to_nodes[src_key][0], PressurePacket) else 0.0
+            else:
+                source_pressure = self.source_to_nodes[src_key][0]
 
             # Collect incoming wave variables
             incoming_waves = []
             other_nodes = []
+            incoming_packets = []  # Store packets for path tracking
+            
             for other_id in self.room.walls:
                 if other_id != wall_id:
                     other_nodes.append(other_id)
                     # Read from delay line and add half of source pressure
-                    pki = self.node_to_node[other_id][wall_id][0] # incoming wave from other node
+                    if self.enable_path_logging:
+                        pki_packet = self.node_to_node[other_id][wall_id][0]
+
+                        if isinstance(pki_packet, PressurePacket):
+                            pki = pki_packet.value
+                            # Extend the path with current node
+                            new_packet = pki_packet.extend_path(wall_id)
+                            incoming_packets.append(new_packet)
+                            # print("akfe,", new_packet)
+                        else:
+                            pki = 0.0
+                    else:
+                        pki = self.node_to_node[other_id][wall_id][0] # incoming wave from other node at n
+                    
                     psk = self.source_pressure_injection_coeff * source_pressure
                     p_tilde = pki + psk
-
-                    if self.enable_path_logging and abs(pki) > 1e-10:
-                        delay = getattr(self, f'{other_id}_to_{wall_id}_delay')
-                        self.path_logger.log_node_to_node(n, other_id, wall_id, pki, delay,
-                                                        1.0, source_pressure, pki)
-
                     incoming_waves.append(p_tilde)
 
             # Apply scattering matrix to get outgoing waves
             outgoing_waves = np.dot(self.scattering_matrix, incoming_waves)
 
-            # Debug prints for ceiling node (continued)
-            # if wall_id == 'ceiling' and has_nonzero_input:
-            #     print("\nProcessed waves:")
-            #     print(f"Source injection coefficient: {self.source_pressure_injection_coeff}")
-            #     print("Incoming waves after source injection:")
-            #     for i, other_id in enumerate(other_nodes):
-            #         print(f"  To {other_id}: {incoming_waves[i]:.6f}")
-            #     print("\nOutgoing waves after scattering:")
-            #     for i, other_id in enumerate(other_nodes):
-            #         print(f"  To {other_id}: {outgoing_waves[i]:.6f}")
-            #     print(f"total incoming waves: {sum(incoming_waves):.6f}")
-            #     print(f"total outgoing waves: {sum(outgoing_waves):.6f}")
-            #     print("-" * 50)
-
             # Store outgoing waves for each connection
             for idx, other_id in enumerate(other_nodes):
-                self.outgoing_waves[wall_id][other_id] = outgoing_waves[idx]
+                if self.enable_path_logging and incoming_packets:
+                    # Create new packet for scattered wave
+                    scattered_packet = PressurePacket(
+                        value=outgoing_waves[idx],
+                        path_history=incoming_packets[idx].path_history + [other_id],
+                        birth_sample=n,
+                        delay=incoming_packets[idx].delay + getattr(self, f'{wall_id}_to_{other_id}_delay')
+                    )
+                    self.outgoing_waves[wall_id][other_id] = scattered_packet
+                else:
+                    self.outgoing_waves[wall_id][other_id] = outgoing_waves[idx]
 
-            # Calculate node pressure: p_k(n) = p_Sk(n) + 2/(N-1) * Σ p_ki^+(n)
-            node_pressure =  (2/(self.num_nodes-1)) * sum(incoming_waves) # I removed the src contribution (as already done above?)
-            # node_pressure =  1 * sum(incoming_waves) # I removed the src contribution (as already done above?)
+            # Calculate node pressure : p_k(n) = p_Sk(n) + 2/(N-1) * Σ p_ki^+(n) 
+            node_pressure = (2/(self.num_nodes-1)) * sum(incoming_waves) # I removed the src contribution (as already done above?)
             self.node_pressures[wall_id] = node_pressure
 
             # Send to microphone (using outgoing waves)
             mic_key = f"{wall_id}_to_mic"
-            # mic_pressure = (2/(self.num_nodes-1)) * sum(outgoing_waves) * self.node_to_mic_gains[mic_key]
-            mic_pressure = 1 * sum(outgoing_waves) * self.node_to_mic_gains[mic_key]
-            self.node_to_mic[mic_key].append(mic_pressure)
-            output_sample += self.node_to_mic[mic_key][0]
+            mic_pressure = (2/(self.num_nodes-1)) * sum(outgoing_waves) * self.node_to_mic_gains[mic_key]
+            # mic_pressure = 1 * sum(outgoing_waves) * self.node_to_mic_gains[mic_key]
             
-            if self.enable_path_logging and abs(mic_pressure) > 1e-10:
-                delay = getattr(self, f'{wall_id}_to_mic_delay')
-                self.path_logger.log_node_to_mic(n, wall_id, mic_pressure, delay,
-                                               self.node_to_mic_gains[mic_key],
-                                               source_pressure)
+            if self.enable_path_logging:
+                # Create packet for microphone output
+                mic_packet = PressurePacket(
+                    value=mic_pressure,
+                    path_history=[wall_id, 'mic'],
+                    birth_sample=n,
+                    delay=getattr(self, f'{wall_id}_to_mic_delay')
+                )
+                self.node_to_mic[mic_key].append(mic_packet if abs(mic_pressure) > 1e-10 else 0.0)
+                if abs(mic_pressure) > 1e-10:
+                    self.path_logger.log_packet(mic_packet)
+            else:
+                self.node_to_mic[mic_key].append(mic_pressure)
+            
+            output_sample += self.node_to_mic[mic_key][0] if not isinstance(self.node_to_mic[mic_key][0], PressurePacket) else self.node_to_mic[mic_key][0].value
 
         # Step 3: Update node-to-node connections using stored outgoing waves
         for wall_id in self.room.walls:
@@ -262,10 +293,18 @@ class DelayNetwork:
                     else:
                         sending_wall_atten = self.room.wallAttenuation[self.room.walls[wall_id].wall_index]
                         receiving_wall_atten = self.room.wallAttenuation[self.room.walls[other_id].wall_index]
-                        # receiving_wall_atten = 1
 
-                    attenuated_wave = outgoing_wave * sending_wall_atten * receiving_wall_atten
-                    self.node_to_node[wall_id][other_id].append(attenuated_wave)
+                    if self.enable_path_logging and isinstance(outgoing_wave, PressurePacket):
+                        attenuated_packet = PressurePacket(
+                            value=outgoing_wave.value * sending_wall_atten * receiving_wall_atten,
+                            path_history=outgoing_wave.path_history,
+                            birth_sample=outgoing_wave.birth_sample,
+                            delay=outgoing_wave.delay
+                        )
+                        self.node_to_node[wall_id][other_id].append(attenuated_packet)
+                    else:
+                        attenuated_wave = outgoing_wave * sending_wall_atten * receiving_wall_atten
+                        self.node_to_node[wall_id][other_id].append(attenuated_wave)
         
         self.current_sample += 1
         return output_sample
