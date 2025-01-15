@@ -96,7 +96,7 @@ def plot_room(room, ax=None):
     ax.legend()
     
     # Make the plot interactive
-    plt.ion()  # Turn on interactive mode
+    # plt.ion()  # Turn on interactive mode
     
     # Enable mouse rotation
     ax.mouse_init()
@@ -267,9 +267,12 @@ def plot_rir_comparison(rirs, labels=None, fs=44100, duration=None, room_dim=Non
     
     # Plot RIRs
     plt.figure(figsize=(12, 6))
+    c = 0.7
     for t, rir, label in zip(times, rirs, labels):
-        plt.plot(t, rir, label=label, alpha=0.7)
-    
+        if label == "SDN-Timu":
+            c = 0.5
+        plt.plot(t, rir, label=label, alpha= c)
+
     plt.title('Room Impulse Response Comparison')
     plt.xlabel('Time (s)')
     plt.ylabel('Amplitude')
@@ -298,7 +301,7 @@ def plot_rir_comparison(rirs, labels=None, fs=44100, duration=None, room_dim=Non
     # Theoretical RT60 if room dimensions and absorption are provided
     if room_dim is not None and absorption is not None:
         rt60_sabine, rt60_eyring = calculate_rt60_theoretical(room_dim, absorption)
-        print(f"\nTheoretical RT60 values:")
+        print(f"\nTheoretical RT60 values of the room:")
         print(f"Sabine: {rt60_sabine:.3f} s")
         print(f"Eyring: {rt60_eyring:.3f} s")
     
