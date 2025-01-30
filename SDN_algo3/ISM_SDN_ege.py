@@ -1,9 +1,9 @@
 import pyroomacoustics as pra
-from src import Geometry as geom
-from src import Signal as sig
-from src import Source as src
-from src import Microphone as mic
-from src import Simulation as sim
+import Geometry as geom
+import Signal as sig
+import Source as src
+import Microphone as mic
+import Simulation as sim
 import numpy as np
 from scipy.signal import butter
 import matplotlib.pyplot as plt

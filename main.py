@@ -3,9 +3,35 @@ import geometry
 import plot_room as pp
 import matplotlib.pyplot as plt
 from sdn_core import DelayNetwork
-from sdn_path_calculator import SDNCalculator, ISMCalculator
+from ISM_manual import calculate_ism_rir
 import path_tracker
 import random
+from sdn_path_calculator import SDNCalculator, ISMCalculator
+import frequency as ff
+
+# Plotting flags
+PLOT_SDN_REF = True      # Plot reference SDN implementation
+PLOT_SDN_EGE = True      # Plot Ege's SDN implementation
+PLOT_ISM = True         # Plot ISM implementation
+PLOT_ISM_PATHS = False   # Visualize example ISM paths
+PLOT_ROOM = False        # 3D Room Visualisation
+PLOT_EDC = False
+PLOT_FREQ = True        # Frequency response plot
+# Path analysis flag
+ISM_SDN_PATH_DIFF_TABLE = False    # Run path analysis (ISM vs SDN comparison, invalid paths, visualization)
+
+#source signal
+duration = 0.2  # seconds
+Fs = 44100
+num_samples = int(Fs * duration)
+
+# Generate Gaussian pulse
+source_signal_gauss = ff.gaussian_impulse(Fs, num_gaussian_samples = 10, std_dev= 5 ,plot=False)
+
+# Generate Dirac Impulse
+source_signal_impulse = np.zeros(num_samples)
+source_signal_impulse[0] = 1.0
+
 
 # Define the Room
 room_parameters = {'width': 9, 'depth': 7, 'height': 4,
@@ -26,134 +52,165 @@ room.set_microphone(room_parameters['mic x'],
 room.set_source(room_parameters['source x'],
                 room_parameters['source y'],
                 room_parameters['source z'],
-                signal = np.array([1]))
+                signal = "")
 
 # Calculate reflection coefficient
 room_parameters['reflection'] = np.sqrt(1 - room_parameters['absorption'])
 room.wallAttenuation = [room_parameters['reflection']] * 6
 
-# Visualize the room setup
-# pp.plot_room(room)
+if PLOT_ROOM:
+    pp.plot_room(room)
 
-# Initialize SDN for reference (with all physics enabled)
-# reference_sdn = DelayNetwork(room,
-#                            use_identity_scattering=False,
-#                            ignore_wall_absorption=False,
-#                            ignore_src_node_atten=False,
-#                            ignore_node_mic_atten=False,
-#                              enable_path_logging=False)
-#
-# Calculate reference RIR
-duration = 0.05  # seconds
+# Calculate Reference SDN RIR if needed
+if PLOT_SDN_REF:
+    room.source.signal = source_signal_impulse
+    reference_sdn = DelayNetwork(room,
+                                use_identity_scattering=False,
+                                ignore_wall_absorption=False,
+                                ignore_src_node_atten=False,
+                                ignore_node_mic_atten=False,
+                                enable_path_logging=False)
+    reference_rir = reference_sdn.calculate_rir(duration)
+    reference_rir = reference_rir / np.max(np.abs(reference_rir))
 
-# reference_rir = reference_sdn.calculate_rir(duration)
-# reference_rir = reference_rir / np.max(np.abs(reference_rir))
+# Calculate Ege's SDN RIR if needed
+if PLOT_SDN_EGE:
+    # room.source.signal = source_signal_gauss
+    room.source.signal = source_signal_impulse
 
-# Initialize SDN with test flags
-sdn = DelayNetwork(room, source_pressure_injection_coeff=0.5,
-                   use_identity_scattering=False,
-                   ignore_wall_absorption=False,
-                   ignore_src_node_atten=False,
-                   ignore_node_mic_atten=False,
-                   enable_path_logging=False)
+    sdn = DelayNetwork(room,
+                      use_identity_scattering=False,
+                      ignore_wall_absorption=False,
+                      ignore_src_node_atten=False,
+                      ignore_node_mic_atten=False,
+                      enable_path_logging=True)
+    sdn_rir = sdn.calculate_rir(duration)
+    sdn_rir = sdn_rir / np.max(np.abs(sdn_rir))
+    sdn.plot_wall_incoming_sums()
 
-# Calculate test RIR
-rir = sdn.calculate_rir(duration)
-# rir = rir / np.max(np.abs(rir))
+    # Analyze paths if path logging is enabled
+    if sdn.enable_path_logging:
+        print("\n=== Path Analysis ===")
+        print("\n=== First Arriving Paths ===")
+        complete_paths = sdn.path_logger.get_complete_paths_sorted()
+        for path_key, packet in complete_paths[:10]:  # Show first 10 paths
+            print(f"{path_key}: arrives at n={packet.birth_sample + packet.delay}, value={packet.value:.6f}")
 
-# Analyze paths if path logging is enabled
-if sdn.enable_path_logging:
-    print("\n=== Path Analysis ===")
-    
-    # Print paths by reflection order
-    for order in range(4):  # Up to 3rd order reflections
-        paths = sdn.path_logger.get_paths_by_order(order)
-        if paths:
-            print(f"\nOrder {order} reflections found: {len(paths)} paths")
-            for path_key, packet in paths[:5]:  # Show first 5 paths of each order
-                print(f"  {path_key}: arrives at n={packet.birth_sample + packet.delay}, value={packet.value:.6f}")
-    
-    # Print earliest arriving paths
-    print("\n=== First Arriving Paths ===")
-    complete_paths = sdn.path_logger.get_complete_paths_sorted()
-    for path_key, packet in complete_paths[:10]:  # Show first 10 paths
-        print(f"{path_key}: arrives at n={packet.birth_sample + packet.delay}, value={packet.value:.6f}")
+# Calculate ISM RIR if needed
+if PLOT_ISM:
+    ism_rir, fs = calculate_ism_rir(room_parameters, duration=duration)
+    ism_rir = ism_rir / np.max(np.abs(ism_rir))
 
-# Create list of enabled flags
+# Create list of enabled flags for SDN
 enabled_flags = []
-if sdn.use_identity_scattering:
+if PLOT_SDN_EGE and sdn.use_identity_scattering:
     enabled_flags.append("Identity Scattering")
-if sdn.ignore_wall_absorption:
+if PLOT_SDN_EGE and sdn.ignore_wall_absorption:
     enabled_flags.append("No Wall Absorption")
-if sdn.ignore_src_node_atten:
+if PLOT_SDN_EGE and sdn.ignore_src_node_atten:
     enabled_flags.append("No Src-Node Atten")
-if sdn.ignore_node_mic_atten:
+if PLOT_SDN_EGE and sdn.ignore_node_mic_atten:
     enabled_flags.append("No Node-Mic Atten")
 
-# Plot RIR
-plt.figure(figsize=(12, 6))
+# Plot RIRs if any implementation is enabled
+if any([PLOT_SDN_REF, PLOT_SDN_EGE, PLOT_ISM]):
+    plt.figure(figsize=(12, 6))
+    
+    if PLOT_SDN_REF:
+        plt.plot(reference_rir, label='Reference SDN', alpha=1)
+    if PLOT_SDN_EGE:
+        plt.plot(sdn_rir, label='Ege-SDN', alpha=0.7)
+    if PLOT_ISM:
+        plt.plot(ism_rir, label='ISM', alpha=0.7)
 
+    plt.title('Room Impulse Response Comparison')
+    plt.xlabel('Time (s)')
+    plt.ylabel('Amplitude')
+    plt.grid(True)
+    plt.legend()
 
-# Plot test RIR
-plt.plot(rir, label='Test RIR')
+    # Add flags to top-right corner
+    if enabled_flags:
+        flag_text = '\n'.join(enabled_flags)
+        plt.text(0.98, 0.98, flag_text,
+                transform=plt.gca().transAxes,
+                verticalalignment='top',
+                horizontalalignment='right',
+                bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
 
-# Plot reference RIR with reduced opacity
-# plt.plot(reference_rir, color='orange', alpha=0.6, label='Reference RIR')
+    plt.show()
 
-plt.title('Room Impulse Response (SDN)')
-plt.xlabel('Sample')
-plt.ylabel('Amplitude')
-plt.grid(True)
-plt.legend()
+if PLOT_FREQ:
 
-# Add flags to top-right corner
-if enabled_flags:
-    flag_text = '\n'.join(enabled_flags)
-    plt.text(0.98, 0.98, flag_text,
-             transform=plt.gca().transAxes,
-             verticalalignment='top',
-             horizontalalignment='right',
-             bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
+    if PLOT_SDN_REF:
+        freq, magnitude = ff.calculate_frequency_response(reference_rir, Fs)
+        ff.plot_frequency_response(freq, magnitude, label='FRF TEST SDN')
 
-plt.show()
+    if PLOT_SDN_EGE:
+        freq, magnitude = ff.calculate_frequency_response(sdn_rir, Fs)
+        ff.plot_frequency_response(freq, magnitude, label='FRF Reference SDN')
 
-# The code below is the order-based implementation that we'll revisit later
-# after implementing and validating the traditional sample-based SDN.
+    if PLOT_ISM:
+        freq, magnitude = ff.calculate_frequency_response(ism_rir, Fs)
+        ff.plot_frequency_response(freq, magnitude, label='FRF ISM')
 
-# Create shared path tracker
-# path_tracker = path_tracker.PathTracker()
+if PLOT_EDC:
+    # Plot energy decay curves
+    plt.figure(figsize=(12, 6))
+    for rir, label in [(sdn_rir, 'SDN'), (ism_rir, 'ISM')]:
+        pEnergy = (np.cumsum(rir[::-1] ** 2) / np.sum(rir[::-1]))[::-1]
+        pEdB = 10.0 * np.log10(pEnergy / np.max(pEnergy))
+        plt.plot(np.arange(len(pEdB)) / fs, pEdB, label=label, alpha=0.7)
 
-# # Initialize calculators with shared tracker
-# sdn_calc = SDNCalculator(room.walls, room.source.srcPos, room.micPos)
-# ism_calc = ISMCalculator(room.walls, room.source.srcPos, room.micPos)
-# sdn_calc.set_path_tracker(path_tracker)
-# ism_calc.set_path_tracker(path_tracker)
+    plt.title('Energy Decay Curves')
+    plt.xlabel('Time (s)')
+    plt.ylabel('Energy (dB)')
+    plt.grid(True)
+    plt.legend()
+    plt.ylim(-60, 5)
+    plt.show()
 
-# # Calculate paths up to order 3
-# sdn_calc.calculate_paths_up_to_order(3)
-# ism_calc.calculate_paths_up_to_order(3)
-#
-# # Print path comparison using shared tracker
-# path_tracker.print_path_comparison()
-# 
-# # Get all invalid ISM paths
-# invalid_paths = []
-# for order in range(4):  # Up to order 3
-#     paths = path_tracker.get_paths_by_order(order, 'ISM')
-#     invalid_paths.extend([p.nodes for p in paths if not p.is_valid])
-# #
-# # # Select 10 random invalid paths (or all if less than 10 exist)
-# num_examples = min(10, len(invalid_paths))
-# example_paths = random.sample(invalid_paths, num_examples)
+# Create shared path tracker and calculate paths if needed
+if ISM_SDN_PATH_DIFF_TABLE:
+    path_tracker = path_tracker.PathTracker()
+    sdn_calc = SDNCalculator(room.walls, room.source.srcPos, room.micPos)
+    ism_calc = ISMCalculator(room.walls, room.source.srcPos, room.micPos)
+    sdn_calc.set_path_tracker(path_tracker)
+    ism_calc.set_path_tracker(path_tracker)
 
+    # Calculate paths up to order 3
+    sdn_calc.calculate_paths_up_to_order(3)
+    ism_calc.calculate_paths_up_to_order(3)
 
-# Visualize some example ISM paths
-# example_paths = [
-#     ['s', 'east', 'west', 'm'],
-#     ['s', 'west', 'm'],
-#     ['s', 'west', 'east', 'north', 'm']
-# ]
-#
-# for path in example_paths:
-#     pp.plot_ism_path(room, ism_calc, path)
-#     plt.show()
+    # Print path comparison
+    print("\n=== Path Comparison between ISM and SDN ===")
+    path_tracker.print_path_comparison()
+
+    # Get and print invalid ISM paths
+    print("\n=== Invalid ISM Paths ===")
+    invalid_paths = []
+    for order in range(4):  # Up to order 3
+        paths = path_tracker.get_paths_by_order(order, 'ISM')
+        invalid_paths.extend([p.nodes for p in paths if not p.is_valid])
+    
+    if invalid_paths:
+        print(f"Found {len(invalid_paths)} invalid paths:")
+        for path in invalid_paths[:10]:  # Print first 10 invalid paths
+            print(f"  {' -> '.join(path)}")
+        if len(invalid_paths) > 10:
+            print(f"  ... and {len(invalid_paths) - 10} more")
+    else:
+        print("No invalid paths found")
+
+    # Visualize example ISM paths
+    example_paths = [
+        ['s', 'east', 'west', 'm'],
+        ['s', 'west', 'm'],
+        ['s', 'west', 'east', 'north', 'm']
+    ]
+
+    for path in example_paths:
+        pp.plot_ism_path(room, ism_calc, path)
+        plt.show()
+
+    

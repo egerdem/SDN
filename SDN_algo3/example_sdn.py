@@ -71,7 +71,7 @@ frameSize = 8
 """
 Run SDN for 1 test case
 """
-nSamples = 10000
+nSamples = 5000
 simulate = sim.Simulation(room, source, microphone, frameSize, nSamples)
 output = simulate.run()
 # plot the output
