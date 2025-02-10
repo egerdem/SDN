@@ -59,7 +59,6 @@ class Simulation:
         for i in range(nWalls):
             nodes[i].wallAttenuation = self.room.wallAttenuation[i]
             nodes[i].wallFilter = self.room.wallFilters[i]
-
         # create all the propagation lines between wall nodes
         # print("nodes",nodes)
         for i in range(nWalls):

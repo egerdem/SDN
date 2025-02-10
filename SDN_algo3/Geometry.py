@@ -147,25 +147,23 @@ class Cuboid:
     def setWallPosition(self):
         
         #allocate 3 points specifying each wall in room - 3 points are enough to define a plane
-        
-        # self.walls['floor'] = Wall(Point(0,0,0), Point(self.x,0,0),Point(0,0,self.z))
-        # self.walls['ceiling'] = Wall(Point(0,self.y,0), Point(0, self.y, self.z),
-        #                          Point(self.x, self.y, 0))
-        # self.walls['left'] = Wall(Point(0,0,0), Point(0, self.y, 0),
-        #                          Point(0,0,self.z))
-        # self.walls['right'] = Wall(Point(self.x, 0, 0), Point(self.x, self.y, 0),
-        #                          Point(self.x, self.y, self.z))
-        # self.walls['front'] = Wall(Point(0,0,self.z), Point(0, self.y, self.z),
-        #                          Point(self.x, self.y ,self.z))
-        # self.walls['back'] = Wall(Point(0,0,0), Point(0, self.y, 0),
-        #                          Point(self.x, self.y, 0))
 
+        # self.walls['back'] = Wall(Point(0,0,0), Point(0, self.y, 0), Point(self.x, self.y, 0))
+        # self.walls['front'] = Wall(Point(0, 0, self.z), Point(0, self.y, self.z), Point(self.x, self.y, self.z))
+        # self.walls['left'] = Wall(Point(0, 0, 0), Point(0, self.y, 0), Point(0, 0, self.z))
+        # self.walls['right'] = Wall(Point(self.x, 0, 0), Point(self.x, self.y, 0), Point(self.x, self.y, self.z))
+        # self.walls['ceiling'] = Wall(Point(0, self.y, 0), Point(0, self.y, self.z), Point(self.x, self.y, 0))
+        # self.walls['floor'] = Wall(Point(0, 0, 0), Point(self.x, 0, 0), Point(0, 0, self.z))
+
+        # ege version
         self.walls['back'] = Wall(Point(0, 0, 0), Point(self.x, 0, 0), Point(0, 0, self.z))
         self.walls['front'] = Wall(Point(0, self.y, 0), Point(0, self.y, self.z), Point(self.x, self.y, 0))
         self.walls['left'] = Wall(Point(0, 0, 0), Point(0, self.y, 0), Point(0, 0, self.z))
         self.walls['right'] = Wall(Point(self.x, 0, 0), Point(self.x, self.y, 0), Point(self.x, self.y, self.z))
         self.walls['ceiling'] = Wall(Point(0, 0, self.z), Point(0, self.y, self.z), Point(self.x, self.y, self.z))
         self.walls['ground'] = Wall(Point(0, 0, 0), Point(0, self.y, 0), Point(self.x, self.y, 0))
+
+
         
         for key in self.walls:
             self.walls[key].setPlaneCoefficients()

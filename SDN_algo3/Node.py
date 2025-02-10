@@ -20,7 +20,7 @@ class Node:
     def __init__(self, *args):
         
         self.wallFilter = []
-        self.wallAttenuation = 1.0
+        self.wallAttenuation = 0.0
         self.position = geom.Point(0,0,0)
         self._propLinesIn = []
         self._propLinesOut = []
@@ -108,7 +108,9 @@ class Node:
                     
             
             filteredFrameOut = self.wallFilter[i].processFrame(frameOut) * self.wallAttenuation
-            
+            #Ege - lfilter'I kaldırmaya çalışıyorum
+            # filteredFrameOut = frameOut * self.wallAttenuation
+            # print("Filtered frame out:", self.wallFilter[i].processFrame(frameOut))
             
             framesOut.append(filteredFrameOut)
             

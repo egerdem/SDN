@@ -7,8 +7,8 @@ import Simulation as sim
 import numpy as np
 from scipy.signal import butter
 import matplotlib.pyplot as plt
-from src import rrdecay as rr
-from src import rt60
+import rrdecay as rr
+import rt60
 import pyroomacoustics.experimental as pra_exp
 
 # create the input signal
@@ -102,28 +102,29 @@ simulate = sim.Simulation(room, source, microphone, frameSize, nSamples)
 audio = simulate.run()
 audio = audio / np.max(np.abs(audio))
 
+# ege order test. abort
 # Print path lengths by order
-print("\nSDN Path Lengths by Reflection Order:")
-for order in sorted(simulate.path_lengths_by_order.keys()):
-    paths = simulate.path_lengths_by_order[order]
-    print(f"\nOrder {order} reflections:")
-    print(f"Number of paths: {len(paths)}")
-    print("Path lengths (meters):")
-    for length, count in paths:
-        print(f"  Length: {length:.3f}m, Reflection count: {count}")
+# print("\nSDN Path Lengths by Reflection Order:")
+# for order in sorted(simulate.path_lengths_by_order.keys()):
+#     paths = simulate.path_lengths_by_order[order]
+#     print(f"\nOrder {order} reflections:")
+#     print(f"Number of paths: {len(paths)}")
+#     print("Path lengths (meters):")
+#     for length, count in paths:
+#         print(f"  Length: {length:.3f}m, Reflection count: {count}")
 
     # Calculate average path length for this order
-    avg_length = sum(p[0] for p in paths) / len(paths)
-    print(f"Average path length for order {order}: {avg_length:.3f}m")
-    if order == 5:
-        break
+    # avg_length = sum(p[0] for p in paths) / len(paths)
+    # print(f"Average path length for order {order}: {avg_length:.3f}m")
+    # if order == 5:
+    #     break
 
 outputs.append({})
 outputs[-1]['audio'] = audio
 outputs[-1]['path_lengths'] = simulate.path_lengths_by_order  # Store path lengths for later use
 outputs[-1]['label'] = "SDN"
 
-run_pra = False
+run_pra = True
 pra_order = 100
 figure_size = 1.5
 trim_others = True

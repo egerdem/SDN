@@ -1,11 +1,10 @@
-from src import Geometry as geom
-from src import Signal as sig
-from src import Source as src
-from src import Microphone as mic
-from src import Simulation as sim
-from src.utils import EchoDensity as ned
-from src.utils.rrdecay import EDC
-from src.utils.rrdecay import rrdecay
+import Geometry as geom
+import Signal as sig
+import Source as src
+import Microphone as mic
+import Simulation as sim
+import EchoDensity as ned
+from rrdecay import EDC
 
 import os
 import csv

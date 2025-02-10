@@ -16,7 +16,7 @@ def EDC(impulse_response):
     from https://github.com/BrechtDeMan/pycoustics
     """
     impulse_response = np.array(impulse_response)
-
+    print("EDC from rrdecay.py")
     cumul = 10 * np.log10(sum(impulse_response**2))
     decay_curve = 10 * np.log10(np.flipud(np.cumsum(np.flipud(np.square(impulse_response))))) - cumul
     return decay_curve

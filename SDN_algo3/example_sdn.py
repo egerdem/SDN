@@ -16,7 +16,8 @@ from scipy.signal import butter
 from scipy.io import savemat
 import matplotlib.pyplot as plt
 import timeit
-
+import matplotlib
+matplotlib.use('Qt5Agg')  # Set the backend to Qt5
 
 # create the input signal
 Fs = 44100

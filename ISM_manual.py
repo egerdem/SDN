@@ -6,7 +6,7 @@ from sdn_path_calculator import ISMCalculator
 import path_tracker
 from ISM_core import ISMNetwork
 
-def calculate_ism_rir(room_parameters, duration=0.1, max_order=6):
+def calculate_ism_rir(room, duration, max_order=6):
     """Calculate RIR using ISM method.
     
     Args:
@@ -16,23 +16,7 @@ def calculate_ism_rir(room_parameters, duration=0.1, max_order=6):
         rir: Normalized room impulse response
         fs: Sampling frequency
     """
-    # Setup room
-    room = geometry.Room(room_parameters['width'],
-                         room_parameters['depth'],
-                         room_parameters['height'])
 
-    room.set_microphone(room_parameters['mic x'],
-                        room_parameters['mic y'],
-                        room_parameters['mic z'])
-
-    room.set_source(room_parameters['source x'],
-                    room_parameters['source y'],
-                    room_parameters['source z'],
-                    signal=np.array([1]))
-
-    # Calculate reflection coefficient
-    room_parameters['reflection'] = np.sqrt(1 - room_parameters['absorption'])
-    room.wallAttenuation = [room_parameters['reflection']] * 6
 
     # Create path tracker
     path_tracker_obj = path_tracker.PathTracker()
@@ -79,10 +63,27 @@ if __name__ == '__main__':
                        'mic x': 2, 'mic y': 2, 'mic z': 1.5,
                        'absorption': 0.2,
                        }
-    
+    # Setup room
+    room = geometry.Room(room_parameters['width'],
+                         room_parameters['depth'],
+                         room_parameters['height'])
+
+    room.set_microphone(room_parameters['mic x'],
+                        room_parameters['mic y'],
+                        room_parameters['mic z'])
+
+    room.set_source(room_parameters['source x'],
+                    room_parameters['source y'],
+                    room_parameters['source z'],
+                    signal=np.array([1]))
+
+    # Calculate reflection coefficient
+    room_parameters['reflection'] = np.sqrt(1 - room_parameters['absorption'])
+    room.wallAttenuation = [room_parameters['reflection']] * 6
+
     # Calculate RIR
-    rir, fs = calculate_ism_rir(room_parameters)
-    
+    rir, fs = calculate_ism_rir(room)
+
     # Plot RIR
     plt.figure(figsize=(12, 6))
     plt.plot(np.arange(len(rir))/fs, rir)
@@ -91,3 +92,4 @@ if __name__ == '__main__':
     plt.ylabel('Amplitude')
     plt.grid(True)
     plt.show()
+

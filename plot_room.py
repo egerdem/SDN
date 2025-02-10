@@ -244,4 +244,78 @@ def calculate_rt60_from_rir(rir, fs):
     rt60 = pra.experimental.rt60.measure_rt60(rir, fs)
     return rt60
 
+def create_interactive_rir_plot(enabled_flags, rirs_dict):
+    """Create an interactive RIR plot with checkboxes to show/hide different RIRs.
 
+    Args:
+        rirs_dict: Dictionary containing RIRs with their labels as keys
+    """
+    from matplotlib.widgets import CheckButtons
+
+    # Create the main figure and axis for RIR plot
+    fig, (ax, ax_check) = plt.subplots(1, 2, gridspec_kw={'width_ratios': [5, 1]}, figsize=(15, 6))
+    # plt.subplots_adjust(left=0.1, right=0.95)  # Adjust spacing
+
+    # Initialize lines dictionary and visibility states
+    lines = {}
+    visibility = {}
+
+    # Plot all RIRs initially
+    for label, rir in rirs_dict.items():
+        line, = ax.plot(rir, label=label, alpha=0.7)
+        lines[label] = line
+        visibility[label] = True
+
+    # Set up the main plot
+    ax.set_title('Interactive Room Impulse Response Comparison')
+    ax.set_xlabel('Time (sample)')
+    ax.set_ylabel('Amplitude')
+    ax.grid(True)
+    ax.legend()
+
+    if enabled_flags:
+        flag_text = '\n'.join(enabled_flags)
+        ax.text(0.9, 0.9, flag_text,
+                transform=ax.transAxes,
+                verticalalignment='top',
+                horizontalalignment='center',
+                bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
+    plt.show()
+
+    # Create CheckButtons
+    labels = list(rirs_dict.keys())
+    actives = [True] * len(labels)
+
+    # Remove the outer box and title from the checkbox area
+    ax_check.set_xticks([])  # Hide x-ticks
+    ax_check.set_yticks([])  # Hide y-ticks
+    for spine in ax_check.spines.values():  # Remove spines (outer box)
+        spine.set_visible(False)
+
+    # Position the checkboxes in a good spot
+    ax_check.set_position([0.8, 0.4, 0.1, 0.2])  # [left, bottom, width, height]
+    check = CheckButtons(
+        ax=ax_check,
+        labels=labels,
+        actives=actives
+    )
+
+    def update_visibility(label):
+        # Toggle visibility of the corresponding line
+        line = lines[label]
+        line.set_visible(not line.get_visible())
+        fig.canvas.draw_idle()  # Redraw the figure
+
+        # Update legend
+        handles = [line for line in lines.values() if line.get_visible()]
+        labels = [line.get_label() for line in lines.values() if line.get_visible()]
+        ax.legend(handles, labels)
+
+
+    # Connect the callback
+    check.on_clicked(update_visibility)
+
+    # Keep a reference to prevent garbage collection
+    fig.check = check
+
+    plt.show(block=True)  # Make sure to block to keep the window interactive
