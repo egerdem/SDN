@@ -1,6 +1,8 @@
 from __future__ import annotations  # This allows forward references in type hints
 import numpy as np
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple, Union
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 
 
 class Room:
@@ -16,6 +18,7 @@ class Room:
         self.z = lz
         self.wallAttenuation = []  # this is a list
         self.wallFilters = dict()  # this is a dictionary
+        self.angle_mappings = None  # Will be set after source and nodes are set up
         self._setup_walls()
 
     def _setup_walls(self):
@@ -47,6 +50,8 @@ class Room:
         self.srcPos = Point(sx, sy, sz)
         # Calculate SDN node positions (first-order reflection points)
         self._calculate_sdn_nodes()
+        # Calculate angle mappings after nodes are set up
+        self.angle_mappings = build_angle_mappings(self)
 
     def _calculate_sdn_nodes(self):
         """Calculate fixed SDN node positions (first-order reflection points)"""
@@ -67,6 +72,32 @@ class Source:
         self.Fs = Fs
         # self.directivity = 1.0
         # self.heading = 0.0
+
+    @staticmethod
+    def generate_signal(label: str, num_samples: int, Fs: int = 44100):
+        """Generate source signal based on label type.
+        
+        Args:
+            label: Type of signal ('dirac' or 'gaussian')
+            num_samples: Number of samples in the signal
+            Fs: Sampling frequency (default: 44100)
+            
+        Returns:
+            dict: Contains the signal array and label
+        """
+        if label == 'dirac':
+            # Generate Dirac Impulse
+            signal = np.array([1.0] + [0.0] * (num_samples - 1))
+        elif label == 'gaussian':
+            # Generate Gaussian pulse
+            import frequency as ff
+            signal = ff.gaussian_impulse(num_samples, num_gaussian_samples=30, std_dev=5, plot=False)
+        else:
+            raise ValueError('Invalid source label')
+
+        return {'signal': signal,
+                'label': label}
+
 
 class ImageSource:
     def __init__(self, walls: Dict[str, Wall], srcPos: Point, micPos: Point):
@@ -192,6 +223,228 @@ class Point:
         """Explicit conversion to numpy array"""
         return np.array([self.x, self.y, self.z], dtype=float)
 
+def calculate_angle_between_vectors(v1: np.ndarray, v2: np.ndarray) -> float:
+    """Calculate angle between two vectors in radians."""
+    dot_product = np.dot(v1, v2)
+    norms = np.linalg.norm(v1) * np.linalg.norm(v2)
+    return np.arccos(np.clip(dot_product / norms, -1.0, 1.0))
+
+def calculate_reflection_vector(incident: np.ndarray, normal: np.ndarray) -> np.ndarray:
+    """Calculate reflection vector using incident vector and surface normal."""
+    # R = I - 2(I·N)N where I is incident vector, N is normal vector
+    return incident - 2 * np.dot(incident, normal) * normal
+
+def build_angle_mappings(room: Room) -> Dict[str, Dict[str, float]]:
+    """Build dictionaries containing all source-to-node and node-to-node angles.
+    
+    Args:
+        room: Room object containing geometry and source/mic positions
+        
+    Returns:
+        Dict containing:
+        - 'source_angles': Dict[str, float] - angles between source ray and wall normal
+        - 'node_mappings': Dict[str, Dict[str, float]] - best reflection targets for each node
+    """
+    mappings = {
+        'source_angles': {},  # wall_id -> incident angle
+        'node_mappings': {}   # wall_id -> {target_wall_id -> reflection angle}
+    }
+    
+    # Calculate source-to-node angles
+    source_pos = np.array([room.source.srcPos.x, room.source.srcPos.y, room.source.srcPos.z])
+    
+    for wall_id, wall in room.walls.items():
+        # Get wall normal and node position
+        normal = np.array([wall.plane_coeffs.a, wall.plane_coeffs.b, wall.plane_coeffs.c])
+        normal = normal / np.linalg.norm(normal)
+        node_pos = np.array([wall.node_positions.x, wall.node_positions.y, wall.node_positions.z])
+        
+        # Calculate incident vector from source to node
+        incident = node_pos - source_pos
+        incident = incident / np.linalg.norm(incident)
+        
+        # Store incident angle
+        angle = calculate_angle_between_vectors(incident, normal)
+        mappings['source_angles'][wall_id] = angle
+        
+        # Calculate reflection vector
+        reflection = calculate_reflection_vector(incident, normal)
+        
+        # Find best matching node for reflection
+        node_scores = {}
+        mappings['node_mappings'][wall_id] = {}
+        
+        for other_id, other_wall in room.walls.items():
+            if other_id != wall_id:
+                other_pos = np.array([other_wall.node_positions.x, 
+                                    other_wall.node_positions.y,
+                                    other_wall.node_positions.z])
+                direction = other_pos - node_pos
+                direction = direction / np.linalg.norm(direction)
+                
+                # Calculate angle between reflection vector and direction to other node
+                reflection_angle = calculate_angle_between_vectors(reflection, direction)
+                mappings['node_mappings'][wall_id][other_id] = reflection_angle
+    
+    return mappings
+
+def get_best_reflection_target(wall_id: str, mappings: Dict) -> str:
+    """Get the wall ID that best matches the specular reflection direction.
+    
+    Args:
+        wall_id: Current wall ID
+        mappings: Angle mappings dictionary from build_angle_mappings()
+        
+    Returns:
+        Wall ID of best reflection target
+    """
+    if wall_id not in mappings['node_mappings']:
+        return None
+        
+    # Find wall with smallest reflection angle
+    angles = mappings['node_mappings'][wall_id]
+    return max(angles.items(), key=lambda x: x[1])[0]
+
+def build_specular_matrices_from_angles(room: Room) -> Dict[str, np.ndarray]:
+    """Build specular scattering matrices based on node-to-node angle mappings.
+    
+    For each wall and each incoming direction, calculates the best outgoing direction
+    based on specular reflection principle. Creates a 5x5 matrix where:
+    - For each incoming direction (column), the best outgoing direction (row) gets specular coefficient (0.8)
+    - Other outgoing directions get diffuse coefficient ((1-0.8)/4 = 0.05)
+    
+    Args:
+        room: Room object with walls and their normals
+        
+    Returns:
+        Dict mapping wall IDs to their 5x5 specular matrices
+    """
+    specular_mats = {}
+    specular_coeff = 0.8
+    size = 5  # Matrix size (always 5x5 as we exclude current wall)
+    diffuse_coeff = (1.0 - specular_coeff) / (size - 1)
+    
+    # Direction mappings for each wall (which walls to exclude)
+    direction_maps = {
+        'north': ['south', 'west', 'east', 'ceiling', 'floor'],
+        'south': ['north', 'west', 'east', 'ceiling', 'floor'],
+        'west': ['south', 'north', 'east', 'ceiling', 'floor'],
+        'east': ['south', 'north', 'west', 'ceiling', 'floor'],
+        'ceiling': ['south', 'north', 'west', 'east', 'floor'],
+        'floor': ['south', 'north', 'west', 'east', 'ceiling']
+    }
+    
+    for wall_id, directions in direction_maps.items():
+        # Get current wall's normal and node position
+        wall = room.walls[wall_id]
+        normal = np.array([wall.plane_coeffs.a, wall.plane_coeffs.b, wall.plane_coeffs.c])
+        normal = normal / np.linalg.norm(normal)
+        node_pos = np.array([wall.node_positions.x, wall.node_positions.y, wall.node_positions.z])
+        
+        # Create base matrix with diffuse coefficients
+        mat = np.ones((size, size)) * diffuse_coeff
+        
+        # For each incoming direction (column)
+        for in_idx, in_wall_id in enumerate(directions):
+            in_wall = room.walls[in_wall_id]
+            in_pos = np.array([in_wall.node_positions.x, in_wall.node_positions.y, in_wall.node_positions.z])
+            
+            # Calculate incident vector (from incoming node to current node)
+            incident = node_pos - in_pos
+            incident = incident / np.linalg.norm(incident)
+            
+            # Calculate incident angle with wall normal
+            incident_angle = calculate_angle_between_vectors(incident, normal)
+            
+            # Calculate reflection vector using the law of reflection
+            reflection = calculate_reflection_vector(incident, normal)
+            
+            # Find best matching outgoing direction
+            best_out_idx = 0
+            min_angle_diff = float('inf')
+            
+            # For each possible outgoing direction
+            for out_idx, out_wall_id in enumerate(directions):
+                out_wall = room.walls[out_wall_id]
+                out_pos = np.array([out_wall.node_positions.x, out_wall.node_positions.y, out_wall.node_positions.z])
+                
+                # Calculate direction to outgoing node
+                direction = out_pos - node_pos
+                direction = direction / np.linalg.norm(direction)
+                
+                # Calculate angle between reflection vector and direction to other node
+                out_angle = calculate_angle_between_vectors(reflection, direction)
+                
+                # For perfect specular reflection, we want the outgoing angle to match the incident angle
+                angle_diff = abs(out_angle)
+                
+                if angle_diff < min_angle_diff:
+                    min_angle_diff = angle_diff
+                    best_out_idx = out_idx
+            
+            # Set specular coefficient for best outgoing direction
+            mat[best_out_idx, in_idx] = specular_coeff
+        
+        specular_mats[wall_id] = mat
+    
+    return specular_mats
+
+def test_specular_matrices(room: Room):
+    """Test and visualize the specular reflection matrices.
+    
+    Prints:
+    1. The full matrix for each wall
+    2. For each wall, lists the best reflection target for each incoming direction
+    3. Verifies that each column has exactly one specular coefficient
+    """
+    matrices = build_specular_matrices_from_angles(room)
+    
+    # Direction mappings (same as in build_specular_matrices_from_angles)
+    direction_maps = {
+        'north': ['south', 'west', 'east', 'ceiling', 'floor'],
+        'south': ['north', 'west', 'east', 'ceiling', 'floor'],
+        'west': ['south', 'north', 'east', 'ceiling', 'floor'],
+        'east': ['south', 'north', 'west', 'ceiling', 'floor'],
+        'ceiling': ['south', 'north', 'west', 'east', 'floor'],
+        'floor': ['south', 'north', 'west', 'east', 'ceiling']
+    }
+    
+    specular_coeff = 0.8  # Should match the value in build_specular_matrices_from_angles
+    
+    print("\n=== Testing Specular Reflection Matrices ===\n")
+    
+    for wall_id, matrix in matrices.items():
+        print(f"\nWall: {wall_id.upper()}")
+        print("Directions (columns=incoming, rows=outgoing):", direction_maps[wall_id])
+        print("Matrix:")
+        print(matrix)
+        
+        # Analyze reflection patterns
+        print("\nReflection patterns:")
+        directions = direction_maps[wall_id]
+        for in_idx, in_direction in enumerate(directions):
+            # Find the specular reflection direction (row with coefficient 0.8)
+            out_idx = np.where(np.abs(matrix[:, in_idx] - specular_coeff) < 1e-6)[0][0]
+            out_direction = directions[out_idx]
+            print(f"  Incoming from {in_direction:7} -> Specular reflection to {out_direction:7}")
+            
+        # Verify matrix properties
+        column_sums = np.sum(matrix, axis=0)
+        specular_counts = np.sum(np.abs(matrix - specular_coeff) < 1e-6, axis=0)
+        
+        print("\nVerification:")
+        print(f"  Column sums (should all be 1.0): {column_sums}")
+        print(f"  Specular coefficients per column (should all be 1): {specular_counts}")
+        print("-" * 60)
+
+if __name__ == "__main__":
+    # Create a test room
+    test_room = Room(6, 4, 3)  # 6m x 4m x 3m room
+    test_room.set_microphone(4, 3, 1.5)  # Mic position
+    test_room.set_source(2, 2, 1.7, signal="")  # Source position (signal not needed for this test)
+    
+    # Run the test
+    test_specular_matrices(test_room)
 
 class Plane:
     """

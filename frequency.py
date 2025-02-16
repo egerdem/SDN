@@ -2,13 +2,13 @@ from scipy.signal import gaussian
 import numpy as np
 import matplotlib.pyplot as plt
 
-def gaussian_impulse(Fs, num_gaussian_samples = 50, std_dev = 10, plot=False):
+def gaussian_impulse(num_samples, num_gaussian_samples = 50, std_dev = 10, plot=False):
     # std_dev of the Gaussian (controls the width)
     gaussian_pulse = gaussian(num_gaussian_samples, std_dev)
     # Normalize the pulse to have a maximum amplitude of 1
     gaussian_pulse = gaussian_pulse / np.max(gaussian_pulse)
     # Calculate the number of zeros to append
-    num_zeros = Fs - num_gaussian_samples
+    num_zeros = num_samples - num_gaussian_samples
     # Append zeros to the Gaussian pulse
     gaussian_pulse = np.pad(gaussian_pulse, (0, num_zeros), mode='constant')
     if plot:

@@ -22,6 +22,59 @@ class PathCalculator(ABC):
     def calculate_paths_up_to_order(self, max_order: int):
         pass
 
+    def analyze_paths(self, max_order: int = 3):
+        """Calculate and analyze paths for this calculator.
+        
+        Args:
+            max_order: Maximum reflection order to analyze
+            
+        Returns:
+            For ISMCalculator: List of invalid paths, where each path is a list of node labels
+                             ['s', 'wall1', 'wall2', ..., 'm']
+            For SDNCalculator: None (all SDN paths are valid by definition)
+        """
+        # Calculate paths
+        self.calculate_paths_up_to_order(max_order)
+        
+        if isinstance(self, ISMCalculator):
+            # Print invalid ISM paths
+            print("\n=== Invalid ISM Paths ===")
+            invalid_paths = []
+            for order in range(max_order + 1):
+                paths = self.path_tracker.get_paths_by_order(order, 'ISM')
+                invalid_paths.extend([p.nodes for p in paths if not p.is_valid])
+            
+            if invalid_paths:
+                print(f"Found {len(invalid_paths)} invalid paths:")
+                for path in invalid_paths[:10]:  # Print first 10 invalid paths
+                    print(f"  {' -> '.join(path)}")
+                if len(invalid_paths) > 10:
+                    print(f"  ... and {len(invalid_paths) - 10} more")
+            else:
+                print("No invalid paths found")
+            
+            return invalid_paths
+
+    @staticmethod
+    def compare_paths(sdn_calc: 'SDNCalculator', ism_calc: 'ISMCalculator', max_order: int = 3):
+        """Compare paths between SDN and ISM calculators.
+        
+        Args:
+            sdn_calc: SDN calculator instance
+            ism_calc: ISM calculator instance
+            max_order: Maximum reflection order to analyze
+            
+        Returns:
+            None. Prints comparison table to console.
+        """
+        # Calculate paths for both methods
+        sdn_calc.calculate_paths_up_to_order(max_order)
+        ism_calc.calculate_paths_up_to_order(max_order)
+        
+        # Print path comparison
+        print("\n=== Path Comparison between ISM and SDN ===")
+        sdn_calc.path_tracker.print_path_comparison()
+
 class SDNCalculator(PathCalculator):
     """
     SDN calculator that uses fixed nodes for path approximation.

@@ -227,7 +227,7 @@ def calculate_rt60_theoretical(room_dim, absorption):
     
     return rt60_sabine, rt60_eyring
 
-def calculate_rt60_from_rir(rir, fs):
+def calculate_rt60_from_rir(rir, fs, plot):
     """Calculate RT60 from RIR using pyroomacoustics.
     
     Args:
@@ -241,7 +241,7 @@ def calculate_rt60_from_rir(rir, fs):
     rir = rir / np.max(np.abs(rir))
 
     # Estimate RT60
-    rt60 = pra.experimental.rt60.measure_rt60(rir, fs)
+    rt60 = pra.experimental.rt60.measure_rt60(rir, fs, plot=plot)
     return rt60
 
 def create_interactive_rir_plot(enabled_flags, rirs_dict):
@@ -280,7 +280,7 @@ def create_interactive_rir_plot(enabled_flags, rirs_dict):
                 verticalalignment='top',
                 horizontalalignment='center',
                 bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
-    plt.show()
+    plt.show(block=False)  # Non-blocking
 
     # Create CheckButtons
     labels = list(rirs_dict.keys())
@@ -318,4 +318,5 @@ def create_interactive_rir_plot(enabled_flags, rirs_dict):
     # Keep a reference to prevent garbage collection
     fig.check = check
 
-    plt.show(block=True)  # Make sure to block to keep the window interactive
+    # plt.show(block=True)  # Make sure to block to keep the window interactive
+    plt.show(block=False)  # Non-blocking

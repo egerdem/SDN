@@ -24,7 +24,7 @@ import Simulation as sim
 import Geometry as geom
 from SDN_timu import Room as TimuRoom, Source as TimuSource, Microphone as TimuMicrophone, SoundFileRW
 
-def plot_rir_comparison(rirs, labels=None, PLOT_EDC=False, PLOT_NED=True, Fs=44100, duration=None, room_dim=None, absorption=None):
+def plot_rir_comparison(rirs, labels=None, PLOT_EDC=False, PLOT_NED=True, Fs=44100, duration=None, room_dim=None, absorption=None, PLOT_RT=False, PLOT_FREQ=False):
     """Plot multiple RIRs for comparison and calculate RT60 values.
 
     Args:
@@ -138,7 +138,7 @@ def plot_rir_comparison(rirs, labels=None, PLOT_EDC=False, PLOT_NED=True, Fs=441
     # Calculate RT60 from RIRs
     print("\nMeasured RT60 values:")
     for rir, label in zip(rirs, labels):
-        rt60 = pp.calculate_rt60_from_rir(rir, Fs)
+        rt60 = pp.calculate_rt60_from_rir(rir, Fs, plot=PLOT_RT)
         print(f"{label}: {rt60:.3f} s")
 
 
@@ -396,7 +396,7 @@ if __name__ == "__main__":
     PLOT_NED = False  # Plot normalized echo density
     # Run comparison
     duration = 0.5
-    rirs = run_comparison(room_parameters, duration=duration, max_order=6)
+    rirs = run_comparison(room_parameters, duration=duration, max_order=12)
 
     # Plot RIR comparison
     plot_rir_comparison(
@@ -404,6 +404,7 @@ if __name__ == "__main__":
         labels=list(rirs.keys()),
         PLOT_EDC=PLOT_EDC,
         PLOT_NED=PLOT_NED,
+        PLOT_RT=True,
         Fs=44100,
         duration=duration,
         room_dim=[room_parameters['width'], 
