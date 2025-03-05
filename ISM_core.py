@@ -27,7 +27,7 @@ class ISMNetwork:
     def _setup_delay_lines(self):
         """Initialize all delay lines in the network."""
         # Direct source to microphone
-        src_mic_distance = self.room.srcPos.getDistance(self.room.micPos)
+        src_mic_distance = self.room.source.srcPos.getDistance(self.room.micPos)
         self.direct_sound_delay = int(np.floor((self.Fs * src_mic_distance) / self.c))
         self.source_to_mic["src_to_mic"] = deque([0.0] * self.direct_sound_delay, maxlen=self.direct_sound_delay)
         

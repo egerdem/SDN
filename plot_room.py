@@ -16,7 +16,7 @@ def plot_room(room, ax=None):
     # Plot source and microphone
     ax.scatter(room.source.sx, room.source.sy, room.source.sz, 
               color='green', s=100, label='Source')
-    ax.scatter(room.mx, room.my, room.mz, 
+    ax.scatter(room.micPos.x, room.micPos.y, room.micPos.z, 
               color='red', s=100, label='Microphone')
     
     # Define colors for each wall
@@ -56,7 +56,7 @@ def plot_room(room, ax=None):
             yy = (-wall.plane_coeffs.a * xx - wall.plane_coeffs.c * zz 
                   - wall.plane_coeffs.d) / wall.plane_coeffs.b
             
-        surf = ax.plot_surface(xx, yy, zz, alpha=0.1, 
+        surf = ax.plot_surface(xx, yy, zz, alpha=0.3,
                              color=wall_colors[wall_label])
         
         # Add wall label at the center of each wall, but offset from the surface
@@ -244,7 +244,7 @@ def calculate_rt60_from_rir(rir, fs, plot):
     rt60 = pra.experimental.rt60.measure_rt60(rir, fs, plot=plot)
     return rt60
 
-def create_interactive_rir_plot(enabled_flags, rirs_dict):
+def create_interactive_rir_plot(rirs_dict):
     """Create an interactive RIR plot with checkboxes to show/hide different RIRs.
 
     Args:
@@ -253,7 +253,7 @@ def create_interactive_rir_plot(enabled_flags, rirs_dict):
     from matplotlib.widgets import CheckButtons
 
     # Create the main figure and axis for RIR plot
-    fig, (ax, ax_check) = plt.subplots(1, 2, gridspec_kw={'width_ratios': [5, 1]}, figsize=(15, 6))
+    fig, (ax, ax_check) = plt.subplots(1, 2, gridspec_kw={'width_ratios': [10, 1]}, figsize=(13, 6))
     # plt.subplots_adjust(left=0.1, right=0.95)  # Adjust spacing
 
     # Initialize lines dictionary and visibility states
@@ -261,25 +261,33 @@ def create_interactive_rir_plot(enabled_flags, rirs_dict):
     visibility = {}
 
     # Plot all RIRs initially
+    # c = 0
+    alp = 0.7
     for label, rir in rirs_dict.items():
-        line, = ax.plot(rir, label=label, alpha=0.7)
+        # if c != 0:
+        #     alp = 1 # decrease the alpha if you want the second plot more transparent
+        # else:
+        #     alp = 1
+        line, = ax.plot(rir, label=label, alpha=alp)
         lines[label] = line
         visibility[label] = True
+        # c += 1
+        # alp *= 0.7
 
     # Set up the main plot
-    ax.set_title('Interactive Room Impulse Response Comparison')
+    ax.set_title('Room Impulse Response Comparison')
     ax.set_xlabel('Time (sample)')
     ax.set_ylabel('Amplitude')
     ax.grid(True)
     ax.legend()
 
-    if enabled_flags:
-        flag_text = '\n'.join(enabled_flags)
-        ax.text(0.9, 0.9, flag_text,
-                transform=ax.transAxes,
-                verticalalignment='top',
-                horizontalalignment='center',
-                bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
+    # if enabled_flags:
+    #     flag_text = '\n'.join(enabled_flags)
+    #     ax.text(0.9, 0.9, flag_text,
+    #             transform=ax.transAxes,
+    #             verticalalignment='top',
+    #             horizontalalignment='center',
+    #             bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
     plt.show(block=False)  # Non-blocking
 
     # Create CheckButtons
@@ -319,4 +327,83 @@ def create_interactive_rir_plot(enabled_flags, rirs_dict):
     fig.check = check
 
     # plt.show(block=True)  # Make sure to block to keep the window interactive
+    plt.show(block=False)  # Non-blocking
+
+def create_interactive_edc_plot(rirs_dict, Fs, default_rirs):
+    """Create an interactive EDC plot with checkboxes to show/hide different EDCs.
+
+    Args:
+        rirs_dict: Dictionary containing RIRs with their labels as keys
+        Fs: Sampling frequency
+        default_rirs: Set of RIR labels that should be plotted in black
+    """
+    from matplotlib.widgets import CheckButtons
+    import analysis as an
+
+    # Create the main figure and axis for EDC plot with more space for the plot
+    fig, (ax, ax_check) = plt.subplots(1, 2, gridspec_kw={'width_ratios': [10, 1]}, figsize=(13, 6))
+
+    # Initialize lines dictionary and visibility states
+    lines = {}
+    visibility = {}
+
+    # Calculate and plot all EDCs initially
+    for label, rir in rirs_dict.items():
+        # Calculate EDC without plotting
+        edc = an.compute_edc(rir, Fs, label=label, plot=False)
+        
+        # Create time array in seconds
+        time = np.arange(len(rir)) / Fs
+        
+        # Determine color based on whether it's a default RIR
+        # color = 'black' if label in default_rirs or label == "SDN-Base (original)" else None
+        color = None
+        # Plot EDC
+        line, = ax.plot(time, edc, label=label, alpha=1, color=color)
+        lines[label] = line
+        visibility[label] = True
+
+    # Set up the main plot
+    ax.set_title('Energy Decay Curve Comparison')
+    ax.set_xlabel('Time (s)')
+    ax.set_ylabel('Energy (dB)')
+    ax.grid(True)
+    ax.legend()
+    ax.set_ylim(-65, 5)  # Set y-axis limits similar to the original EDC plot
+
+    # Create CheckButtons
+    labels = list(rirs_dict.keys())
+    actives = [True] * len(labels)
+
+    # Remove the outer box and title from the checkbox area
+    ax_check.set_xticks([])  # Hide x-ticks
+    ax_check.set_yticks([])  # Hide y-ticks
+    for spine in ax_check.spines.values():  # Remove spines (outer box)
+        spine.set_visible(False)
+
+    # Position the checkboxes in a more compact spot
+    ax_check.set_position([0.8, 0.4, 0.1, 0.2])  # [left, bottom, width, height]
+    check = CheckButtons(
+        ax=ax_check,
+        labels=labels,
+        actives=actives
+    )
+
+    def update_visibility(label):
+        # Toggle visibility of the corresponding line
+        line = lines[label]
+        line.set_visible(not line.get_visible())
+        fig.canvas.draw_idle()  # Redraw the figure
+
+        # Update legend
+        handles = [line for line in lines.values() if line.get_visible()]
+        labels = [line.get_label() for line in lines.values() if line.get_visible()]
+        ax.legend(handles, labels)
+
+    # Connect the callback
+    check.on_clicked(update_visibility)
+
+    # Keep a reference to prevent garbage collection
+    fig.check = check
+
     plt.show(block=False)  # Non-blocking

@@ -6,6 +6,7 @@ from path_logger import PathLogger, PressurePacket, deque_plotter
 import matplotlib.pyplot as plt
 import path_logger as pl
 import specular_scattering_matrix as ssm
+import random
 
 def scattering_matrix_crate(increase_coef=0.2):
     """Create a modified scattering matrix with adjusted diagonal and off-diagonal elements.
@@ -31,6 +32,7 @@ def scattering_matrix_crate(increase_coef=0.2):
     adjusted_matrix[off_diagonal_mask] += (c / 4)
     return adjusted_matrix
 
+
 class DelayNetwork:
     """Core SDN implementation focusing on sample-based processing with accessible delay lines."""
 
@@ -46,6 +48,8 @@ class DelayNetwork:
                  enable_path_logging: bool = False,
                  plot_wall_incoming_sums: bool = False,
                  scattering_matrix_update_coef: float = None,
+                 more_absorption: bool = False,
+                 print_mic_pressures: bool = False,
                  label: str = ""):
         """Initialize SDN with test flags.
         
@@ -75,8 +79,9 @@ class DelayNetwork:
         self.ignore_wall_absorption = ignore_wall_absorption
         self.ignore_src_node_atten = ignore_src_node_atten
         self.ignore_node_mic_atten = ignore_node_mic_atten
+        self.more_absorption = more_absorption
         self.scattering_matrix_update_coef = scattering_matrix_update_coef
-        print("coef ??*", self.scattering_matrix_update_coef)
+        self.print_mic_pressures = print_mic_pressures
         # Override wall attenuation if ignore_wall_absorption is True
         if self.ignore_wall_absorption:
             self.room.wallAttenuation = [1.0] * len(self.room.wallAttenuation)
@@ -118,6 +123,78 @@ class DelayNetwork:
         self.wall_incoming_sums = {wall_id: [] for wall_id in room.walls}
         self.sample_indices = {wall_id: [] for wall_id in room.walls}  # To store n values for plotting
 
+        # Print parameter summary
+        # self._print_parameter_summary()
+
+    def _print_parameter_summary(self):
+        """Print a formatted summary of only the non-default SDN parameters."""
+        print("\n" + "=" * 50)
+        print(f"SDN Configuration Summary for: {self.label}")
+
+        # Define default values
+        defaults = {
+            'source_pressure_injection_coeff': 0.5,
+            'coef': 2.0 / 5,
+            'source_weighting': 1,
+            'use_identity_scattering': False,
+            'specular_scattering': False,
+            'specular_source_injection': False,
+            'ignore_wall_absorption': False,
+            'ignore_src_node_atten': False,
+            'ignore_node_mic_atten': False,
+            'enable_path_logging': False,
+            'scattering_matrix_update_coef': None,
+        }
+
+        # Check and print only non-default values
+        non_default_params = []
+
+        if self.source_pressure_injection_coeff != defaults['source_pressure_injection_coeff']:
+            non_default_params.append(
+                f"• Source Pressure Coefficient (1/2 originally): {self.source_pressure_injection_coeff}")
+
+        if self.coef != defaults['coef']:
+            non_default_params.append(f"• Coefficient in front of Summation Symbol (2/5 originally): {self.coef}")
+
+        # if self.source_weighting != defaults['source_weighting']:
+        #     non_default_params.append(f"• Source Weighting: {self.source_weighting}")
+
+        # Scattering Configuration
+        if self.use_identity_scattering:
+            non_default_params.append("• Using Identity Scattering Matrix")
+        elif self.specular_scattering:
+            non_default_params.append("• Using Specular Scattering Matrix")
+        elif self.scattering_matrix_update_coef is not None:
+            non_default_params.append(
+                f"• Using Modified Scattering Matrix (coef: {self.scattering_matrix_update_coef})")
+
+        # Source Injection Mode
+        if self.specular_source_injection:
+            non_default_params.append("• Using Specular Source Injection")
+            if self.source_weighting != defaults['source_weighting']:
+                non_default_params.append(f"  - Source Weighting Factor: {self.source_weighting}")
+
+        # Attenuation Settings
+        if self.ignore_wall_absorption:
+            non_default_params.append("• Wall Absorption Ignored")
+        if self.ignore_src_node_atten:
+            non_default_params.append("• Source-Node Attenuation Ignored")
+        if self.ignore_node_mic_atten:
+            non_default_params.append("• Node-Mic Attenuation Ignored")
+
+        # Path Logging
+        if self.enable_path_logging:
+            non_default_params.append("• Path Logging Enabled")
+
+        # Print all non-default parameters
+        if non_default_params:
+            print("\nParameters:")
+            print("\n".join(non_default_params))
+        else:
+            print("\nAll parameters are at default values")
+
+        print("=" * 50 + "\n")
+
     def _create_scattering_matrix(self) -> np.ndarray:
         """Create the initial scattering matrix based on current settings.
         
@@ -157,14 +234,20 @@ class DelayNetwork:
 
         # Direct source to microphone
         key = "src_to_mic"
-        src_mic_distance = self.room.srcPos.getDistance(self.room.micPos)
+        src_mic_distance = self.room.source.srcPos.getDistance(self.room.micPos)
         self.direct_sound_delay = int(np.ceil(((self.Fs * src_mic_distance) / self.c)))
 
-        # initial_packet = PressurePacket(value=0.0, path_history=['src', 'mic'], birth_sample=0, delay=self.direct_sound_delay)
-        # self.source_to_mic[key] = deque([initial_packet] * self.direct_sound_delay, maxlen=self.direct_sound_delay) # kaldırdım çünkü zeroları paketsiz yapıyorum
-        # deque_plotter(self.source_to_mic[key])
 
-        self.source_to_mic[key] = deque([0.0] * self.direct_sound_delay, maxlen=self.direct_sound_delay)
+        if self.enable_path_logging == False: # NO LOG CASE - REF
+            self.source_to_mic[key] = deque([0.0] * self.direct_sound_delay, maxlen=self.direct_sound_delay)
+
+        ###############################################
+        else: # LOG CASE
+            initial_packet = PressurePacket(value=0.0, path_history=['src', 'mic'], birth_sample=0,
+                                        delay=self.direct_sound_delay)
+            self.source_to_mic[key] = deque([initial_packet] * self.direct_sound_delay, maxlen=self.direct_sound_delay)
+            deque_plotter(self.source_to_mic[key])
+        ###############################################
 
         # Source to nodes
         for wall_id, wall in self.room.walls.items():
@@ -229,14 +312,6 @@ class DelayNetwork:
         output_sample = 0.0
         self.n = n
 
-        # Switch to diffuse scattering at n=3000
-        # if self.n == 600 and self.specular_scattering:
-        #     print(f"n={self.n}: Switching to diffuse scattering")
-        #     self.specular_scattering = False
-        #     N = self.num_nodes
-        #     size = N - 1
-        #     self.scattering_matrix = (2 / size) * np.ones((size, size)) - np.eye(size)
-
         # Step 0a : propagate the DIRECT SOUND to source_to_mic delay line
         direct_sound = input_sample * self.source_to_mic_gain
 
@@ -300,7 +375,6 @@ class DelayNetwork:
                 else:  # there is no active source input, Just append zero and move the delay line forward
                     source_pressure = self.source_to_nodes[src_key][0]
                     assert source_pressure == 0.0, f"source_pressure: {source_pressure}, should be zero!"
-
             ###############################################
 
             # Collect incoming wave variables
@@ -309,16 +383,21 @@ class DelayNetwork:
             # incoming_packets = []  # Store packets for path tracking
 
             psk = self.source_pressure_injection_coeff * source_pressure  # source pressure arriving at any (all) nodes (mostly zero except impulse sample)
-            if psk != 0.0 or psk != 0:
-                print("psk:", psk)
+            # if psk != 0.0 or psk != 0: # print when source pressure is nonzero (happens only 6 times as there are 6 nodes)
+            #     print("psk:", psk)
 
             iter = 0
             inject_ind = np.random.randint(5)
 
             target = get_best_reflection_target(wall_id, self.room.angle_mappings)
+
+            # print("Wall:", wall_id)
+            # target = random.choice(list(self.room.walls.keys()))
+            # print("target:", target)
+            i = 1
             for other_id in self.room.walls:
-                # print("wall_id:", wall_id, "other_id:", other_id)
                 if other_id != wall_id:
+                    # print("wall_id:", wall_id, "other_id:", other_id)
                     other_nodes.append(other_id)
                     # Read from delay line and add half of source pressure
 
@@ -347,18 +426,14 @@ class DelayNetwork:
                     p_tilde = pki_pressure + psk  # if p_tilde is zero, no pressure at the node
 
                     if self.specular_source_injection:
-                        # c = 4
                         c = self.source_weighting
-                        # if iter == inject_ind: # x1
                         if other_id == target:
                             incoming_waves.append(pki_pressure + c*psk)
                         else:
                             incoming_waves.append(pki_pressure + (5 - c) / 4 * psk)
-                            # print("p_tilde:", p_tilde)
+                            # incoming_waves.append(pki_pressure + 0 * psk)
                     else:
                         incoming_waves.append(p_tilde)
-
-                    iter += 1
 
             # Apply appropriate scattering matrix
             if self.specular_scattering:
@@ -371,6 +446,8 @@ class DelayNetwork:
             # Store outgoing waves for each connection
             for idx, other_id in enumerate(other_nodes):
                 val = self.instant_outgoing_waves[idx]
+                if self.more_absorption:
+                    val = val * self.room.wallAttenuation[self.room.walls[wall_id].wall_index]
 
                 if self.enable_path_logging == False:  # NO LOG CASE - REF
                     self.outgoing_waves[wall_id][other_id] = val
@@ -407,12 +484,15 @@ class DelayNetwork:
 
             # Send to microphone (using outgoing waves)
             mic_key = f"{wall_id}_to_mic"
-            # print("n:", n, "single nonzero=", self.instant_outgoing_waves)
 
             # coef = 2/5 originally
+            # what about using? sum(incoming_waves)
             mic_pressure = self.coef * sum(self.instant_outgoing_waves) * \
                            self.node_to_mic_gains[mic_key] * \
                            self.room.wallAttenuation[self.room.walls[wall_id].wall_index]
+            if self.print_mic_pressures:
+                if mic_pressure != 0.0:  # print when mic pressure is nonzero
+                    print("mic_pressure:", mic_pressure*5/2)
 
             if self.enable_path_logging == False: # NO LOG CASE - REF
                 self.node_to_mic[mic_key].append(mic_pressure)
@@ -437,7 +517,7 @@ class DelayNetwork:
         for wall_id in self.room.walls:
             for other_id in self.room.walls:
                 if wall_id != other_id:
-                    # Get outgoing wave and apply both walls' attenuations
+                    # Get outgoing wave and apply wall attenuations
                     outgoing_wave = self.outgoing_waves[wall_id][other_id]
                     sending_wall_atten = self.room.wallAttenuation[self.room.walls[wall_id].wall_index]
 
@@ -465,7 +545,7 @@ class DelayNetwork:
         G = self.c / self.Fs  # unit distance
 
         # Direct sound attenuation (1/r law)
-        src_mic_distance = self.room.srcPos.getDistance(self.room.micPos)
+        src_mic_distance = self.room.source.srcPos.getDistance(self.room.micPos)
         self.source_to_mic_gain = G / src_mic_distance if not self.ignore_src_node_atten else 1.0
 
         for wall_id, wall in self.room.walls.items():
@@ -485,7 +565,6 @@ class DelayNetwork:
     def calculate_rir(self, duration):
         """Calculate room impulse response for a given duration."""
         num_samples = int(self.Fs * duration)
-        print(f"Calculating RIR for {self.label}")
         rir = np.zeros(num_samples)
 
         for n in range(num_samples):

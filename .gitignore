@@ -1,3 +1,20 @@
 .idea/
 __pycache__/
 *.pyc
+
+# Ignore image files
+*.jpeg
+*.jpg
+*.png
+*.gif
+
+# Ignore video files
+*.mov
+*.mp4
+
+# Ignore document files
+*.docx
+*.pdf
+
+# Ignore the latex folder
+latex/

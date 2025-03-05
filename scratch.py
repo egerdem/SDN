@@ -52,8 +52,6 @@ def calculate_recursive_scattering(iterations, initial_input, sc):
 # Example usage
 
 initial_vector = np.array([1/2, 1/2, 1/2, 1/2, 1/2])
-initial_vector = np.array([1/5, 1/5, 1/5, 1/5, 1/5])
-
 initial_vector2 = np.array([1/8, 2, 1/8, 1/8, 1/8])
 
 # Arrays to store results for plotting

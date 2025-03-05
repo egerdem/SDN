@@ -3,6 +3,8 @@ import numpy as np
 from typing import Dict, List, Optional, Tuple, Union
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+import matplotlib
+matplotlib.use('Qt5Agg')  # Set the backend to Qt5
 
 
 class Room:
@@ -19,6 +21,9 @@ class Room:
         self.wallAttenuation = []  # this is a list
         self.wallFilters = dict()  # this is a dictionary
         self.angle_mappings = None  # Will be set after source and nodes are set up
+        self.source = None
+        self.micPos = None
+        self.sdn_nodes_calculated = False  # New flag to track if nodes are calculated
         self._setup_walls()
 
     def _setup_walls(self):
@@ -39,25 +44,31 @@ class Room:
             if wall_id in self.walls:
                 self.walls[wall_id].wall_index = i
 
-    def set_microphone(self, mx, my, mz):
-        self.mx = mx
-        self.my = my
-        self.mz = mz
-        self.micPos = Point(mx, my, mz)
-
-    def set_source(self, sx, sy, sz, signal, Fs=44100):
+    def set_source(self, sx, sy, sz, signal=None, Fs=44100):
+        """Set source position and optionally its signal."""
         self.source = Source(sx, sy, sz, signal, Fs)
-        self.srcPos = Point(sx, sy, sz)
-        # Calculate SDN node positions (first-order reflection points)
-        self._calculate_sdn_nodes()
-        # Calculate angle mappings after nodes are set up
-        self.angle_mappings = build_angle_mappings(self)
+        self._try_calculate_sdn_nodes()  # Try to calculate nodes if mic is already set
+
+    def set_microphone(self, mx, my, mz):
+        """Set microphone position."""
+        self.micPos = Point(mx, my, mz)
+        self._try_calculate_sdn_nodes()  # Try to calculate nodes if source is already set
+
+    def _try_calculate_sdn_nodes(self):
+        """Try to calculate SDN nodes if both source and mic are set."""
+        if self.source is not None and self.micPos is not None and not self.sdn_nodes_calculated:
+            self._calculate_sdn_nodes()
+            self.angle_mappings = build_angle_mappings(self)
+            self.sdn_nodes_calculated = True
 
     def _calculate_sdn_nodes(self):
-        """Calculate fixed SDN node positions (first-order reflection points)"""
+        """Calculate SDN node positions at first-order reflection points."""
+        if self.source is None or self.micPos is None:
+            raise ValueError("Both source and microphone positions must be set before calculating SDN nodes")
+            
         for wall_label, wall in self.walls.items():
             # Calculate image source for "wall"
-            img_source = ImageSource({wall_label: wall}, self.srcPos, self.micPos)
+            img_source = ImageSource({wall_label: wall}, self.source.srcPos, self.micPos)
             # Find intersection point between IM-mic line segment and the wall
             wall.node_positions = img_source._find_intersection_point(img_source.imageSourcePos, img_source.micPos)
 
@@ -256,12 +267,12 @@ def build_angle_mappings(room: Room) -> Dict[str, Dict[str, float]]:
     for wall_id, wall in room.walls.items():
         # Get wall normal and node position
         normal = np.array([wall.plane_coeffs.a, wall.plane_coeffs.b, wall.plane_coeffs.c])
-        normal = normal / np.linalg.norm(normal)
+        normal = normal / np.linalg.norm(normal)  # Normalize normal vector
         node_pos = np.array([wall.node_positions.x, wall.node_positions.y, wall.node_positions.z])
         
         # Calculate incident vector from source to node
         incident = node_pos - source_pos
-        incident = incident / np.linalg.norm(incident)
+        incident = incident / np.linalg.norm(incident)  # Normalize incident vector
         
         # Store incident angle
         angle = calculate_angle_between_vectors(incident, normal)
@@ -269,6 +280,7 @@ def build_angle_mappings(room: Room) -> Dict[str, Dict[str, float]]:
         
         # Calculate reflection vector
         reflection = calculate_reflection_vector(incident, normal)
+        reflection = reflection / np.linalg.norm(reflection)  # Normalize reflection vector
         
         # Find best matching node for reflection
         node_scores = {}
@@ -280,10 +292,13 @@ def build_angle_mappings(room: Room) -> Dict[str, Dict[str, float]]:
                                     other_wall.node_positions.y,
                                     other_wall.node_positions.z])
                 direction = other_pos - node_pos
-                direction = direction / np.linalg.norm(direction)
+                direction = direction / np.linalg.norm(direction)  # Normalize direction vector
                 
                 # Calculate angle between reflection vector and direction to other node
                 reflection_angle = calculate_angle_between_vectors(reflection, direction)
+                # If angle is obtuse, use the supplementary angle
+                if reflection_angle > np.pi/2:
+                    reflection_angle = np.pi - reflection_angle
                 mappings['node_mappings'][wall_id][other_id] = reflection_angle
     
     return mappings
@@ -303,7 +318,7 @@ def get_best_reflection_target(wall_id: str, mappings: Dict) -> str:
         
     # Find wall with smallest reflection angle
     angles = mappings['node_mappings'][wall_id]
-    return max(angles.items(), key=lambda x: x[1])[0]
+    return min(angles.items(), key=lambda x: x[1])[0]
 
 def build_specular_matrices_from_angles(room: Room) -> Dict[str, np.ndarray]:
     """Build specular scattering matrices based on node-to-node angle mappings.
@@ -389,7 +404,7 @@ def build_specular_matrices_from_angles(room: Room) -> Dict[str, np.ndarray]:
     
     return specular_mats
 
-def test_specular_matrices(room: Room):
+def specular_matrices_test(room: Room):
     """Test and visualize the specular reflection matrices.
     
     Prints:
@@ -437,14 +452,76 @@ def test_specular_matrices(room: Room):
         print(f"  Specular coefficients per column (should all be 1): {specular_counts}")
         print("-" * 60)
 
-if __name__ == "__main__":
-    # Create a test room
-    test_room = Room(6, 4, 3)  # 6m x 4m x 3m room
-    test_room.set_microphone(4, 3, 1.5)  # Mic position
-    test_room.set_source(2, 2, 1.7, signal="")  # Source position (signal not needed for this test)
+def plot_reflection_comparison(room: Room, source_wall: str, ax=None):
+    """Plot actual specular reflection and chosen best reflection paths.
     
-    # Run the test
-    test_specular_matrices(test_room)
+    Args:
+        room: Room object with walls and source/mic positions
+        source_wall: Wall ID where reflection occurs (e.g., 'west')
+        ax: Optional matplotlib 3D axis for plotting
+    """
+    if ax is None:
+        fig = plt.figure(figsize=(12, 8))
+        ax = fig.add_subplot(111, projection='3d')
+        
+    # Plot room first
+    from plot_room import plot_room
+    plot_room(room, ax)
+    
+    # Get source position and node position
+    src_pos = room.source.srcPos
+    node_pos = room.walls[source_wall].node_positions
+    
+    # Plot source to node line segment
+    ax.plot([src_pos.x, node_pos.x], 
+            [src_pos.y, node_pos.y], 
+            [src_pos.z, node_pos.z], 
+            'r--', linewidth=2, label='Source to Node')
+    
+    # Calculate actual specular reflection
+    wall = room.walls[source_wall]
+    normal = np.array([wall.plane_coeffs.a, wall.plane_coeffs.b, wall.plane_coeffs.c])
+    normal = normal / np.linalg.norm(normal)
+    
+    # Calculate incident vector
+    incident = np.array([node_pos.x - src_pos.x,
+                        node_pos.y - src_pos.y,
+                        node_pos.z - src_pos.z])
+    incident = incident / np.linalg.norm(incident)
+    
+    # Calculate specular reflection vector
+    reflection = calculate_reflection_vector(incident, normal)
+    reflection = reflection / np.linalg.norm(reflection)
+    
+    # Calculate the maximum possible ray length based on room dimensions
+    max_length = np.sqrt(room.x**2 + room.y**2 + room.z**2) * 2  # Diagonal of the room * 2
+    
+    # Plot specular reflection ray (extend it to max_length)
+    end_point = np.array([node_pos.x, node_pos.y, node_pos.z]) + max_length * reflection
+    ax.plot([node_pos.x, end_point[0]], 
+            [node_pos.y, end_point[1]], 
+            [node_pos.z, end_point[2]], 
+            'g--', linewidth=2, label='Specular Reflection')
+    
+    # Get best reflection target from angle mappings
+    best_target = get_best_reflection_target(source_wall, room.angle_mappings)
+    target_pos = room.walls[best_target].node_positions
+    
+    # Plot actual chosen reflection path
+    ax.plot([node_pos.x, target_pos.x], 
+            [node_pos.y, target_pos.y], 
+            [node_pos.z, target_pos.z], 
+            'b--', linewidth=2, label='Chosen Reflection')
+    
+    # Add legend and labels
+    ax.legend()
+    ax.set_title(f'Reflection Paths from {source_wall.upper()} wall')
+    
+    # Set view angle for better visualization
+    ax.view_init(elev=20, azim=45)
+    
+    return ax
+
 
 class Plane:
     """
@@ -467,3 +544,100 @@ class Plane:
         self.a = self.normal[0]
         self.b = self.normal[1]
         self.c = self.normal[2]
+
+def test_angle_calculations():
+    """Test function to verify the correctness of angle calculations."""
+    # Create a simple test room
+    test_room = Room(6, 4, 3)  # 6m x 4m x 3m room
+    test_room.set_microphone(4, 3, 1.5)  # Mic position
+    test_room.set_source(2, 2, 1.7, signal="")  # Source position
+    
+    # Calculate angle mappings
+    mappings = build_angle_mappings(test_room)
+    
+    # Test 1: Verify incident angle equals reflection angle for each wall
+    print("\nTest 1: Incident vs Reflection Angles")
+    for wall_id, wall in test_room.walls.items():
+        # Get wall normal
+        normal = np.array([wall.plane_coeffs.a, wall.plane_coeffs.b, wall.plane_coeffs.c])
+        normal = normal / np.linalg.norm(normal)
+        
+        # Get node position and source position
+        node_pos = np.array([wall.node_positions.x, wall.node_positions.y, wall.node_positions.z])
+        source_pos = np.array([test_room.source.srcPos.x, test_room.source.srcPos.y, test_room.source.srcPos.z])
+        
+        # Calculate incident vector and its reflection
+        incident = node_pos - source_pos
+        incident = incident / np.linalg.norm(incident)
+        reflection = calculate_reflection_vector(incident, normal)
+        
+        # Calculate angles from normal (both should be acute angles)
+        incident_angle = calculate_angle_between_vectors(incident, normal)
+        # If incident_angle > π/2, use the supplementary angle
+        if incident_angle > np.pi/2:
+            incident_angle = np.pi - incident_angle
+        
+        # For reflection angle, we need to ensure we're measuring it the same way as incident
+        reflection_angle = calculate_angle_between_vectors(reflection, normal)
+        if reflection_angle > np.pi/2:
+            reflection_angle = np.pi - reflection_angle
+        
+        print(f"{wall_id}:")
+        print(f"  Incident angle from normal: {np.degrees(incident_angle):.2f}°")
+        print(f"  Reflection angle from normal: {np.degrees(reflection_angle):.2f}°")
+        print(f"  Difference: {np.degrees(abs(incident_angle - reflection_angle)):.6f}°")
+        assert np.abs(incident_angle - reflection_angle) < 1e-10, "Incident angle should equal reflection angle"
+    
+    # Test 2: Verify symmetry of reflection paths
+    print("\nTest 2: Path Symmetry")
+    test_pairs = [
+        ('north', 'south'),
+        ('east', 'west'),
+        ('ceiling', 'floor')
+    ]
+    
+    for wall1, wall2 in test_pairs:
+        # Get angles for path: source -> wall1 -> wall2
+        path1_angle1 = mappings['source_angles'][wall1]
+        path1_angle2 = mappings['node_mappings'][wall1][wall2]
+        
+        # Get angles for path: source -> wall2 -> wall1
+        path2_angle1 = mappings['source_angles'][wall2]
+        path2_angle2 = mappings['node_mappings'][wall2][wall1]
+        
+        print(f"\n{wall1}-{wall2} pair:")
+        print(f"  Path 1 (source->{wall1}->{wall2}): {np.degrees(path1_angle1 + path1_angle2):.2f}°")
+        print(f"  Path 2 (source->{wall2}->{wall1}): {np.degrees(path2_angle1 + path2_angle2):.2f}°")
+        print(f"  Difference: {np.degrees(abs((path1_angle1 + path1_angle2) - (path2_angle1 + path2_angle2))):.6f}°")
+    
+    # Test 3: Verify best reflection targets are physically correct
+    print("\nTest 3: Physical Correctness of Best Reflection Targets")
+    expected_pairs = {
+        'north': 'south',
+        'south': 'north',
+        'east': 'west',
+        'west': 'east',
+        'ceiling': 'floor',
+        'floor': 'ceiling'
+    }
+    
+    for wall_id, expected_target in expected_pairs.items():
+        best_target = get_best_reflection_target(wall_id, mappings)
+        print(f"{wall_id}: Expected {expected_target}, Got {best_target}")
+        assert best_target == expected_target, f"Unexpected reflection target for {wall_id}"
+
+if __name__ == "__main__":
+    # Run the angle calculation tests
+    test_angle_calculations()
+    
+    # Create visualization of reflection paths
+    test_room = Room(6, 4, 3)
+    test_room.set_microphone(4, 3, 1.5)
+    test_room.set_source(2, 2, 1.7, signal="")
+    
+    # Create single plot
+    fig = plt.figure(figsize=(12, 8))
+    ax = fig.add_subplot(111, projection='3d')
+    plot_reflection_comparison(test_room, 'south', ax)
+    plt.tight_layout()
+    plt.show()

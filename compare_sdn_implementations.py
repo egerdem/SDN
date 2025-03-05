@@ -182,11 +182,9 @@ def run_comparison(room_parameters, duration=0.05, max_order=5):
             start_time = time.time()
 
         # Initialize and run our SDN implementation
-        sdn = DelayNetwork(room, use_identity_scattering=False,
-                           ignore_wall_absorption=False,
-                           ignore_src_node_atten=False,
-                           ignore_node_mic_atten=False,
-                           enable_path_logging=False)
+        sdn = DelayNetwork(room,
+                           more_absorption = False,
+                           )
         our_rir = sdn.calculate_rir(duration)
         our_rir = our_rir / np.max(np.abs(our_rir))
         rirs['SDN-Ege'] = our_rir
@@ -387,7 +385,7 @@ if __name__ == "__main__":
     # Implementation flags
     CALC_SDN_EGE = True  # Calculate Ege's SDN implementation
     CALC_SDN_BASE = True  # Calculate base SDN implementation
-    CALC_SDN_TIMU = False  # Calculate Timu's SDN implementation
+    CALC_SDN_TIMU = True  # Calculate Timu's SDN implementation
     CALC_ISM = False  # Calculate ISM implementation
     CALC_ISM_PRA = False  # Calculate ISM with PRA implementation
     PRINT_TIMING = True  # Print timing information
