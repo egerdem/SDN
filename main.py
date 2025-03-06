@@ -12,12 +12,13 @@ import frequency as ff
 import EchoDensity as ned  # Import the EchoDensity module
 import analysis as an
 import dsp
+from collections import defaultdict
 
 """ Method flags """
-PLOT_SDN_BASE = False
+PLOT_SDN_BASE = True
 PLOT_SDN_Test1 = True
 PLOT_SDN_Test2 = True
-PLOT_SDN_Test3 = True
+PLOT_SDN_Test3 = False
 PLOT_SDN_Test4 = False
 PLOT_SDN_Test5 = False
 PLOT_SDN_Test6 = False
@@ -36,18 +37,18 @@ ISM_SDN_PATH_DIFF_TABLE = False    # Run path analysis (ISM vs SDN comparison, i
 PLOT_EDC = False
 PLOT_FREQ = False        # Frequency response plot
 PLOT_NED = False         # Plot Normalized Echo Density
-PLOT_lsd = True         # Plot LSD
+PLOT_lsd = False         # Plot LSD
 
-Print_RIR_comparison_metrics = True
+Print_RIR_comparison_metrics = False
 interactive_rirs = True
-pulse_analysis = False
+pulse_analysis = True
 plot_smoothed_rirs = False
 
 """ Source Signals """
 
 # source function moved to geometry.py as Source.generate_signal()
 
-duration = 0.3  # seconds
+duration = 0.05  # seconds
 Fs = 44100
 num_samples = int(Fs * duration)
 rirs = {}
@@ -176,6 +177,7 @@ sdn_tests = {
         # 'info': "should be same with original SDN",
         'flags': {
             # 'more_absorption': True,
+            "enable_path_logging": False,
         },
         'label': "Original SDN"
     },
@@ -184,9 +186,9 @@ sdn_tests = {
         # 'absorption': 0.2,
         'info': "path",
         'flags': {
-            # "ignore_wall_absorption" : True,
-            # "ignore_src_node_atten" : True,
-            # "ignore_node_mic_atten" : True,
+            "ignore_wall_absorption" : True,
+            "ignore_src_node_atten" : True,
+            "ignore_node_mic_atten" : True,
             # 'specular_source_injection': True,
             # 'source_weighting': 3,
             # "coef": 1,
@@ -242,8 +244,7 @@ sdn_tests = {
 
 # Function to run SDN tests with given configuration, new implementation (SDN-Ege)
 def run_sdn_test(test_name, config):
-    if not config['enabled']:
-        return
+
     print("Running SDN test:", test_name)
     if 'absorption' in config:
         # Override absorption
@@ -292,20 +293,50 @@ if PLOT_SDN_BASE:
 
 # Run SDN tests
 for test_name, config in sdn_tests.items():
-    sdn = run_sdn_test(test_name, config)
 
+    if config['enabled']:
+        sdn = run_sdn_test(test_name, config)
 
-    # Additional analysis if needed (e.g., path logging)
-    if sdn and sdn.enable_path_logging:
-        print(f"\n=== {test_name} Path Analysis ===")
-        print("\n=== First Arriving Paths ===")
-        complete_paths = sdn.path_logger.get_complete_paths_sorted()
-        for path_key, packet in complete_paths[:10]:
-            print(f"{path_key}: arrives at n={packet.birth_sample + packet.delay}, value={packet.value:.6f}")
+        # Additional analysis: path logging
+        if sdn and sdn.enable_path_logging:
+            print(f"\n=== {test_name} Path Analysis ===")
+            print("\n=== First Arriving Paths ===")
+            complete_paths = sdn.path_logger.get_complete_paths_sorted()
+            print("lennnn", len(complete_paths))
+            for path_key, packet in complete_paths[:10]:
+                print(f"{path_key}: arrives at n={packet.birth_sample + packet.delay}, value={packet.value:.6f}")
 
-if duration > 0:
+            # Create rir_with_paths dictionary with pressure and arrival time
+            rir_with_paths = {}
+            for path_key, packet in complete_paths:
+                rir_with_paths[path_key] = {
+                    "pressure": packet.value,
+                    "arrival": packet.birth_sample + packet.delay
+                }
 
-    # Calculate RT60 values for all RIRs
+            # Create a path-based RIR from complete_paths
+            if complete_paths:
+                # Find the maximum arrival time to determine the length of the RIR
+                max_arrival = max(packet.birth_sample + packet.delay for _, packet in complete_paths)
+                
+                # Create an empty RIR array
+                path_based_rir = np.zeros(max_arrival + 1)
+                
+                # Fill in the RIR with pressure values at their arrival times
+                for _, packet in complete_paths:
+                    arrival_time = packet.birth_sample + packet.delay
+                    path_based_rir[arrival_time] += packet.value
+                
+                # Add the path-based RIR to the rirs dictionary
+                rirs[f"{test_name} (Path-based)"] = path_based_rir
+                
+                # Also add it to default_rirs to highlight it
+                default_rirs.add(f"{test_name} (Path-based)")
+
+        sdn.get_path_summary()
+
+# Calculate RT60 values for all RIRs
+if duration > 0.7:
     rt60_values = {}
     for label, rir in rirs.items():
         rt60_values[label] = pp.calculate_rt60_from_rir(rir, Fs, plot=False)
@@ -324,36 +355,7 @@ if duration > 0:
         print(f"Eyring: {rt60_eyring:.3f} s")
 
 if PLOT_EDC:
-
     pp.create_interactive_edc_plot(rirs, Fs, default_rirs)
-
-    # commenting out the below "static" plot since I have an interactive plot now
-    """ 
-    # Plot energy decay curves (matching SDN_timu implementation)
-    plt.figure(figsize=(12, 6))
-    for label, rir in rirs.items():
-        if duration > 1.5:
-            plot_label = f"{label} (RT60: {rt60_values[label]:.3f}s)"
-        else:
-            plot_label = label
-
-        color = 'black' if label in default_rirs or label == "SDN-Base (original)" else None
-
-        # Use black for default RIRs, default color cycle otherwise
-        # if label in default_rirs:
-        #     an.compute_edc(rir, Fs, label=plot_label, color='black')
-        # else:
-        an.compute_edc(rir, Fs, label=plot_label, color=color)
-        
-
-    plt.title('Energy Decay Curves')
-    plt.xlabel('Time (s)')
-    plt.ylabel('Energy (dB)')
-    plt.legend()
-    plt.grid(True)
-    plt.ylim(-65, 5)
-    plt.show(block=False)
-    """
 
     # Compare all distinct pairs of EDCs
     print("\nEDC Comparison (First 50ms RMSE Differences):")
@@ -397,7 +399,6 @@ if PLOT_NED:
     plt.show(block=False)
 
 if PLOT_lsd:
-
 # Get all unique pairs of RIR labels
     rir_labels = list(rirs.keys())
     i = 0
@@ -564,42 +565,6 @@ if plot_smoothed_rirs:
         plt.show()
 
 
-"""
-
-# dsp.calculate_edf(rirs['SDN-Test2'], sr=Fs, plot=True)
-# dsp.calculate_rt(rirs['SDN-Base (original)'], sr=Fs, plot=False)
-# dsp.calculate_drr(rirs['SDN-Test2'])
-
-
-rir = rirs['SDN-Base (original)']
-
-# 1) Check global max amplitude (absolute value)
-global_max = np.max(np.abs(rir))
-print("Global max amplitude:", global_max)
-
-# 2) Check if there's any portion that is exactly zero
-num_zeros = np.sum(rir == 0.0)
-print(f"There are {num_zeros} samples that are exactly zero.")
-
-# 3) Check total energy
-total_energy = np.sum(rir**2)
-print("Total energy:", total_energy)
-
-
-# Filter into octave bands (if that's what your code is doing)
-filtered = dsp.filter_octaveband(rir, sr=16000)
-
-# Now, each column is an octave-band filtered signal
-# Check max amplitude in each band
-for band_idx in range(filtered.shape[1]):
-    band_max = np.max(np.abs(filtered[:, band_idx]))
-    print(f"Band {band_idx} max amplitude: {band_max}")
-
-edc_db = dsp.calculate_edf(rir, sr=Fs)
-print("EDC range:", np.min(edc_db), np.max(edc_db))
-"""
-
-"""
 # Only Path Length Analysis, No RIR Calculation 
 # Create shared path tracker and calculate paths
 if ISM_SDN_PATH_DIFF_TABLE:
@@ -630,7 +595,6 @@ if ISM_SDN_PATH_DIFF_TABLE:
 
 if PLOT_ROOM:
     pp.plot_room(room)
-"""
 
 if pulse_analysis:
     print("\n=== RIR Pulse Analysis ===")
@@ -651,17 +615,13 @@ if pulse_analysis:
         time_span_ms = (last_pulse - first_pulse) / Fs * 1000  # in milliseconds
 
         print(f"\n{rir_label}:")
-        print(f"  Total pulses: {nonzero_count}")
+        print(f"  Total (nonzero) pulses: {nonzero_count}")
         print(f"  Percentage of nonzero samples: {percentage:.2f}%")
         print(f"  First pulse at: {first_pulse/Fs*1000:.2f} ms")
         print(f"  Last pulse at: {last_pulse/Fs*1000:.2f} ms")
         print(f"  Time span: {time_span_ms:.2f} ms")
 
-
-# import numpy as np
-# import matplotlib.pyplot as plt
-
-# # Example RIR data (replace this with your actual RIR data)
+# # Example RIR data
 # non_zero_rir = rir[rir != 0]
 # # Compute the histogram
 # hist, bin_edges = np.histogram(non_zero_rir, bins=30)

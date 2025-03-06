@@ -76,8 +76,8 @@ class PathLogger:
         """Get all paths that reach the mic, sorted by arrival time."""
         complete_paths = []
         for path_key, packets in self.paths.items():
-            mic_packets = [p for p in packets if p.reaches_mic]
-            complete_paths.extend((path_key, p) for p in mic_packets)
+            for p in packets:
+                complete_paths.append((path_key, p))
         
         # Sort by arrival time (birth_sample + delay)
         return sorted(complete_paths, key=lambda x: x[1].birth_sample + x[1].delay)
