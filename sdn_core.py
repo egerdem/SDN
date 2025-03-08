@@ -260,8 +260,16 @@ class DelayNetwork:
             key = f"src_to_{wall_id}"
             dist = wall.node_positions.getDistance(self.room.source.srcPos)
             delay_src2node = round((self.Fs * dist) / self.c)
-            self.source_to_nodes[key] = deque([0.0] * delay_src2node, maxlen=delay_src2node)
             setattr(self, f'src_to_{wall_id}_delay', delay_src2node)
+
+            ###############################################
+            if self.enable_path_logging:
+                initial_packet = PressurePacket(value=0.0, path_history=['src', wall_id], birth_sample=0,
+                                                delay=delay_src2node)
+                self.source_to_nodes[key] = deque([initial_packet] * delay_src2node, maxlen=delay_src2node)
+            ###############################################
+            else:
+                self.source_to_nodes[key] = deque([0.0] * delay_src2node, maxlen=delay_src2node)
 
             # Nodes to microphone
             key = f"{wall_id}_to_mic"
@@ -290,11 +298,46 @@ class DelayNetwork:
                     if self.enable_path_logging:
                         initial_packet = PressurePacket(value=0.0, path_history=[wall1_id, wall2_id], birth_sample=0, delay=delay_samples)
                         self.node_to_node[wall1_id][wall2_id] = deque([initial_packet] * delay_samples, maxlen=delay_samples)
-                        # self.node_to_node[wall1_id][wall2_id] = deque([0.0] * delay_samples, maxlen=delay_samples)
                         setattr(self, f'{wall1_id}_to_{wall2_id}_delay', delay_samples)
 
                     else:  # NO LOG CASE - REF
                         self.node_to_node[wall1_id][wall2_id] = deque([0.0] * delay_samples, maxlen=delay_samples)
+                        setattr(self, f'{wall1_id}_to_{wall2_id}_delay', delay_samples)
+
+    def get_delay_by_path(self, path):
+        """
+        Calculate the total delay for a given path by summing up individual segment delays.
+        Args:
+            path (list): A list of node IDs representing the path, e.g., ['src', 'west', 'floor', 'mic']
+        Returns:
+            int: The total delay in samples for the complete path
+        """
+        total_delay = 0
+        # Iterate through the path segments
+        for i in range(len(path) - 1):
+            start_node = path[i]
+            end_node = path[i + 1]
+            # Handle the special case for source-to-node delay
+            if start_node == 'src':
+                delay_attr_name = f'src_to_{end_node}_delay'
+            # Handle the special case for node-to-mic delay
+            elif end_node == 'mic':
+                delay_attr_name = f'{start_node}_to_mic_delay'
+            # Handle node-to-node delay
+            else:
+                delay_attr_name = f'{start_node}_to_{end_node}_delay'
+            
+            # Get the delay value from the DelayNetwork instance
+            try:
+                segment_delay = getattr(self, delay_attr_name)
+                # Add to the total delay
+                total_delay += segment_delay
+            except AttributeError:
+                # If the attribute doesn't exist, use a default delay
+                print(f"Warning: Delay attribute {delay_attr_name} not found. Using default delay of 0.")
+                segment_delay = 0
+                
+        return total_delay
 
     def _update_scattering_matrix(self):
         """Update the scattering matrix based on current settings."""
@@ -355,7 +398,7 @@ class DelayNetwork:
                     # Create the packet for the delay line
                     packet = PressurePacket(
                         value=source_pressure,
-                        path_history=['src', wall_id],
+                        path_history=['src', wall_id],  # Always start with 'src'
                         birth_sample=n,
                         delay=getattr(self, f'src_to_{wall_id}_delay'),
                     )
@@ -387,10 +430,27 @@ class DelayNetwork:
             incoming_waves = []
             other_nodes = []
             incoming_packets = []  # Store packets for path tracking
+            source_contribution_packets = []  # Store packets for direct source contributions
 
             psk = self.source_pressure_injection_coeff * source_pressure  # source pressure arriving at any (all) nodes (mostly zero except impulse sample)
-            # if psk != 0.0 or psk != 0: # print when source pressure is nonzero (happens only 6 times as there are 6 nodes)
-            #     print("psk:", psk)
+            
+            # Initialize source_path to ensure it's always defined
+            source_path = ['src', wall_id]  # Default path if no direct source contribution
+            
+            # If there's a direct source contribution to this node, create a packet for it
+            if self.enable_path_logging and abs(psk) > 1e-10:
+                src_key = f"src_to_{wall_id}"
+                if isinstance(self.source_to_nodes[src_key][0], PressurePacket):
+                    # Use the actual path history from the source-node packet
+                    source_path = self.source_to_nodes[src_key][0].path_history.copy()
+                
+                source_packet = PressurePacket(
+                    value=psk,
+                    path_history=source_path,
+                    birth_sample=n,
+                    delay=0
+                )
+                source_contribution_packets.append(source_packet)
 
             iter = 0
 
@@ -407,33 +467,32 @@ class DelayNetwork:
 
                     if self.enable_path_logging == False:
                         pki_pressure = self.node_to_node[other_id][wall_id][0]  # incoming wave from other node at n
+                        p_tilde = pki_pressure + psk  # if p_tilde is zero, no pressure at the node
 
                     ###############################################
                     else:  # LOG CASE
-                        packet = self.node_to_node[other_id][wall_id][0]
-                        pki_pressure = packet.value
-                        
-                        # Only extend the path if the packet has a non-empty path history
-                        # and non-zero pressure
-                        if abs(pki_pressure) > 1e-10 and packet.path_history:
+                        pki_pressure = self.node_to_node[other_id][wall_id][0].value
+                        p_tilde = pki_pressure + psk  # if p_tilde is zero, no pressure at the node
+
+                        if abs(p_tilde) > 1e-10 :
                             # DO NOT extend the path here - we're just reading from the delay line
                             # The path will be extended when we update the node-to-node connections
                             # This prevents duplicate wall IDs in the path history
-                            incoming_packets.append(packet)  # Use the original packet without extending
+                            incoming_packets.append(self.node_to_node[other_id][wall_id][0])  # Use the original packet without extending
                         else:
                             # For zero pressure or empty path history, create a placeholder packet
                             # This ensures we have something in incoming_packets for each other_id
                             placeholder_packet = PressurePacket(
                                 value=pki_pressure,
-                                path_history=[],
+                                path_history=["?????"],
                                 birth_sample=n,
                                 delay=0
                             )
-                            incoming_packets.append(placeholder_packet)
+                            # incoming_packets.append(placeholder_packet)
 
                     ###############################################
 
-                    p_tilde = pki_pressure + psk  # if p_tilde is zero, no pressure at the node
+                    # p_tilde = pki_pressure + psk  # if p_tilde is zero, no pressure at the node
 
                     if self.specular_source_injection:
                         c = self.source_weighting
@@ -464,16 +523,29 @@ class DelayNetwork:
                 ###############################################
                 else: # LOG CASE
                     if all_zero == False:  # if there are outgoing pressures at the node, we should store
-                        # Get the corresponding incoming packet for this outgoing wave
-                        incoming_packet = incoming_packets[idx]
-                        
                         # Create new packet for scattered wave with proper path history
                         # We're just maintaining the path history, not logging it yet
+                        
+                        # Create a proper path history that includes the current wall_id and target node
+                        # Make sure source_path is a list, not a string
+                        if isinstance(source_path, list):
+                            # If source_path already ends with wall_id, don't add it again
+                            if source_path[-1] != wall_id:
+                                full_path = source_path + [wall_id, other_id]
+                            else:
+                                full_path = source_path + [other_id]
+                        else:
+                            # Fallback if source_path is not a list
+                            full_path = ['src', wall_id, other_id]
+                        
+                        # Calculate the delay based on the full path
+                        path_delay = self.get_delay_by_path(full_path)
+                        
                         scattered_packet = PressurePacket(
                             value=val,
-                            path_history=incoming_packet.path_history,  # Path already includes wall_id from extend_path
+                            path_history=full_path,  # Use the full path
                             birth_sample=n,
-                            delay=incoming_packet.delay  # Maintain the accumulated delay
+                            delay=path_delay  # Use the calculated delay
                         )
                         
                         self.outgoing_waves[wall_id][other_id] = scattered_packet
@@ -522,24 +594,35 @@ class DelayNetwork:
                     # We need to find which incoming packets contributed to this node's pressure
                     contributing_paths = []
                     
+                    # Check if there's direct source contribution to this node
+                    src_key = f"src_to_{wall_id}"
+                    direct_source_contribution = False
+                    source_path = None
+                    
+                    # Check if there's a direct source contribution to this node
+                    if isinstance(self.source_to_nodes[src_key][0], PressurePacket) and abs(self.source_to_nodes[src_key][0].value) > 1e-10:
+                        direct_source_contribution = True
+                        # Use the actual path history from the source-node packet
+                        source_path = self.source_to_nodes[src_key][0].path_history.copy()
+                        # Add this path to contributing paths
+                        contributing_paths.append(source_path)
+                    
                     # Check all incoming packets for non-zero contributions
                     for packet in incoming_packets:
-                        if abs(packet.value) > 1e-10:
+                        if abs(packet.value) > 1e-10 and packet.path_history:
                             # This packet contributed to the node pressure
-                            # Make sure the path starts with 'src'
-                            path = packet.path_history.copy()  # Make a copy to avoid modifying the original
-                            if path and path[0] != 'src':
-                                # If path doesn't start with src, prepend it
-                                path = ['src'] + path
+                            # Make a copy to avoid modifying the original
+                            path = packet.path_history.copy()
                             
-                            # Only add complete paths that start with 'src'
-                            if path and path[0] == 'src':
-                                # Check if the current wall_id is already the last node in the path
-                                if not path or path[-1] != wall_id:
-                                    path.append(wall_id)
-                                
-                                # Add the path to contributing paths
-                                contributing_paths.append(path)
+                            # DO NOT blindly prepend 'src' - only use the actual path history
+                            # This ensures we're tracking the true energy propagation
+                            
+                            # Check if the current wall_id is already the last node in the path
+                            if not path or path[-1] != wall_id:
+                                path.append(wall_id)
+                            
+                            # Add the path to contributing paths
+                            contributing_paths.append(path)
                     
                     # If we have contributing paths, create a mic packet with the full path
                     if contributing_paths:
@@ -602,11 +685,24 @@ class DelayNetwork:
                             # Create a new packet with the attenuated value and proper path history
                             # We need to extend the path with the current node and target node
                             # But first check if the path already ends with the current node
-                            path_history = outgoing_wave.path_history
+                            path_history = outgoing_wave.path_history.copy() if outgoing_wave.path_history else []
                             
                             # Only add the current node (wall_id) if it's not already the last node in the path
-                            if not path_history or path_history[-1] != wall_id:
+                            # and if the path is not empty
+                            if path_history and path_history[-1] != wall_id:
                                 path_history = path_history + [wall_id]
+                            elif not path_history:
+                                # If path is empty, this might be a direct source contribution
+                                # Check if there's a direct source contribution to this node
+                                src_key = f"src_to_{wall_id}"
+                                if isinstance(self.source_to_nodes[src_key][0], PressurePacket) and abs(self.source_to_nodes[src_key][0].value) > 1e-10:
+                                    # Use the actual path history from the source-node packet
+                                    path_history = self.source_to_nodes[src_key][0].path_history.copy()
+                                else:
+                                    # If no direct source contribution, start with the current node
+                                    path_history = [wall_id]
+
+                                    
                                 
                             # Now add the target node (other_id)
                             path_history = path_history + [other_id]
