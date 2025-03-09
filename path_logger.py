@@ -8,17 +8,22 @@ import matplotlib.pyplot as plt
 class PressurePacket:
     """Represents a pressure value with its propagation history."""
     value: float
+    val_history: List[float]  # List of pressure values at each step
     path_history: List[str]  # List of nodes visited (e.g., ['src', 'ceiling', 'mic'])
-    birth_sample: int        # Sample index when this packet was created
-    delay: int              # Accumulated delay in samples
+    timestamps: List[int]     # List of sample indices when this packet was created
+    delay: int                # Accumulated delay in samples
+    birth_sample: int         # Sample index when this packet was created
+
     
-    def extend_path(self, node: str, additional_delay: int = 0) -> 'PressurePacket':
+    def extend_path(self, node: str, additional_delay: int = 0, new_val: float = 0.0) -> 'PressurePacket':
         """Create new packet with extended path."""
         return PressurePacket(
             value=self.value,
+            val_history=self.val_history + [new_val],  # Retain the pressure values history
             path_history=self.path_history + [node],
-            birth_sample=self.birth_sample,
-            delay=self.delay + additional_delay
+            timestamps=self.timestamps,     # Retain timestamps
+            delay=self.delay + additional_delay,
+            birth_sample=self.birth_sample   # Retain the original birth sample
         )
     
     @property

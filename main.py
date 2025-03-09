@@ -15,7 +15,7 @@ import dsp
 from collections import defaultdict
 
 """ Method flags """
-PLOT_SDN_BASE = True
+PLOT_SDN_BASE = False
 PLOT_SDN_Test1 = True
 PLOT_SDN_Test2 = True
 PLOT_SDN_Test3 = False
@@ -177,18 +177,18 @@ sdn_tests = {
         # 'info': "should be same with original SDN",
         'flags': {
             # 'more_absorption': True,
-            "enable_path_logging": False,
+            # "enable_path_logging": False,
         },
         'label': "Original SDN"
     },
     'Test2': {
         'enabled': PLOT_SDN_Test2,
         # 'absorption': 0.2,
-        'info': "path",
+        'info': "PLOT_SDN_Test2",
         'flags': {
-            "ignore_wall_absorption" : True,
-            "ignore_src_node_atten" : True,
-            "ignore_node_mic_atten" : True,
+            # "ignore_wall_absorption" : True,
+            # "ignore_src_node_atten" : True,
+            # "ignore_node_mic_atten" : True,
             # 'specular_source_injection': True,
             # 'source_weighting': 3,
             # "coef": 1,
@@ -202,9 +202,9 @@ sdn_tests = {
         # 'absorption': 0.3,
         'info': "c=4",
         'flags': {
-        'specular_source_injection': True,
-            'source_weighting': 3,
-            "enable_path_logging": True,
+        # 'specular_source_injection': True,
+        #     'source_weighting': 3,
+        #     "enable_path_logging": True,
         },
         'label': "SDN"
     },
@@ -214,29 +214,29 @@ sdn_tests = {
             # 'absorption': 0.3,
             'info': "c=8",
             'flags': {
-                'specular_source_injection': True,
-                'source_weighting': 8,
+                # 'specular_source_injection': True,
+                # 'source_weighting': 8,
             },
             'label': "SDN"
         },
 
     'Test5': {  # New test configuration
                 'enabled': PLOT_SDN_Test5,
-                # 'absorption': 0.3,
+                # 'absorption': 0.2,
                 'info': "c=5",
                 'flags': {
-                    'specular_source_injection': True,
-                    'source_weighting': 5,
+                    # 'specular_source_injection': True,
+                    # 'source_weighting': 5,
                 },
                 'label': "SDN Test 5"
             },
     'Test6': {  # New test configuration
                     'enabled': PLOT_SDN_Test6,
                     # 'absorption': 0.3,
-                    'info': "source weigth 1",
+                    'info': "no log - remove step 3 ",
                     'flags': {
-                        'specular_source_injection': True,
-                        'source_weighting': 1,
+                        # 'specular_source_injection': True,
+                        # 'source_weighting': 1,
                     },
                     'label': "SDN Test 6"
                 }
@@ -326,9 +326,11 @@ for test_name, config in sdn_tests.items():
                 for _, packet in complete_paths:
                     arrival_time = packet.birth_sample + packet.delay
                     path_based_rir[arrival_time] += packet.value
-                
+
+                path_based_rir = path_based_rir / np.max(np.abs(path_based_rir))
+
                 # Add the path-based RIR to the rirs dictionary
-                rirs[f"{test_name} (Path-based)"] = path_based_rir
+                rirs[f"SDN {test_name} (Path-based-PROOF)"] = path_based_rir
                 
                 # Also add it to default_rirs to highlight it
                 default_rirs.add(f"{test_name} (Path-based)")
