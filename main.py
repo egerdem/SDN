@@ -178,18 +178,18 @@ sdn_tests = {
                         'source_pressure_injection_coeff': 0.4,
                     },
                     'label': "SDN Test 6"
-                }
+        }
 }
 
 # Function to run SDN tests with given configuration, new implementation (SDN-Ege)
 def run_sdn_test(test_name, config):
-
+    
     print("Running SDN test:", test_name)
     if 'absorption' in config:
-        # Override absorption
-        room_parameters['absorption'] = config['absorption']
-        room_parameters['reflection'] = np.sqrt(1 - config['absorption'])
-        room.wallAttenuation = [room_parameters['reflection']] * 6
+    # Override absorption
+    room_parameters['absorption'] = config['absorption']
+    room_parameters['reflection'] = np.sqrt(1 - config['absorption'])
+    room.wallAttenuation = [room_parameters['reflection']] * 6
     
     # Setup signal
     room.source.signal = impulse_dirac['signal']
@@ -200,7 +200,7 @@ def run_sdn_test(test_name, config):
     # Calculate RIR
     rir = sdn.calculate_rir(duration)
     rir = rir / np.max(np.abs(rir))
-
+    
     # Check if this is a default configuration (no flags)
     is_default = len(config.get('flags', {})) == 0
     
@@ -326,7 +326,7 @@ if __name__ == '__main__':
                 # Find the typical peak position in other RIRs (using ISM as reference if available)
                 if 'ISM' in rirs:
                     reference_peak_idx = np.argmax(np.abs(rirs['ISM']))
-                else:
+        else:
                     # If ISM is not available, use a default value based on typical direct sound arrival
                     reference_peak_idx = int(0.005 * Fs)  # Assuming 5ms for direct sound
 
@@ -364,35 +364,35 @@ if __name__ == '__main__':
         # Load the new Treble RIR
         load_and_align_treble_rir('rir_treble_ism12_no_air.npy', " ISM12")
 
-    # Calculate ISM test RIR if needed
-    if PLOT_ISM_TEST:
-        from ISM import ISM
-
-        # Setup parameters for ISM test
-        xs = np.array([room_parameters['source x'],
-                       room_parameters['source y'],
-                       room_parameters['source z']])
-        xr = np.array([[room_parameters['mic x'],
-                        room_parameters['mic y'],
-                        room_parameters['mic z']]])
-        xr = np.transpose(xr)
-        L = np.array([room_parameters['width'],
-                      room_parameters['depth'],
-                      room_parameters['height']])
-        N = np.array([0, 0, 0])
-        beta = room_parameters['reflection']  # Use reflection coefficient directly
-        Tw = 11
-        Fc = 0.9
-        Rd = 0.08
+# Calculate ISM test RIR if needed
+if PLOT_ISM_TEST:
+    from ISM import ISM
+    
+    # Setup parameters for ISM test
+    xs = np.array([room_parameters['source x'], 
+                   room_parameters['source y'], 
+                   room_parameters['source z']])
+    xr = np.array([[room_parameters['mic x'], 
+                    room_parameters['mic y'], 
+                    room_parameters['mic z']]])
+    xr = np.transpose(xr)
+    L = np.array([room_parameters['width'], 
+                  room_parameters['depth'], 
+                  room_parameters['height']])
+    N = np.array([0, 0, 0])
+    beta = room_parameters['reflection']  # Use reflection coefficient directly
+    Tw = 11
+    Fc = 0.9
+    Rd = 0.08
         Nt = round(Fs / 2)
-        c = 343
-
-        # Calculate RIR using ISM test method
-        B = ISM(xr, xs, L, beta, N, Nt, Rd, [], Tw, Fc, Fs, c)
-        ism_test_rir = B[0].flatten()  # Flatten the 2D array to 1D
-        ism_test_rir = ism_test_rir / np.max(np.abs(ism_test_rir))
+    c = 343
+    
+    # Calculate RIR using ISM test method
+    B = ISM(xr, xs, L, beta, N, Nt, Rd, [], Tw, Fc, Fs, c)
+    ism_test_rir = B[0].flatten()  # Flatten the 2D array to 1D
+    ism_test_rir = ism_test_rir / np.max(np.abs(ism_test_rir))
         ism_test_rir = ism_test_rir[:num_samples]
-        rirs['ISM_test'] = ism_test_rir
+    rirs['ISM_test'] = ism_test_rir
 
     # Calculate manual ISM RIR if needed
     if PLOT_ISM:
@@ -656,36 +656,36 @@ if __name__ == '__main__':
             # Show the plot
             plt.show()
 
-    # Only Path Length Analysis, No RIR Calculation
-    # Create shared path tracker and calculate paths
-    if ISM_SDN_PATH_DIFF_TABLE:
-        path_tracker = path_tracker.PathTracker()
-        sdn_calc = SDNCalculator(room.walls, room.source.srcPos, room.micPos)
-        ism_calc = ISMCalculator(room.walls, room.source.srcPos, room.micPos)
-        sdn_calc.set_path_tracker(path_tracker)
-        ism_calc.set_path_tracker(path_tracker)
+# Only Path Length Analysis, No RIR Calculation 
+# Create shared path tracker and calculate paths
+if ISM_SDN_PATH_DIFF_TABLE:
+    path_tracker = path_tracker.PathTracker()
+    sdn_calc = SDNCalculator(room.walls, room.source.srcPos, room.micPos)
+    ism_calc = ISMCalculator(room.walls, room.source.srcPos, room.micPos)
+    sdn_calc.set_path_tracker(path_tracker)
+    ism_calc.set_path_tracker(path_tracker)
 
-        # Compare paths and analyze invalid ISM paths
-        PathCalculator.compare_paths(sdn_calc, ism_calc,
-                                     max_order=3)  # compare_paths() prints the comparison table but doesn't return anything
+    # Compare paths and analyze invalid ISM paths
+    PathCalculator.compare_paths(sdn_calc, ism_calc,
+                                 max_order=3)  # compare_paths() prints the comparison table but doesn't return anything
 
-        # analyze_paths() returns a list of invalid paths (only for ISM calculator)
-        # Each path is a list of node labels ['s', 'wall1', 'wall2', ..., 'm']
-        invalid_paths = ism_calc.analyze_paths(max_order=3)
+    # analyze_paths() returns a list of invalid paths (only for ISM calculator)
+    # Each path is a list of node labels ['s', 'wall1', 'wall2', ..., 'm']
+    invalid_paths = ism_calc.analyze_paths(max_order=3)
 
-        # Visualize example ISM paths
-        example_paths = [
-            ['s', 'east', 'west', 'm'],
-            ['s', 'west', 'm'],
-            ['s', 'west', 'east', 'north', 'm']
-        ]
+    # Visualize example ISM paths
+    example_paths = [
+        ['s', 'east', 'west', 'm'],
+        ['s', 'west', 'm'],
+        ['s', 'west', 'east', 'north', 'm']
+    ]
 
-        for path in example_paths:
-            pp.plot_ism_path(room, ism_calc, path)
-            plt.show()
+    for path in example_paths:
+        pp.plot_ism_path(room, ism_calc, path)
+        plt.show()
 
-    if PLOT_ROOM:
-        pp.plot_room(room)
+if PLOT_ROOM:
+    pp.plot_room(room)
 
     if pulse_analysis:
         print("\n=== RIR Pulse Analysis ===")
