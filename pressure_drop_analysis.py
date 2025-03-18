@@ -23,6 +23,24 @@ def form_input_vector(c):
     b[0] = c * (1 / 2)
     return b
 
+def form_input_vector_new(b):
+    # for b in [0, 0.5,1,1.5,2.,2.5,3.,3.5,4.,4.5,5]:
+    b0 = (5-2*b)/8
+    if b>b0 or b==b0:
+        pr = 2/5 * (1-b)
+        pr_vec = [b, b0, b0, b0, b0]
+    else:
+        pr = (2*b-3)/5
+        pr_vec = [b0, b, b, b, b]
+
+    print(f"c = {2*b}, b = {b}, b0 = {b0}, \n, {pr_vec}, pr = {pr}")
+    outgoing_vec = np.dot(S,pr_vec)
+    print("outgoing_vec", outgoing_vec)
+    if np.max(np.abs(outgoing_vec)) == pr:
+        print("yes! true")
+    else:
+        print("no!:", np.max(outgoing_vec), pr)
+    return pr_vec
 
 def process_scattering(S, b):
     """
@@ -66,7 +84,7 @@ def simulate_mic_pressures(c, num_iterations=3):
     current = form_input_vector(c)
     pressures.append(mic_pressure(current))
     for _ in range(1, num_iterations):
-        current = process_scattering(S, current)
+        current = process_scattering(S, current) # singled out outgoing vector
         pressures.append(mic_pressure(current))
     return pressures
 
@@ -99,22 +117,23 @@ def main():
 
 
 if __name__ == '__main__':
-    # main()
+    main()
 
     S = create_scattering_matrix()
+    form_input_vector_new(2)
 
     rank = np.linalg.matrix_rank(S)
     num_vectors = S.shape[0]  # Assuming S is square
     is_independent = rank == num_vectors
-    print("S has a basis of linearly independent vectors:", is_independent)
+    # print("S has a basis of linearly independent vectors:", is_independent)
     eigenvalues, _ = np.linalg.eig(S)  # Compute eigenvalues of the scattering matrix
-    print("Eigenvalues of S:", eigenvalues)
+    # print("Eigenvalues of S:", eigenvalues)
     pi = form_input_vector(1) # [0.5, 0.5, 0.5, 0.5, 0.5]
     po = np.dot(S,pi) # [0.5, 0.5, 0.5, 0.5, 0.5]
     pi_1st = process_scattering(S, pi) # [0.5, 0. , 0. , 0. , 0. ]
     po_1st = np.dot(S,pi_1st) # [-0.3,  0.2,  0.2,  0.2,  0.2]
 
-    # Quadratic form: p1 = pi_1st^T * S * pi_1st
+    """# Quadratic form: p1 = pi_1st^T * S * pi_1st
     # Ensure pi_1st is a column vector for correct multiplication
     pi_1st_col = pi_1st.reshape(-1, 1)  # Convert to column vector
     p1 = np.dot(pi_1st_col.T, np.dot(S, pi_1st_col))  # p1 is a scalar
@@ -122,8 +141,13 @@ if __name__ == '__main__':
     # Quadratic form: p2 = po_1st^T * S * po_1st
     # Ensure po_1st is a column vector for correct multiplication
     po_1st_col = po_1st.reshape(-1, 1)  # Convert to column vector
-    p2 = np.dot(po_1st_col.T, np.dot(S, po_1st_col))  # p2 is a scalar
+    p2 = np.dot(po_1st_col.T, np.dot(S, po_1st_col))  # p2 is a scalar"""
 
-    print("p1:", p1)
-    print("p2:", p2)
+    # print("p1:", p1)
+    # print("p2:", p2)
 
+    # print("pi_1st:", pi_1st)
+    u = np.array([1, 0, 0, 0, 0]).reshape(5, 1)
+    S_specular = np.eye(5)-2*np.dot(u,ut)
+    alfa = 0.9
+    S_hybrid = alfa*S + (1-alfa)*S_specular

@@ -1,0 +1,31 @@
+{
+  "experiment_id": "29e797ea79",
+  "config": {
+    "label": "SDN",
+    "info": "source weighting = 3",
+    "flags": {
+      "specular_source_injection": true,
+      "source_weighting": 3
+    },
+    "room_parameters": {
+      "width": 9,
+      "depth": 7,
+      "height": 4,
+      "source x": 4.5,
+      "source y": 3.5,
+      "source z": 2,
+      "mic x": 2,
+      "mic y": 2,
+      "mic z": 1.5,
+      "absorption": 0.2
+    },
+    "duration": 2,
+    "fs": 44100
+  },
+  "timestamp": "2025-03-17T02:19:31.013490",
+  "fs": 44100,
+  "duration": 2,
+  "metrics": {
+    "rt60": 0.9976417233560092
+  }
+}

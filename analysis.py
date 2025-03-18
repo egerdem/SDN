@@ -186,7 +186,7 @@ def compute_RMS(sig1: np.ndarray, sig2: np.ndarray, range: int = 50, Fs: int = 4
     """Compare two energy decay curves or smoothed RIRs and compute difference using various metrics."""
     # Calculate samples for range (e.g., 50ms)
     samples_range = int(range/1000 * Fs)  # Convert ms to samples
-    print("trimming signals for error calculation")
+    # print("trimming signals for error calculation")
 
     # Trim signals to specified range
     sig1_early = sig1[:samples_range]

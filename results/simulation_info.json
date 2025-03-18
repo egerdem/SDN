@@ -1,0 +1,90 @@
+{
+  "id": "b2bdcc72-6045-4243-91ed-8bebc45a04ae",
+  "projectId": "81addcf1-5fa1-491d-bf5e-55422fb0dfca",
+  "name": "SDN-AES simulation ism order 12",
+  "description": null,
+  "simulationType": "Hybrid",
+  "impulseLengthSec": 2,
+  "crossoverFrequency": 250,
+  "modelDefinitionId": "6ed6bc6c-c8b9-415a-b453-31ef3822f2d2",
+  "originalGeometryLibraryId": null,
+  "onTaskError": "Ignore",
+  "category": "Default",
+  "receivers": [
+    {
+      "id": "bdf3502c-63a5-43b4-97ba-c56e62ad840e",
+      "receiverType": "Mono",
+      "label": "mono_receiver",
+      "x": 2,
+      "y": 2,
+      "z": 1.5,
+      "orderNumber": 0,
+      "receiverProperties": null
+    }
+  ],
+  "sources": [
+    {
+      "id": "a08fa4e1-ab4a-4dbc-a044-8ff468d5f9c7",
+      "sourceType": "Omni",
+      "label": "Omni_source",
+      "x": 4.5,
+      "y": 3.5,
+      "z": 2,
+      "orderNumber": 0,
+      "tasks": [],
+      "sourceProperties": null
+    }
+  ],
+  "layerMaterialAssignments": [
+    {
+      "materialId": "38070ff0-8e6a-4d38-bcc5-c6328d4b0648",
+      "materialName": "SDN-AES-0.2",
+      "layerId": "8bb68fc9-e200-424c-8668-dd05bc5d1b30",
+      "layerName": "shoebox_ceiling",
+      "scatteringCoefficient": null
+    },
+    {
+      "materialId": "38070ff0-8e6a-4d38-bcc5-c6328d4b0648",
+      "materialName": "SDN-AES-0.2",
+      "layerId": "13293deb-5d4f-4ef7-bce1-9ca74bc20d6a",
+      "layerName": "shoebox_floor",
+      "scatteringCoefficient": null
+    },
+    {
+      "materialId": "38070ff0-8e6a-4d38-bcc5-c6328d4b0648",
+      "materialName": "SDN-AES-0.2",
+      "layerId": "19656b58-5edd-484f-bd23-941d15ba9e99",
+      "layerName": "shoebox_walls",
+      "scatteringCoefficient": null
+    }
+  ],
+  "localMeshSizing": [],
+  "simulationSettings": {
+    "speedOfSound": 343,
+    "gaSettings": {
+      "numberOfRays": 5000,
+      "ISMOrder": 12,
+      "isAirAbsorptionActive": false,
+      "ISMRayCount": 50000,
+      "gaSolverType": "IsmPressureRayRadiosity"
+    },
+    "dgSettings": {
+      "polynomialOrder": 4,
+      "disableBcOptimizations": null,
+      "dumpRawIrs": null,
+      "skipPostprocessing": null
+    }
+  },
+  "energyDecayThreshold": null,
+  "resultStatus": {
+    "result_code": 0,
+    "result_code_name": "Ok",
+    "message": null
+  },
+  "mesherSettings": null,
+  "metadata": null,
+  "createdAt": "2025-03-13T00:17:16.257508Z",
+  "updatedAt": "2025-03-13T00:18:34.211239Z",
+  "status": "Completed",
+  "project_id": "81addcf1-5fa1-491d-bf5e-55422fb0dfca"
+}

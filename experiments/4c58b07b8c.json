@@ -1,0 +1,31 @@
+{
+  "experiment_id": "4c58b07b8c",
+  "config": {
+    "label": "SDN",
+    "info": "source weighting = 5: specular receives all psk",
+    "flags": {
+      "specular_source_injection": true,
+      "source_weighting": 5
+    },
+    "room_parameters": {
+      "width": 9,
+      "depth": 7,
+      "height": 4,
+      "source x": 4.5,
+      "source y": 3.5,
+      "source z": 2,
+      "mic x": 2,
+      "mic y": 2,
+      "mic z": 1.5,
+      "absorption": 0.2
+    },
+    "duration": 2,
+    "fs": 44100
+  },
+  "timestamp": "2025-03-17T02:26:25.566574",
+  "fs": 44100,
+  "duration": 2,
+  "metrics": {
+    "rt60": 1.0078004535147393
+  }
+}
