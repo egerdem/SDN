@@ -359,14 +359,16 @@ class SDNExperiment:
 class SDNExperimentManager:
     """Class to manage multiple acoustic simulation experiments, store results, and provide visualization."""
     
-    def __init__(self, results_dir='results'):
+    def __init__(self, results_dir='results', is_batch_manager=False):
         """
         Initialize the experiment manager.
         
         Args:
             results_dir (str): Base directory to store experiment data
+            is_batch_manager (bool): If True, this manager handles batch processing experiments
         """
         self.results_dir = results_dir
+        self.is_batch_manager = is_batch_manager
         self.rooms = {}  # name -> Room
         self.ensure_dir_exists()
         self.load_experiments()
@@ -374,6 +376,9 @@ class SDNExperimentManager:
     def ensure_dir_exists(self):
         """Ensure the results directory exists."""
         os.makedirs(self.results_dir, exist_ok=True)
+        # Ensure the singulars directory exists if this is not a batch manager
+        if not self.is_batch_manager:
+            os.makedirs(os.path.join(self.results_dir, 'room_singulars'), exist_ok=True)
     
     def _get_room_name(self, room_parameters):
         """Generate a unique room name based on parameters."""
@@ -385,85 +390,218 @@ class SDNExperimentManager:
     
     def _get_room_dir(self, room_name):
         """Get the directory path for a room."""
-        return os.path.join(self.results_dir, room_name)
+        if not self.is_batch_manager:
+            # For singular experiments, use the room_singulars folder
+            return os.path.join(self.results_dir, 'room_singulars', room_name)
+        else:
+            # For batch experiments, use the normal structure
+            return os.path.join(self.results_dir, 'rooms', room_name)
     
+    def _get_source_dir(self, room_name, source_label):
+        """Get the directory path for a source within a room."""
+        room_dir = self._get_room_dir(room_name)
+        return os.path.join(room_dir, source_label)  
+    
+    def _get_simulation_dir(self, room_name, source_label, method, param_set):
+        """Get the directory path for a simulation within a source."""
+        source_dir = self._get_source_dir(room_name, source_label)
+        return os.path.join(source_dir, method, param_set)
+    
+    def _get_source_label_from_pos(self, source_pos):
+        """Generate a standardized label for a source position."""
+        return f"source_{source_pos[0]}_{source_pos[1]}_{source_pos[2]}"
+    
+    def _get_mic_label_from_pos(self, mic_pos):
+        """Generate a standardized label for a microphone position."""
+        return f"mic_{mic_pos[0]}_{mic_pos[1]}_{mic_pos[2]}"
+    
+    def _generate_param_set_name(self, config):
+        """Generate a standardized name for the parameter set based on the config."""
+        method = config.get('method', 'SDN')
+        param_set = ""
+        
+        if method == 'SDN':
+            # Include key SDN parameters in the name
+            flags = config.get('flags', {})
+            if 'source_weighting' in flags:
+                param_set += f"sw{flags['source_weighting']}_"
+            if flags.get('specular_source_injection', False):
+                param_set += "si_"
+            if 'scattering_matrix_update_coef' in flags:
+                param_set += f"smu{flags['scattering_matrix_update_coef']}_"
+            
+            # Remove trailing underscore
+            param_set = param_set.rstrip('_')
+            if not param_set:
+                param_set = "default"
+                
+        elif method == 'ISM':
+            # Include key ISM parameters in the name
+            max_order = config.get('max_order', 12)
+            param_set = f"order{max_order}"
+            if config.get('ray_tracing', False):
+                param_set += "_rt"
+                
+        elif method == 'TRE' or method == 'treble':
+            # Include key Treble parameters in the name
+            param_set = "hybrid"
+            if 'max_order' in config:
+                param_set += f"_order{config['max_order']}"
+                
+        else:
+            param_set = "default"
+            
+        return param_set
+
     def load_experiments(self):
         """Load all experiments from the results directory."""
         self.rooms = {}
         
-        # Check if the directory exists
-        if not os.path.exists(self.results_dir):
-            return
-        
-        # Iterate through room directories
-        for room_dir in os.listdir(self.results_dir):
-            room_path = os.path.join(self.results_dir, room_dir)
-            if not os.path.isdir(room_path):
-                continue
-                
-            # Check for room info first (preferred method)
-            room_info_path = os.path.join(room_path, 'room_info.json')
-            if os.path.exists(room_info_path):
-                try:
-                    with open(room_info_path, 'r') as f:
-                        room_info = json.load(f)
-                    # Create room with saved display name
-                    room_parameters = room_info.get('parameters', {})
-                    room = Room(room_info.get('name', room_dir), room_parameters)
-                    if 'display_name' in room_info:
-                        room.display_name = room_info['display_name']
-                except Exception as e:
-                    print(f"Error loading room info for {room_dir}: {e}")
-                    # Fallback to room parameters if room info fails
-                    room_params_path = os.path.join(room_path, 'room_parameters.json')
-                    if os.path.exists(room_params_path):
-                        with open(room_params_path, 'r') as f:
-                            room_parameters = json.load(f)
-                        room = Room(room_dir, room_parameters)
-                    else:
-                        continue  # Skip if no valid room data
-            else:
-                # Fallback to legacy room parameters
-                room_params_path = os.path.join(room_path, 'room_parameters.json')
-                if not os.path.exists(room_params_path):
+        if not self.is_batch_manager:
+            # Load singular experiments from room_singulars folder
+            singulars_dir = os.path.join(self.results_dir, 'room_singulars')
+            if os.path.exists(singulars_dir):
+                for room_name in os.listdir(singulars_dir):
+                    room_path = os.path.join(singulars_dir, room_name)
+                    if not os.path.isdir(room_path):
+                        continue
+                        
+                    # Check for room info first (preferred method)
+                    room_info_path = os.path.join(room_path, 'room_info.json')
+                    if os.path.exists(room_info_path):
+                        try:
+                            with open(room_info_path, 'r') as f:
+                                room_info = json.load(f)
+                            
+                            # Create room with saved display name
+                            room_parameters = room_info.get('parameters', {})
+                            room = Room(room_info.get('name', room_name), room_parameters)
+                            if 'display_name' in room_info:
+                                room.display_name = room_info['display_name']
+                                
+                            # Load experiments for this room
+                            for filename in os.listdir(room_path):
+                                if filename.endswith('.json') and filename not in ['room_parameters.json', 'room_info.json']:
+                                    experiment_id = filename.split('.')[0]
+                                    metadata_path = os.path.join(room_path, filename)
+                                    rir_path = os.path.join(room_path, f"{experiment_id}.npy")
+                                    
+                                    try:
+                                        # Load metadata
+                                        with open(metadata_path, 'r') as f:
+                                            metadata = json.load(f)
+                                        
+                                        # Load RIR if it exists
+                                        if os.path.exists(rir_path):
+                                            rir = np.load(rir_path)
+                                            
+                                            # Create experiment object
+                                            experiment = SDNExperiment.from_dict(metadata, rir)
+                                            room.add_experiment(experiment)
+                                    except Exception as e:
+                                        print(f"Error loading experiment {experiment_id}: {e}")
+                            
+                            self.rooms[room.name] = room
+                        except Exception as e:
+                            print(f"Error loading room {room_name}: {e}")
+        else:
+            # Load batch experiments from the structured directory
+            rooms_dir = os.path.join(self.results_dir, 'rooms')
+            if not os.path.exists(rooms_dir):
+                return
+            
+            # Iterate through room directories
+            for room_name in os.listdir(rooms_dir):
+                room_path = os.path.join(rooms_dir, room_name)
+                if not os.path.isdir(room_path):
                     continue
                     
-                with open(room_params_path, 'r') as f:
-                    room_parameters = json.load(f)
-                
-                # Create room object from legacy parameters
-                room = Room(room_dir, room_parameters)
-                
-                # Create room_info.json from room_parameters.json for future use
-                # and to standardize on a single format
+                # Load room info
                 room_info_path = os.path.join(room_path, 'room_info.json')
-                with open(room_info_path, 'w') as f:
-                    json.dump(room.to_dict(), f, indent=2)
-                    print(f"Upgraded {room_dir} to use room_info.json")
-            
-            # Load experiments for this room
-            for filename in os.listdir(room_path):
-                if filename.endswith('.json') and filename not in ['room_parameters.json', 'room_info.json']:
-                    experiment_id = filename.split('.')[0]
-                    metadata_path = os.path.join(room_path, filename)
-                    rir_path = os.path.join(room_path, f"{experiment_id}.npy")
-                    
+                if os.path.exists(room_info_path):
                     try:
-                        # Load metadata
-                        with open(metadata_path, 'r') as f:
-                            metadata = json.load(f)
+                        with open(room_info_path, 'r') as f:
+                            room_info = json.load(f)
                         
-                        # Load RIR if it exists
-                        if os.path.exists(rir_path):
-                            rir = np.load(rir_path)
+                        # Create room with saved parameters
+                        room_parameters = room_info.get('parameters', {})
+                        room = Room(room_info.get('name', room_name), room_parameters)
+                        if 'display_name' in room_info:
+                            room.display_name = room_info['display_name']
+                        
+                        # Load sources directly from room directory
+                        for source_label in os.listdir(room_path):
+                            source_path = os.path.join(room_path, source_label)
                             
-                            # Create experiment object
-                            experiment = SDNExperiment.from_dict(metadata, rir)
-                            room.add_experiment(experiment)
+                            # Skip non-directories and special files/directories
+                            if not os.path.isdir(source_path) or source_label == 'room_info.json':
+                                continue
+                            
+                            # Method folders directly under source folder (no simulations level)
+                            for method in os.listdir(source_path):
+                                method_dir = os.path.join(source_path, method)
+                                if not os.path.isdir(method_dir):
+                                    continue
+                                
+                                for param_set in os.listdir(method_dir):
+                                    param_dir = os.path.join(method_dir, param_set)
+                                    if not os.path.isdir(param_dir):
+                                        continue
+                                    
+                                    # Load configuration
+                                    config_path = os.path.join(param_dir, 'config.json')
+                                    if not os.path.exists(config_path):
+                                        continue
+                                        
+                                    try:
+                                        with open(config_path, 'r') as f:
+                                            config = json.load(f)
+                                        
+                                        # Load RIRs
+                                        rirs_path = os.path.join(param_dir, 'rirs.npy')
+                                        if not os.path.exists(rirs_path):
+                                            continue
+                                            
+                                        rirs = np.load(rirs_path)
+                                        
+                                        # Get receivers from config.json
+                                        receivers_data = config.get('receivers', [])
+                                        
+                                        # Create experiment objects for each source-receiver pair
+                                        for idx, receiver_info in enumerate(receivers_data):
+                                            if idx >= len(rirs):
+                                                break
+                                                
+                                            # Create a single experiment config
+                                            receiver_config = config.copy()
+                                            # Remove the receivers array
+                                            if 'receivers' in receiver_config:
+                                                del receiver_config['receivers']
+                                            # Add the specific receiver info
+                                            receiver_config['receiver'] = receiver_info
+                                            
+                                            # Use source info from config
+                                            source_info = config.get('source', {})
+                                            
+                                            # Create experiment object
+                                            experiment = SDNExperiment(
+                                                config=receiver_config,
+                                                rir=rirs[idx],
+                                                fs=config.get('fs', 44100),
+                                                duration=config.get('duration', 0.5),
+                                                experiment_id=receiver_info.get('experiment_id')
+                                            )
+                                            
+                                            # Add experiment to room
+                                            room.add_experiment(experiment)
+                                    except Exception as e:
+                                        print(f"Error loading simulation {param_set} for {source_label}: {e}")
+                        
+                        # Add room to manager
+                        self.rooms[room.name] = room
+                        
                     except Exception as e:
-                        print(f"Error loading experiment {experiment_id}: {e}")
-            
-            self.rooms[room.name] = room
+                        print(f"Error loading room {room_name}: {e}")
     
     def run_experiment(self, config, room_parameters, duration=0.5, fs=44100, 
                       force_rerun=False, room_name=None, method='SDN',
@@ -492,6 +630,25 @@ class SDNExperimentManager:
         
         # Handle batch processing case
         if batch_processing:
+            # Check if this manager is set up for batch processing
+            if not self.is_batch_manager:
+                # Create or get a batch manager
+                batch_manager = get_batch_manager()
+                # Delegate to batch manager
+                return batch_manager.run_experiment(
+                    config=config,
+                    room_parameters=room_parameters,
+                    duration=duration,
+                    fs=fs,
+                    force_rerun=force_rerun,
+                    room_name=room_name,
+                    method=method,
+                    batch_processing=True,
+                    source_positions=source_positions,
+                    receiver_positions=receiver_positions
+                )
+            
+            # Original batch processing code (unchanged)
             if source_positions is None or receiver_positions is None:
                 raise ValueError("Both source_positions and receiver_positions must be provided for batch processing")
             
@@ -712,24 +869,132 @@ class SDNExperimentManager:
             experiment (SDNExperiment): The experiment to save
             room_name (str): Name of the room this experiment belongs to
         """
-        room_dir = self._get_room_dir(room_name)
-        os.makedirs(room_dir, exist_ok=True)
-        
-        # Save or update room info
-        room = self.rooms.get(room_name)
-        if room:
-            room_info_path = os.path.join(room_dir, 'room_info.json')
-            with open(room_info_path, 'w') as f:
-                json.dump(room.to_dict(), f, indent=2)
-        
-        # Save experiment metadata
-        metadata_path = os.path.join(room_dir, f"{experiment.experiment_id}.json")
-        with open(metadata_path, 'w') as f:
-            json.dump(experiment.to_dict(), f, indent=2)
-        
-        # Save RIR
-        rir_path = os.path.join(room_dir, f"{experiment.experiment_id}.npy")
-        np.save(rir_path, experiment.rir)
+        if not self.is_batch_manager:
+            # Save using the old singular format - flat structure in room_singulars
+            room_dir = self._get_room_dir(room_name)
+            os.makedirs(room_dir, exist_ok=True)
+            
+            # Save or update room info
+            room = self.rooms.get(room_name)
+            if room:
+                room_info_path = os.path.join(room_dir, 'room_info.json')
+                with open(room_info_path, 'w') as f:
+                    json.dump(room.to_dict(), f, indent=2)
+            
+            # Save experiment metadata
+            metadata_path = os.path.join(room_dir, f"{experiment.experiment_id}.json")
+            with open(metadata_path, 'w') as f:
+                json.dump(experiment.to_dict(), f, indent=2)
+            
+            # Save RIR
+            rir_path = os.path.join(room_dir, f"{experiment.experiment_id}.npy")
+            np.save(rir_path, experiment.rir)
+        else:
+            # Save using the new batch format - structured directories
+            # Get source and mic positions from config
+            room_params = experiment.config.get('room_parameters', {})
+            source_pos = [
+                room_params.get('source x', 0),
+                room_params.get('source y', 0),
+                room_params.get('source z', 0)
+            ]
+            mic_pos = [
+                room_params.get('mic x', 0),
+                room_params.get('mic y', 0),
+                room_params.get('mic z', 0)
+            ]
+            
+            # Get the source label or use position-based label
+            position_id = experiment.config.get('position_id')
+            source_label = position_id.split('_to_mic_')[0] if position_id else self._get_source_label_from_pos(source_pos)
+            
+            # Get method and parameter set name
+            method = experiment.config.get('method', 'SDN')
+            param_set = self._generate_param_set_name(experiment.config)
+            
+            # Determine directories
+            room_dir = self._get_room_dir(room_name)
+            source_dir = self._get_source_dir(room_name, source_label)
+            simulation_dir = self._get_simulation_dir(room_name, source_label, method, param_set)
+            
+            # Ensure directories exist
+            os.makedirs(simulation_dir, exist_ok=True)
+            
+            # Save room info if needed
+            room = self.rooms.get(room_name)
+            if room:
+                room_info_path = os.path.join(room_dir, 'room_info.json')
+                with open(room_info_path, 'w') as f:
+                    json.dump(room.to_dict(), f, indent=2)
+            
+            # Check if we already have config.json and rirs.npy
+            config_path = os.path.join(simulation_dir, 'config.json')
+            rirs_path = os.path.join(simulation_dir, 'rirs.npy')
+            
+            config_data = {}
+            receivers = []
+            rirs = []
+            
+            # Load existing data if available
+            if os.path.exists(config_path) and os.path.exists(rirs_path):
+                try:
+                    with open(config_path, 'r') as f:
+                        config_data = json.load(f)
+                    receivers = config_data.get('receivers', [])
+                    rirs = np.load(rirs_path)
+                except Exception as e:
+                    print(f"Error loading existing data, starting fresh: {e}")
+                    config_data = {}
+                    receivers = []
+                    rirs = np.array([])
+            
+            # Create receiver info
+            receiver_info = {
+                'experiment_id': experiment.experiment_id,
+                'position': mic_pos,
+                'label': self._get_mic_label_from_pos(mic_pos),
+                'position_id': position_id,
+                'timestamp': experiment.timestamp
+            }
+            
+            # Check if this receiver already exists
+            existing_idx = -1
+            for idx, rec in enumerate(receivers):
+                if rec.get('experiment_id') == experiment.experiment_id:
+                    existing_idx = idx
+                    break
+            
+            if existing_idx >= 0:
+                # Update existing receiver data
+                receivers[existing_idx] = receiver_info
+                if len(rirs) > existing_idx:
+                    rirs[existing_idx] = experiment.rir
+            else:
+                # Add new receiver data
+                receivers.append(receiver_info)
+                if len(rirs) == 0:
+                    rirs = np.array([experiment.rir])
+                else:
+                    rirs = np.append(rirs, [experiment.rir], axis=0)
+            
+            # Update the config with source info and receivers
+            config_data = experiment.config.copy()
+            config_data['source'] = {
+                'position': source_pos,
+                'label': source_label
+            }
+            config_data['fs'] = experiment.fs
+            config_data['duration'] = experiment.duration
+            
+            # Store all receivers in the config.json
+            config_data['receivers'] = receivers
+            
+            # Save config
+            with open(config_path, 'w') as f:
+                json.dump(config_data, f, indent=2)
+            
+            # Save RIRs
+            np.save(rirs_path, rirs)
     
     def get_experiment(self, experiment_id):
         """
@@ -1805,120 +2070,126 @@ class SDNExperimentManager:
         
         return table_data, dash_columns
 
-def run_main_experiments():
-    """Run experiments from main.py configurations."""
-    # Import main module to access configurations
-    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-    import main
-    
-    # Create experiment manager
-    manager = SDNExperimentManager()
-    
-    # Determine which predefined room we're using
-    room_name = None
-    if hasattr(main, 'room_parameters'):
-        # Check if it matches a known room
-        params = main.room_parameters
-        if params == getattr(main, 'room_waspaa', None):
-            room_name = "room_waspaa"
-        elif params == getattr(main, 'room_aes', None):
-            room_name = "room_aes"
-        elif params == getattr(main, 'room_journal', None):
-            room_name = "room_journal"
-    
-    # Run ISM experiments if enabled
-    if hasattr(main, 'PLOT_ISM_with_pra') and main.PLOT_ISM_with_pra:
-        print("Running ISM experiment using pyroomacoustics")
-        max_order = getattr(main, 'pra_order', 12)
-        ray_tracing = getattr(main, 'ray_tracing_flag', False)
-        use_rand_ism = getattr(main, 'use_rand_ism', False)
-        manager.run_ism_experiment(
-            room_parameters=main.room_parameters,
-            max_order=max_order,
-            ray_tracing=ray_tracing,
-            use_rand_ism=use_rand_ism,
-            duration=getattr(main, 'duration', 0.5),
-            fs=getattr(main, 'Fs', 44100),
-            room_name=room_name
+# Singleton pattern for batch manager
+_batch_manager = None
+
+def get_batch_manager():
+    """Get or create the batch experiment manager singleton."""
+    global _batch_manager
+    if _batch_manager is None:
+        _batch_manager = SDNExperimentManager(
+            results_dir='results',
+            is_batch_manager=True
         )
-    
-    # Run SDN experiments from main.py configurations
-    if hasattr(main, 'sdn_tests') and hasattr(main, 'room_parameters'):
-        for test_name, config in main.sdn_tests.items():
-            if config.get('enabled', False):
-                print(f"Running SDN experiment: {test_name}")
-                # Ensure method is set to SDN
-                config['method'] = 'SDN'
-                manager.run_experiment(config, main.room_parameters, room_name=room_name)
-    
-    return manager
+    return _batch_manager
+
+def get_singular_manager():
+    """Get or create the singular experiment manager singleton."""
+    global _singular_manager
+    if _singular_manager is None:
+        _singular_manager = SDNExperimentManager(
+            results_dir='results',
+            is_batch_manager=False
+        )
+    return _singular_manager
+
+_singular_manager = None
 
 if __name__ == "__main__":
-    # Method 1: Run experiments directly
-    manager = SDNExperimentManager()
-    experiments = manager.get_all_experiments()
-    duration = 1
-
-    # Example room parameters
-    room_aes = {'width': 9, 'depth': 7, 'height': 4,
-                'source x': 4.5, 'source y': 3.5, 'source z': 2,
-                'mic x': 2, 'mic y': 2, 'mic z': 1.5,
-                'absorption': 0.2}
-
-    room = room_aes
-
     
-    # Run an SDN experiment
-    # single source and receiver
-    manager.run_experiment(
-        config={
-            'label': 'weighted psk',
-            'info': '',
-            'method': 'SDN',
-            'flags': {
-                'specular_source_injection': True,
-                'source_weighting': 5,
-            }
-        },
-        room_parameters=room_aes,
-        duration=duration,
-        fs=44100,
-        room_name="room_aes"
-    )
+    run_single_experiments = True
+    run_batch_experiments = False
 
-    # Method 2: Run experiments from main.py (recommended)
-    # print("\nRunning experiments from main.py configuration...")
-    # main_manager = run_main_experiments()
-    # Optionally, visualize the main experiments
-    # print("\nLaunching visualization of main.py experiments...")
-    # main_manager.plot()
+    if run_single_experiments:
+        # Method 1: Run experiments directly
+        single_manager = get_singular_manager()  # Use the singular manager for direct experiments
+        
+        duration = 1
 
-    # Generate source & receiver positions
-    receiver_positions = sa.generate_receiver_grid(room['width'], room['depth'], 5)
-    source_positions = sa.generate_source_positions(room)
+        # Example room parameters
+        room_aes = {'width': 9, 'depth': 7, 'height': 4,
+                    'source x': 4.5, 'source y': 3.5, 'source z': 2,
+                    'mic x': 2, 'mic y': 2, 'mic z': 1.5,
+                    'absorption': 0.2}
 
-    # Run the experiments in batch mode
-    experiment_ids = manager.run_experiment(
-    config={
-        'label': 'weighted psk',
-        'info': '',
-        'method': 'SDN',
-        'flags': {
-            'specular_source_injection': True,
-            'source_weighting': 5,
-        }
-    },
-    room_parameters=room_aes,
-    duration=0.5,  # Shorter duration for batch processing
-    fs=44100,
-    room_name="room_aes",
-    batch_processing=True,  # Enable batch processing
-    source_positions=source_positions,  # Provide source positions
-    receiver_positions=receiver_positions  # Provide receiver positions
-)
+        room = room_aes
 
-    print(f"Completed {len(experiment_ids)} experiments")
+        
+        # Run an SDN experiment - single source and receiver (uses singular manager)
+        single_manager.run_experiment(
+            config={
+                'label': 'weighted psk',
+                'info': '',
+                'method': 'SDN',
+                'flags': {
+                    'specular_source_injection': True,
+                    'source_weighting': 4,
+                }
+            },
+            room_parameters=room_aes,
+            duration=duration,
+            fs=44100,
+            room_name="room_aes"
+        )
 
-    # Launch visualization of direct experiments
-    print("\nLaunching visualization of direct experiments...")
-    manager.plot()
+        single_manager.run_experiment(
+            config={
+                'label': 'weighted psk',
+                'info': '',
+                'method': 'SDN',
+                'flags': {
+                    'specular_source_injection': True,
+                    'source_weighting': 5,
+                }
+            },
+            room_parameters=room_aes,
+            duration=duration,
+            fs=44100,
+            room_name="room_aes"
+        )
+
+        # Run an ISM experiment
+        single_manager.run_ism_experiment(
+            room_parameters=room_aes,
+            max_order=12,
+            ray_tracing=False,
+            duration=duration,
+            fs=44100,
+            room_name="room_aes",
+            label="",
+        )
+
+        # Launch visualization for singular experiments
+        single_manager.plot()
+
+    if run_batch_experiments:
+        # Generate source & receiver positions
+        receiver_positions = sa.generate_receiver_grid(room['width'], room['depth'], 5)
+        source_positions = sa.generate_source_positions(room)
+
+        # Run batch experiments (uses batch manager)
+        batch_manager = get_batch_manager()  # Use the batch manager for batch processing
+        experiment_ids = batch_manager.run_experiment(
+            config={
+                'label': 'weighted psk',
+                'info': '',
+                'method': 'SDN',
+                'flags': {
+                    'specular_source_injection': True,
+                    'source_weighting': 5,
+                }
+            },
+            room_parameters=room_aes,
+            duration=0.5,  # Shorter duration for batch processing
+            fs=44100,
+            room_name="room_aes",
+            batch_processing=True,  # Enable batch processing
+            source_positions=source_positions,  # Provide source positions
+            receiver_positions=receiver_positions  # Provide receiver positions
+        )
+
+        print(f"Completed {len(experiment_ids)} experiments")
+
+        # Launch visualization for batch experiments
+        print("\nLaunching visualization of batch experiments...")
+        batch_manager.plot()
