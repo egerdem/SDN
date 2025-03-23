@@ -109,3 +109,49 @@ def echoDensityProfileRaw(rir,
         output[cursor] = count  # Raw count without ERFC normalization
 
     return output[:-2*window_length_frames]
+
+import numpy as np
+from scipy.special import erfc
+
+def echo_density_profile_unweighted(rir, window_length_ms=30, fs=44100):
+    """
+    Compute the Normalized Echo Density (NED) of a Room Impulse Response (RIR)
+    using an unweighted approach.
+
+    Parameters:
+    - rir: numpy array
+        The room impulse response signal.
+    - window_length_ms: float
+        The length of the sliding window in milliseconds.
+    - fs: int
+        The sampling frequency in Hz.
+
+    Returns:
+    - ned_profile: numpy array
+        The normalized echo density profile.
+    """
+    window_length_samples = int(window_length_ms * fs / 1000)
+    half_window = window_length_samples // 2
+
+    # Pad the RIR to handle edge cases
+    padded_rir = np.pad(rir, (half_window, half_window), 'constant', constant_values=(0, 0))
+    ned_profile = np.zeros(len(rir))
+
+    # ERFC constant for Gaussian noise
+    ERFC = erfc(1 / np.sqrt(2))
+
+    for i in range(len(rir)):
+        # Extract the current window
+        window = padded_rir[i:i + window_length_samples]
+
+        # Compute mean and standard deviation
+        mean = np.mean(window)
+        std = np.std(window)
+
+        # Count samples exceeding one standard deviation from the mean
+        count = np.sum(np.abs(window - mean) > std)
+
+        # Normalize by window length and ERFC
+        ned_profile[i] = (count / window_length_samples) / ERFC
+
+    return ned_profile

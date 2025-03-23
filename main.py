@@ -13,22 +13,22 @@ import EchoDensity as ned  # Import the EchoDensity module
 import analysis as an
 import dsp
 from collections import defaultdict
-import pickle  # Added for loading pickled Treble RIR
+import pickle  # Added for loading pickled Treble RI
 
 """ Method flags """
-PLOT_SDN_BASE = True
+PLOT_SDN_BASE = False
 PLOT_SDN_Test1 = True
 PLOT_SDN_Test2 = True
-PLOT_SDN_Test3 = True
-PLOT_SDN_Test4 = True
-PLOT_SDN_Test5 = True
+PLOT_SDN_Test3 = False
+PLOT_SDN_Test4 = False
+PLOT_SDN_Test5 = False
 PLOT_SDN_Test6 = False
 PLOT_TREBLE = True
 
 PLOT_ISM = False # manual ISM
-PLOT_ISM_with_pra = True
+PLOT_ISM_with_pra = False
 PLOT_ISM_TEST = False
-pra_order = 12
+pra_order = 35
 
 """ Visualization flags """
 PLOT_ROOM = False        # 3D Room Visualisation
@@ -47,7 +47,7 @@ pulse_analysis = False
 plot_smoothed_rirs = False
 
 # Parameters
-duration = 0.5  # seconds
+duration = 1  # seconds
 Fs = 44100
 num_samples = int(Fs * duration)
 rirs = {}
@@ -98,10 +98,10 @@ sdn_tests = {
     'Test1': {
         'enabled': PLOT_SDN_Test1,
         # 'absorption': 0.2,
-        'info': "specular c5 ",
+        'info': "c1 ",
         'flags': {
             'specular_source_injection': True,
-            'source_weighting': 5,
+            'source_weighting': 1,
         # 'scattering_matrix_update_coef' : 0.05
         },
         'label': "SDN"
@@ -109,14 +109,14 @@ sdn_tests = {
     'Test2': {
         'enabled': PLOT_SDN_Test2,
         # 'absorption': 0.2,
-        'info': "specular matrix coef -0.02",
+        'info': "c5",
         'flags': {
             # "ignore_wall_absorption" : True,
             # "ignore_src_node_atten" : True,
             # "ignore_node_mic_atten" : True,
-            # 'specular_source_injection': True,
-            # 'source_weighting': 3,
-            'scattering_matrix_update_coef' : -0.02
+            'specular_source_injection': True,
+            'source_weighting': 5,
+            # 'scattering_matrix_update_coef' : -0.02
             # 'specular_scattering': True,
         },
         'label': "SDN"
@@ -187,8 +187,8 @@ def run_sdn_test(test_name, config):
     print("Running SDN test:", test_name)
     if 'absorption' in config:
     # Override absorption
-    room_parameters['absorption'] = config['absorption']
-    room_parameters['reflection'] = np.sqrt(1 - config['absorption'])
+        room_parameters['absorption'] = config['absorption']
+        room_parameters['reflection'] = np.sqrt(1 - config['absorption'])
     room.wallAttenuation = [room_parameters['reflection']] * 6
     
     # Setup signal
@@ -289,7 +289,7 @@ if __name__ == '__main__':
         # if room_parameters == room_journal:
 
         pra_room = pra.ShoeBox(room_dim, fs=Fs,
-                               materials=pra.Material(room_parameters['absorption']),
+                               materials=pra.Material(energy_absorption = room_parameters['absorption']),
                                max_order=pra_order,
                                air_absorption=False, ray_tracing=ray_tracing_flag, use_rand_ism=False)
         pra_room.set_sound_speed(343)
@@ -326,9 +326,8 @@ if __name__ == '__main__':
                 # Find the typical peak position in other RIRs (using ISM as reference if available)
                 if 'ISM' in rirs:
                     reference_peak_idx = np.argmax(np.abs(rirs['ISM']))
-        else:
-                    # If ISM is not available, use a default value based on typical direct sound arrival
-                    reference_peak_idx = int(0.005 * Fs)  # Assuming 5ms for direct sound
+                else:
+                    assert "ISM or SDN-Original RIR is required for alignment"
 
                 # Calculate the shift needed
                 shift_amount = reference_peak_idx - treble_peak_idx
@@ -349,7 +348,8 @@ if __name__ == '__main__':
 
                 # Add to the rirs dictionary
                 rir_label = f"Treble{label_suffix}"
-                rirs[rir_label] = treble_rir
+                # rirs[rir_label] = treble_rir
+                rirs[rir_label] = treble_raw
                 print(
                     f"Successfully loaded {rir_label} RIR from {file_path} and aligned it (shift: {shift_amount} samples)")
                 return True
@@ -364,42 +364,43 @@ if __name__ == '__main__':
         # Load the new Treble RIR
         load_and_align_treble_rir('rir_treble_ism12_no_air.npy', " ISM12")
 
-# Calculate ISM test RIR if needed
-if PLOT_ISM_TEST:
-    from ISM import ISM
-    
-    # Setup parameters for ISM test
-    xs = np.array([room_parameters['source x'], 
-                   room_parameters['source y'], 
-                   room_parameters['source z']])
-    xr = np.array([[room_parameters['mic x'], 
-                    room_parameters['mic y'], 
-                    room_parameters['mic z']]])
-    xr = np.transpose(xr)
-    L = np.array([room_parameters['width'], 
-                  room_parameters['depth'], 
-                  room_parameters['height']])
-    N = np.array([0, 0, 0])
-    beta = room_parameters['reflection']  # Use reflection coefficient directly
-    Tw = 11
-    Fc = 0.9
-    Rd = 0.08
+    # Calculate ISM test RIR if needed
+    if PLOT_ISM_TEST:
+        from ISM import ISM
+
+        # Setup parameters for ISM test
+        xs = np.array([room_parameters['source x'],
+                       room_parameters['source y'],
+                       room_parameters['source z']])
+        xr = np.array([[room_parameters['mic x'],
+                        room_parameters['mic y'],
+                        room_parameters['mic z']]])
+        xr = np.transpose(xr)
+        L = np.array([room_parameters['width'],
+                      room_parameters['depth'],
+                      room_parameters['height']])
+        N = np.array([0, 0, 0])
+        beta = room_parameters['reflection']  # Use reflection coefficient directly
+        Tw = 11
+        Fc = 0.9
+        Rd = 0.08
         Nt = round(Fs / 2)
-    c = 343
-    
-    # Calculate RIR using ISM test method
-    B = ISM(xr, xs, L, beta, N, Nt, Rd, [], Tw, Fc, Fs, c)
-    ism_test_rir = B[0].flatten()  # Flatten the 2D array to 1D
-    ism_test_rir = ism_test_rir / np.max(np.abs(ism_test_rir))
+        c = 343
+
+        # Calculate RIR using ISM test method
+        B = ISM(xr, xs, L, beta, N, Nt, Rd, [], Tw, Fc, Fs, c)
+        ism_test_rir = B[0].flatten()  # Flatten the 2D array to 1D
+        ism_test_rir = ism_test_rir / np.max(np.abs(ism_test_rir))
         ism_test_rir = ism_test_rir[:num_samples]
-    rirs['ISM_test'] = ism_test_rir
+        rirs['ISM_test'] = ism_test_rir
 
     # Calculate manual ISM RIR if needed
     if PLOT_ISM:
         ISM_signal = impulse_dirac  # or impulse_dirac (only change this line, not the subsequent)
         room.source.signal = ISM_signal['signal']
-
-        ism_rir, fs = calculate_ism_rir(room, max_order=6, duration=duration)
+        print("manual ISM")
+        ism_rir, fs = calculate_ism_rir(room, max_order=8, duration=duration)
+        print("takes time")
         ism_rir = ism_rir / np.max(np.abs(ism_rir))
         ism_manual_rir = ism_rir[:num_samples]
         rirs['ISM_manual'] = ism_manual_rir

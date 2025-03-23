@@ -1,18 +1,19 @@
 import os
 import json
-import pickle
+# import pickle
 import numpy as np
-import matplotlib.pyplot as plt
+import spatial_analysis as sa
+# import matplotlib.pyplot as plt
 import dash
 from dash import dcc, html, callback, Input, Output, State, dash_table
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import pandas as pd
+# from plotly.subplots import make_subplots
+# import pandas as pd
 from datetime import datetime
 import hashlib
-import importlib
+# import importlib
 import sys
-from pathlib import Path
+# from pathlib import Path
 import webbrowser
 from threading import Timer
 
@@ -40,8 +41,12 @@ class Room:
         """
         self.name = name
         self.parameters = parameters
+        # Store additional metadata for better display
+        self.parameters['room_name'] = name
         self.experiments = {}  # experiment_id -> SDNExperiment
         self.experiments_by_position = {}  # (source_pos, mic_pos) -> list of experiments
+        # Use the provided name as display name
+        self.display_name = name
         
     def _get_position_key(self, source_pos, mic_pos):
         """Create a tuple key for source-mic position."""
@@ -129,12 +134,20 @@ class Room:
                 return False
         return True
 
+    def to_dict(self):
+        """Convert room to a dictionary for serialization."""
+        return {
+            'name': self.name,
+            'display_name': self.display_name,
+            'parameters': self.parameters
+        }
+
 class SDNExperiment:
-    """Class to store and manage SDN experiment data and metadata."""
+    """Class to store and manage acoustic simulation experiment data and metadata."""
     
     def __init__(self, config, rir, fs=44100, duration=0.5, experiment_id=None, skip_metrics=False):
         """
-        Initialize an SDN experiment.
+        Initialize an acoustic simulation experiment.
         
         Args:
             config (dict): Configuration parameters for the experiment
@@ -152,8 +165,7 @@ class SDNExperiment:
         
         # Generate a unique ID if not provided
         if experiment_id is None:
-            # Create a hash of the configuration to use as ID, but exclude 'info' field
-            # as it's just a description and doesn't affect the experiment result
+            # Create a hash of the configuration to use as ID
             id_config = self._prepare_config_for_id(config)
             config_str = json.dumps(self._make_serializable(id_config), sort_keys=True)
             self.experiment_id = hashlib.md5(config_str.encode()).hexdigest()[:10]
@@ -179,11 +191,19 @@ class SDNExperiment:
         # Create a copy to avoid modifying the original
         id_config = {}  # Start with empty dict instead of copying to ensure consistent keys
         
-        # Remove purely descriptive fields
-        if 'info' in config:
-            # Don't include 'info' in id_config at all
-            pass
+        # Add simulation method
+        if 'method' in config:
+            id_config['method'] = config['method']
         
+        # Add ISM-specific parameters
+        if config.get('method') == 'ISM':
+            if 'max_order' in config:
+                id_config['max_order'] = config['max_order']
+            if 'ray_tracing' in config:
+                id_config['ray_tracing'] = config['ray_tracing']
+            if 'use_rand_ism' in config:
+                id_config['use_rand_ism'] = config['use_rand_ism']
+                
         # Keep only room parameters with numerical values
         if 'room_parameters' in config:
             id_config['room_parameters'] = {}
@@ -192,8 +212,8 @@ class SDNExperiment:
                 if isinstance(value, (int, float)):
                     id_config['room_parameters'][key] = value
         
-        # Keep only relevant flags that affect the simulation
-        if 'flags' in config:
+        # Keep only relevant flags that affect the simulation (for SDN)
+        if 'flags' in config and config.get('method') == 'SDN':
             id_config['flags'] = {}
             for key, value in config['flags'].items():
                 if key in ['source_weighting', 'specular_source_injection', 
@@ -255,22 +275,35 @@ class SDNExperiment:
     
     def get_label(self):
         """Generate a descriptive label for the experiment."""
+        method = self.config.get('method', 'SDN')
+        
         if 'label' in self.config and self.config['label']:
-            label = self.config['label']
+            label = f"{self.config['label']}"
         else:
-            label = f"SDN-{self.experiment_id[:6]}"
+            label = f""
             
         if 'info' in self.config and self.config['info']:
             label += f": {self.config['info']}"
             
+        # Add method-specific details
+        if method == 'ISM':
+            if 'max_order' in self.config:
+                label += f" order={self.config['max_order']}"
+        
+        # For debugging
+        # print(f"Generated label: {label}")
+        
         return label
     
     def get_key_parameters(self):
         """Extract and return the key parameters that define this experiment."""
         params = {}
         
-        # Add key flags if they exist
-        if 'flags' in self.config:
+        # Add method
+        params['method'] = self.config.get('method', 'SDN')
+        
+        # Add key flags if they exist (for SDN)
+        if 'flags' in self.config and params['method'] == 'SDN':
             flags = self.config['flags']
             # Focus on commonly adjusted parameters
             key_params = ['source_weighting', 'specular_source_injection', 
@@ -279,6 +312,13 @@ class SDNExperiment:
             for param in key_params:
                 if param in flags:
                     params[param] = flags[param]
+        
+        # Add ISM-specific parameters
+        if params['method'] == 'ISM':
+            if 'max_order' in self.config:
+                params['max_order'] = self.config['max_order']
+            if 'ray_tracing' in self.config:
+                params['ray_tracing'] = self.config['ray_tracing']
         
         # Add room parameters if they exist
         if 'room_parameters' in self.config:
@@ -317,7 +357,7 @@ class SDNExperiment:
 
 
 class SDNExperimentManager:
-    """Class to manage multiple SDN experiments, store results, and provide visualization."""
+    """Class to manage multiple acoustic simulation experiments, store results, and provide visualization."""
     
     def __init__(self, results_dir='results'):
         """
@@ -361,20 +401,49 @@ class SDNExperimentManager:
             if not os.path.isdir(room_path):
                 continue
                 
-            # Load room parameters
-            room_params_path = os.path.join(room_path, 'room_parameters.json')
-            if not os.path.exists(room_params_path):
-                continue
+            # Check for room info first (preferred method)
+            room_info_path = os.path.join(room_path, 'room_info.json')
+            if os.path.exists(room_info_path):
+                try:
+                    with open(room_info_path, 'r') as f:
+                        room_info = json.load(f)
+                    # Create room with saved display name
+                    room_parameters = room_info.get('parameters', {})
+                    room = Room(room_info.get('name', room_dir), room_parameters)
+                    if 'display_name' in room_info:
+                        room.display_name = room_info['display_name']
+                except Exception as e:
+                    print(f"Error loading room info for {room_dir}: {e}")
+                    # Fallback to room parameters if room info fails
+                    room_params_path = os.path.join(room_path, 'room_parameters.json')
+                    if os.path.exists(room_params_path):
+                        with open(room_params_path, 'r') as f:
+                            room_parameters = json.load(f)
+                        room = Room(room_dir, room_parameters)
+                    else:
+                        continue  # Skip if no valid room data
+            else:
+                # Fallback to legacy room parameters
+                room_params_path = os.path.join(room_path, 'room_parameters.json')
+                if not os.path.exists(room_params_path):
+                    continue
+                    
+                with open(room_params_path, 'r') as f:
+                    room_parameters = json.load(f)
                 
-            with open(room_params_path, 'r') as f:
-                room_parameters = json.load(f)
-            
-            # Create room object
-            room = Room(room_dir, room_parameters)
+                # Create room object from legacy parameters
+                room = Room(room_dir, room_parameters)
+                
+                # Create room_info.json from room_parameters.json for future use
+                # and to standardize on a single format
+                room_info_path = os.path.join(room_path, 'room_info.json')
+                with open(room_info_path, 'w') as f:
+                    json.dump(room.to_dict(), f, indent=2)
+                    print(f"Upgraded {room_dir} to use room_info.json")
             
             # Load experiments for this room
             for filename in os.listdir(room_path):
-                if filename.endswith('.json') and filename != 'room_parameters.json':
+                if filename.endswith('.json') and filename not in ['room_parameters.json', 'room_info.json']:
                     experiment_id = filename.split('.')[0]
                     metadata_path = os.path.join(room_path, filename)
                     rir_path = os.path.join(room_path, f"{experiment_id}.npy")
@@ -396,102 +465,244 @@ class SDNExperimentManager:
             
             self.rooms[room.name] = room
     
-    def run_experiment(self, config, room_parameters, duration=0.5, fs=44100, force_rerun=False):
+    def run_experiment(self, config, room_parameters, duration=0.5, fs=44100, 
+                      force_rerun=False, room_name=None, method='SDN',
+                      batch_processing=False, source_positions=None, receiver_positions=None):
         """
-        Run an SDN experiment with the given configuration.
+        Run an acoustic simulation experiment with the given configuration.
         
         Args:
-            config (dict): Configuration for the SDN experiment
+            config (dict): Configuration for the experiment
             room_parameters (dict): Room parameters
             duration (float): Duration of the simulation in seconds
             fs (int): Sampling frequency
             force_rerun (bool): If True, rerun the experiment even if it exists
+            room_name (str, optional): Explicit name for the room (e.g. 'room_aes')
+            method (str): Simulation method ('SDN', 'ISM', 'TRE', etc.)
+            batch_processing (bool): If True, run for multiple source-mic positions
+            source_positions (list): List of source positions [(x,y,z,label), ...] 
+            receiver_positions (list): List of receiver positions [(x,y,z), ...]
             
         Returns:
-            SDNExperiment: The experiment object
+            SDNExperiment or list: Single experiment or list of experiment IDs
         """
-        # Get or create room
-        room_name = self._get_room_name(room_parameters)
-        if room_name not in self.rooms:
-            room = Room(room_name, room_parameters)
-            self.rooms[room_name] = room
+        # Add method to config
+        if 'method' not in config:
+            config['method'] = method
+        
+        # Handle batch processing case
+        if batch_processing:
+            if source_positions is None or receiver_positions is None:
+                raise ValueError("Both source_positions and receiver_positions must be provided for batch processing")
             
-            # Save room parameters
-            room_dir = self._get_room_dir(room_name)
-            os.makedirs(room_dir, exist_ok=True)
-            with open(os.path.join(room_dir, 'room_parameters.json'), 'w') as f:
-                json.dump(room_parameters, f, indent=2)
+            experiment_ids = []
+            total_combinations = len(source_positions) * len(receiver_positions)
+            
+            print(f"\nRunning batch processing: {len(source_positions)} sources × {len(receiver_positions)} receivers = {total_combinations} experiments")
+            
+            # Process each source-receiver combination
+            for src_idx, src_pos in enumerate(source_positions):
+                source_x, source_y, source_z, source_label = src_pos
+                
+                print(f"\nProcessing source {src_idx+1}/{len(source_positions)}: {source_label}")
+                
+                # Process each receiver for this source
+                for rec_idx, rec_pos in enumerate(receiver_positions):
+                    mic_x, mic_y = rec_pos
+                    mic_z = room_parameters['mic z']
+                    
+                    # Create position identifier
+                    pos_id = f"{source_label}_to_mic_{rec_idx+1}"
+                    progress = ((src_idx * len(receiver_positions) + rec_idx + 1) / total_combinations) * 100
+                    print(f"  [{progress:.1f}%] Position {src_idx * len(receiver_positions) + rec_idx + 1}/{total_combinations}: {pos_id}")
+                    
+                    # Create updated room parameters with current positions
+                    current_params = room_parameters.copy()
+                    current_params.update({
+                        'source x': source_x,
+                        'source y': source_y, 
+                        'source z': source_z,
+                        'mic x': mic_x,
+                        'mic y': mic_y,
+                        'mic z': mic_z
+                    })
+                    
+                    # Add position ID to config
+                    position_config = config.copy()
+                    position_config['position_id'] = pos_id
+                    
+                    # Run single experiment with these positions
+                    try:
+                        experiment = self.run_experiment(
+                            config=position_config,
+                            room_parameters=current_params,
+                            duration=duration,
+                            fs=fs,
+                            force_rerun=force_rerun,
+                            room_name=room_name,
+                            method=method
+                        )
+                        
+                        if experiment:
+                            experiment_ids.append(experiment.experiment_id)
+                    except Exception as e:
+                        print(f"    Error: {str(e)}")
+            
+            print(f"\nCompleted {len(experiment_ids)}/{total_combinations} experiments")
+            return experiment_ids
+        
+        # Original single-position implementation (existing code)
         else:
-            room = self.rooms[room_name]
-        
-        # Create a temporary config with all parameters for ID generation
-        full_config = {
-            **config,
-            'room_parameters': room_parameters,
-            'duration': duration,
-            'fs': fs
-        }
-        
-        # Generate experiment ID
-        temp_experiment = SDNExperiment(full_config, np.array([]), skip_metrics=True)
-        experiment_id = temp_experiment.experiment_id
-        
-        # Check if experiment exists
-        if experiment_id in room.experiments and not force_rerun:
-            print(f"Experiment {experiment_id} already exists in room {room_name}. Using cached results.")
-            return room.experiments[experiment_id]
-        
-        # Setup room geometry
-        geom_room = geometry.Room(
-            room_parameters['width'], 
-            room_parameters['depth'], 
-            room_parameters['height']
-        )
-        geom_room.set_microphone(
-            room_parameters['mic x'], 
-            room_parameters['mic y'], 
-            room_parameters['mic z']
-        )
-        geom_room.set_source(
-            room_parameters['source x'], 
-            room_parameters['source y'], 
-            room_parameters['source z'],
-            signal="will be replaced", 
-            Fs=fs
-        )
-        
-        # Calculate reflection coefficient
-        reflection = np.sqrt(1 - room_parameters['absorption'])
-        geom_room.wallAttenuation = [reflection] * 6
-        
-        # Setup signal
-        num_samples = int(fs * duration)
-        impulse_dirac = geometry.Source.generate_signal('dirac', num_samples)
-        geom_room.source.signal = impulse_dirac['signal']
-        
-        # Create SDN instance with configured flags
-        sdn = DelayNetwork(geom_room, Fs=fs, label=config.get('label', ''), **config.get('flags', {}))
-        
-        # Calculate RIR
-        rir = sdn.calculate_rir(duration)
-        rir = rir / np.max(np.abs(rir))
-        
-        # Create experiment object
-        experiment = SDNExperiment(
-            config=full_config,
-            rir=rir,
-            fs=fs,
-            duration=duration,
-            experiment_id=experiment_id
-        )
-        
-        # Save experiment
-        self.save_experiment(experiment, room_name)
-        
-        # Add to room's experiments
-        room.add_experiment(experiment)
-        
-        return experiment
+            # Get or create room 
+            if room_name is None:
+                # Generate a hash-based name if not provided
+                room_name = self._get_room_name(room_parameters)
+            
+            # Check if room exists with same parameters
+            existing_room = None
+            for existing_name, room in self.rooms.items():
+                if room.matches_parameters(room_parameters):
+                    existing_room = room
+                    room_name = existing_name
+                    break
+                
+            if existing_room is None:
+                # Create new room with the specified name
+                room = Room(room_name, room_parameters)
+                self.rooms[room_name] = room
+                
+                # Save room info to disk
+                room_dir = self._get_room_dir(room_name)
+                os.makedirs(room_dir, exist_ok=True)
+                
+                # Save only room_info.json
+                room_info_path = os.path.join(room_dir, 'room_info.json')
+                with open(room_info_path, 'w') as f:
+                    json.dump(room.to_dict(), f, indent=2)
+            else:
+                room = existing_room
+            
+            # Create a temporary config with all parameters for ID generation
+            full_config = {
+                **config,
+                'room_parameters': room_parameters,
+                'duration': duration,
+                'fs': fs,
+                'method': method
+            }
+            
+            # Generate experiment ID
+            temp_experiment = SDNExperiment(full_config, np.array([]), skip_metrics=True)
+            experiment_id = temp_experiment.experiment_id
+            
+            # Check if experiment exists
+            if experiment_id in room.experiments and not force_rerun:
+                print(f"Experiment {experiment_id} already exists in room {room.display_name}. Using cached results.")
+                return room.experiments[experiment_id]
+            
+            # Setup room geometry
+            geom_room = geometry.Room(
+                room_parameters['width'], 
+                room_parameters['depth'], 
+                room_parameters['height']
+            )
+            geom_room.set_microphone(
+                room_parameters['mic x'], 
+                room_parameters['mic y'], 
+                room_parameters['mic z']
+            )
+            geom_room.set_source(
+                room_parameters['source x'], 
+                room_parameters['source y'], 
+                room_parameters['source z'],
+                signal="will be replaced", 
+                Fs=fs
+            )
+            
+            # Calculate reflection coefficient
+            reflection = np.sqrt(1 - room_parameters['absorption'])
+            geom_room.wallAttenuation = [reflection] * 6
+            
+            # Setup signal
+            num_samples = int(fs * duration)
+            impulse_dirac = geometry.Source.generate_signal('dirac', num_samples)
+            geom_room.source.signal = impulse_dirac['signal']
+            
+            # Calculate RIR based on method
+            if method == 'SDN':
+                # Get flags from config
+                flags = config.get('flags', {})
+                
+                # Create SDN instance with configured flags
+                sdn = DelayNetwork(geom_room, Fs=fs, label=config.get('label', ''), **flags)
+                
+                # Calculate RIR
+                rir = sdn.calculate_rir(duration)
+                
+            elif method == 'ISM':
+                # Import pyroomacoustics
+                import pyroomacoustics as pra
+                
+                # Get ISM parameters
+                max_order = config.get('max_order', 12)
+                ray_tracing = config.get('ray_tracing', False)
+                use_rand_ism = config.get('use_rand_ism', False)
+                
+                # Setup source and mic locations
+                source_loc = np.array([room_parameters['source x'], room_parameters['source y'], room_parameters['source z']])
+                mic_loc = np.array([room_parameters['mic x'], room_parameters['mic y'], room_parameters['mic z']])
+                room_dim = np.array([room_parameters['width'], room_parameters['depth'], room_parameters['height']])
+                
+                # Create pra room
+                pra_room = pra.ShoeBox(
+                    room_dim, 
+                    fs=fs,
+                    materials=pra.Material(room_parameters['absorption']),
+                    max_order=max_order,
+                    air_absorption=False, 
+                    ray_tracing=ray_tracing,
+                    use_rand_ism=use_rand_ism
+                )
+                pra_room.set_sound_speed(343)
+                pra_room.add_source(source_loc).add_microphone(mic_loc)
+                
+                # Compute RIR
+                pra_room.compute_rir()
+                pra_rir = pra_room.rir[0][0]
+                
+                # Process the RIR
+                global_delay = pra.constants.get("frac_delay_length") // 2
+                pra_rir = pra_rir[global_delay:]  # Shift left by removing the initial delay
+                pra_rir = np.pad(pra_rir, (0, global_delay))  # Pad with zeros at the end to maintain length
+                rir = pra_rir[:num_samples]
+                
+            elif method == 'TRE':
+                # Placeholder for Treble method
+                # This would be implemented in the future
+                raise NotImplementedError("Treble method not yet implemented")
+                
+            else:
+                raise ValueError(f"Unknown simulation method: {method}")
+            
+            # Normalize RIR
+            rir = rir / np.max(np.abs(rir))
+            
+            # Create experiment object
+            experiment = SDNExperiment(
+                config=full_config,
+                rir=rir,
+                fs=fs,
+                duration=duration,
+                experiment_id=experiment_id
+            )
+            
+            # Save experiment
+            self.save_experiment(experiment, room_name)
+            
+            # Add to room's experiments
+            room.add_experiment(experiment)
+            
+            return experiment
     
     def save_experiment(self, experiment, room_name):
         """
@@ -504,7 +715,14 @@ class SDNExperimentManager:
         room_dir = self._get_room_dir(room_name)
         os.makedirs(room_dir, exist_ok=True)
         
-        # Save metadata
+        # Save or update room info
+        room = self.rooms.get(room_name)
+        if room:
+            room_info_path = os.path.join(room_dir, 'room_info.json')
+            with open(room_info_path, 'w') as f:
+                json.dump(room.to_dict(), f, indent=2)
+        
+        # Save experiment metadata
         metadata_path = os.path.join(room_dir, f"{experiment.experiment_id}.json")
         with open(metadata_path, 'w') as f:
             json.dump(experiment.to_dict(), f, indent=2)
@@ -603,12 +821,12 @@ class SDNExperimentManager:
             current_pos = room.source_mic_pairs[highlight_pos_idx % len(room.source_mic_pairs)]
             source_pos, mic_pos = current_pos
             
-            # Add source marker
+            # Add source marker (red)
             fig.add_trace(go.Scatter(
                 x=[source_pos[0]], y=[source_pos[1]],
                 mode='markers',
                 marker=dict(
-                    color='green',
+                    color='red',
                     size=12,
                     symbol='circle',
                     line=dict(color='black', width=2)
@@ -616,12 +834,12 @@ class SDNExperimentManager:
                 name='Source'
             ))
             
-            # Add microphone marker
+            # Add microphone marker (green)
             fig.add_trace(go.Scatter(
                 x=[mic_pos[0]], y=[mic_pos[1]],
                 mode='markers',
                 marker=dict(
-                    color='red',
+                    color='green',
                     size=12,
                     symbol='circle',
                     line=dict(color='black', width=2)
@@ -636,6 +854,7 @@ class SDNExperimentManager:
         
         # Update layout
         fig.update_layout(
+            title=f"{room.display_name}: {room.dimensions_str}",
             xaxis=dict(
                 title="Width (m)",
                 range=x_range,
@@ -660,7 +879,7 @@ class SDNExperimentManager:
                 xanchor="left",
                 x=0.01
             ),
-            margin=dict(t=0, b=0, l=0, r=0),
+            margin=dict(t=30, b=0, l=0, r=0),  # Added top margin for title
             plot_bgcolor='rgba(240, 240, 240, 0.5)'
         )
         
@@ -693,10 +912,73 @@ class SDNExperimentManager:
         app = dash.Dash(__name__)
         server = app.server
         port = 8050
-        
+
+        # Add custom styles for dropdown options
+        app.index_string = '''
+        <!DOCTYPE html>
+        <html>
+            <head>
+                {%metas%}
+                <title>{%title%}</title>
+                {%favicon%}
+                {%css%}
+                <style>
+                    /* Make dropdown option text light-colored */
+                    .VirtualizedSelectOption {
+                        color: #e0e0e0 !important;
+                        background-color: #282c34 !important;
+                    }
+                    .VirtualizedSelectFocusedOption {
+                        background-color: #1e2129 !important;
+                    }
+                    /* Style for dropdown input text and selected value */
+                    .Select-value-label {
+                        color: #e0e0e0 !important;
+                    }
+                    .Select-control {
+                        background-color: #282c34 !important;
+                        border-color: #404040 !important;
+                    }
+                    .Select-menu-outer {
+                        background-color: #282c34 !important;
+                        border-color: #404040 !important;
+                    }
+                    .Select-input > input {
+                        color: #e0e0e0 !important;
+                    }
+                    /* Dropdown arrow color */
+                    .Select-arrow {
+                        border-color: #e0e0e0 transparent transparent !important;
+                    }
+                </style>
+            </head>
+            <body>
+                {%app_entry%}
+                <footer>
+                    {%config%}
+                    {%scripts%}
+                    {%renderer%}
+                </footer>
+            </body>
+        </html>
+        '''
+
         # Get list of rooms for navigation
         room_names = list(self.rooms.keys())
         current_room_idx = room_names.index(room_name)
+        
+        # Dark theme colors
+        dark_theme = {
+            'background': '#2d3038',
+            'paper_bg': '#282c34',
+            'text': '#e0e0e0',
+            'grid': 'rgba(255, 255, 255, 0.1)',
+            'button_bg': '#404040',
+            'button_text': '#ffffff',
+            'header_bg': '#1e2129',
+            'plot_bg': '#1e2129',
+            'accent': '#61dafb'
+        }
         
         # Create app layout
         app.layout = html.Div([
@@ -705,89 +987,241 @@ class SDNExperimentManager:
                 html.Div([
                     html.H2(
                         id='room-header',
-                        style={'margin': '0 20px'}
+                        style={'margin': '0 20px', 'color': dark_theme['text']}
                     ),
                     html.H3(
                         id='rt-header',
-                        style={'margin': '10px 20px', 'color': '#666'}
+                        style={'margin': '10px 20px', 'color': dark_theme['accent']}
                     )
                 ], style={'display': 'inline-block', 'position': 'relative'}),
                 html.Div([
-                    html.Button('←', id='prev-room', style={'fontSize': 24, 'marginRight': '10px'}),
-                    html.Button('→', id='next-room', style={'fontSize': 24}),
-                ], style={'position': 'absolute', 'left': '50%', 'top': '%20', 'transform': 'translateX(-50%)'}),
+                    html.Button('←', id='prev-room', style={
+                        'fontSize': 24, 
+                        'marginRight': '10px',
+                        'backgroundColor': dark_theme['button_bg'],
+                        'color': dark_theme['button_text'],
+                        'border': 'none',
+                        'borderRadius': '4px',
+                        'padding': '0px 15px'
+                    }),
+                    html.Button('→', id='next-room', style={
+                        'fontSize': 24,
+                        'backgroundColor': dark_theme['button_bg'],
+                        'color': dark_theme['button_text'],
+                        'border': 'none',
+                        'borderRadius': '4px',
+                        'padding': '0px 15px'
+                    }),
+                ], style={'position': 'absolute', 'left': '50%', 'top': '%50', 'transform': 'translateX(-50%)'}),
                 dcc.Store(id='current-room-idx', data=current_room_idx)
             ], style={'textAlign': 'center', 'margin': '20px', 'position': 'relative'}),
             
             # Main content with plots and room visualization
             html.Div([
-                # Left side - plots (75% width)
+                # Left side - plots and table (50% width instead of 75%)
                 html.Div([
-                    # Experiment table for current position
+                    # Time range selector
                     html.Div([
-                        html.H3("Active Experiments"),
+                        html.H4("Time Range:", style={'display': 'inline-block', 'marginRight': '15px', 'color': dark_theme['text']}),
+                        dcc.RadioItems(
+                            id='time-range-selector',
+                            options=[
+                                {'label': 'Early Part (50ms)', 'value': 0.05},
+                                {'label': 'First 0.5s', 'value': 0.5},
+                                {'label': 'Whole RIR', 'value': 'full'}
+                            ],
+                            value='0.05',  # Default to early part view
+                            labelStyle={'display': 'inline-block', 'marginRight': '20px', 'cursor': 'pointer'},
+                            style={'color': dark_theme['text'], 'fontSize': '14px'},
+                            inputStyle={'marginRight': '5px'}
+                        )
+                    ], style={'margin': '10px 0 0 20px', 'display': 'flex', 'alignItems': 'center'}),
+                    
+                    # Plots
+                    dcc.Tabs([
+                        dcc.Tab(label="Room Impulse Responses", children=[
+                            dcc.Graph(id='rir-plot', style={'height': '50vh'})
+                        ],
+                        style={
+                            'backgroundColor': dark_theme['paper_bg'],
+                            'color': dark_theme['text']
+                        },
+                        selected_style={
+                            'backgroundColor': dark_theme['header_bg'],
+                            'color': dark_theme['accent'],
+                            'borderTop': f'2px solid {dark_theme["accent"]}'
+                        }),
+                        dcc.Tab(label="Energy Decay Curves", children=[
+                            dcc.Graph(id='edc-plot', style={'height': '50vh'})
+                        ],
+                        style={
+                            'backgroundColor': dark_theme['paper_bg'],
+                            'color': dark_theme['text']
+                        },
+                        selected_style={
+                            'backgroundColor': dark_theme['header_bg'],
+                            'color': dark_theme['accent'],
+                            'borderTop': f'2px solid {dark_theme["accent"]}'
+                        }),
+                        dcc.Tab(label="Normalized Echo Density", children=[
+                            dcc.Graph(id='ned-plot', style={'height': '50vh'})
+                        ],
+                        style={
+                            'backgroundColor': dark_theme['paper_bg'],
+                            'color': dark_theme['text']
+                        },
+                        selected_style={
+                            'backgroundColor': dark_theme['header_bg'],
+                            'color': dark_theme['accent'],
+                            'borderTop': f'2px solid {dark_theme["accent"]}'
+                        })
+                    ], style={'backgroundColor': dark_theme['paper_bg'], 'margin': '10px 0'}),
+                    
+                    # Experiment table for current position (now below the plots)
+                    html.Div([
+                        html.H3("Active Experiments", style={'color': dark_theme['text']}),
                         dash_table.DataTable(
                             id='experiment-table',
-                            style_table={'overflowX': 'auto'},
+                            style_table={
+                                'overflowX': 'auto',
+                                'maxWidth': '100%'
+                            },
                             style_cell={
                                 'textAlign': 'left',
-                                'minWidth': '100px',  # Minimum column width
-                                'width': '150px',     # Default column width
-                                'maxWidth': '300px',  # Maximum column width
-                                'padding': '10px'
+                                'minWidth': '5px',     # Smaller minimum width
+                                'width': '100px',      # Smaller default width
+                                'maxWidth': '150px',   # Smaller maximum width
+                                'padding': '5px',      # Reduced padding
+                                'backgroundColor': dark_theme['paper_bg'],
+                                'color': dark_theme['text'],
+                                'whiteSpace': 'normal',
+                                'height': 'auto',
+                                'overflow': 'hidden',
+                                'textOverflow': 'ellipsis'
                             },
+                            style_cell_conditional=[
+                                # Generate conditional styling for each column from config
+                                {'if': {'column_id': col_config['id']},
+                                 'width': col_config['width']}
+                                for col_config in self._get_column_config()
+                                if 'width' in col_config
+                            ],
                             style_header={
-                                'backgroundColor': 'rgb(230, 230, 230)',
-                                'fontWeight': 'bold'
+                                'backgroundColor': dark_theme['header_bg'],
+                                'fontWeight': 'bold',
+                                'color': dark_theme['text'],
+                                'whiteSpace': 'normal',
+                                'height': 'auto',
+                                'textAlign': 'center'
                             },
                             style_data_conditional=[
                                 {
                                     'if': {'row_index': 'odd'},
-                                    'backgroundColor': 'rgb(248, 248, 248)'
+                                    'backgroundColor': 'rgba(255, 255, 255, 0.05)'
                                 }
                             ],
                             filter_action="native",
                             sort_action="native",
                             sort_mode="multi"
                         )
-                    ], style={'margin': '20px'}),
-                    
-                    dcc.Tabs([
-                        dcc.Tab(label="Room Impulse Responses", children=[
-                            dcc.Graph(id='rir-plot', style={'height': '60vh'})
-                        ]),
-                        dcc.Tab(label="Energy Decay Curves", children=[
-                            dcc.Graph(id='edc-plot', style={'height': '60vh'})
-                        ]),
-                        dcc.Tab(label="Normalized Echo Density", children=[
-                            dcc.Graph(id='ned-plot', style={'height': '60vh'})
-                        ])
-                    ])
-                ], style={'width': '75%', 'display': 'inline-block', 'vertical-align': 'top'}),
+                    ], style={'margin': '20px'})
+                ], style={'width': '50%', 'display': 'inline-block', 'verticalAlign': 'top'}),
                 
-                # Right side - room visualization (25% width)
+                # Middle - room visualization (25% width)
                 html.Div([
-                    # Title and source-mic navigation
+                    # Title
+                    html.H3("Room Layout (Top View)", 
+                           style={'textAlign': 'center', 'marginBottom': '5px', 'marginTop': '65px', 'color': dark_theme['text']}),
+                    
+                    # Source and receiver dropdown selectors (NEW)
                     html.Div([
-                        html.H3("Room Layout (Top View)", 
-                               style={'textAlign': 'center', 'marginBottom': '5px', 'marginTop': '0px'}),
+                        # Source selector
                         html.Div([
-                            html.Button('←', id='prev-pos', style={'fontSize': 20, 'marginRight': '10px'}),
-                            html.Button('→', id='next-pos', style={'fontSize': 20}),
-                        ], style={'textAlign': 'center', 'marginBottom': '5px'}),
-                        html.Div(id='pos-info', 
-                               style={'textAlign': 'center', 'marginBottom': '5px', 'fontSize': '14px'}),
-                        dcc.Store(id='current-pos-idx', data=0),
-                    ], style={'marginBottom': '0px', 'padding': '0px'}),
+                            html.Label("Select source", 
+                                     style={'fontSize': '14px', 'color': dark_theme['text'], 'display': 'block', 'marginBottom': '5px'}),
+                            dcc.Dropdown(
+                                id='source-selector',
+                                options=[],  # Will be populated in callback
+                                style={
+                                    'backgroundColor': dark_theme['paper_bg'],
+                                    'color': dark_theme['text'],  # Light text color for better readability
+                                    'width': '100%'
+                                },
+                                # Add dropdown style for better readability of options
+                                className='dropdown-light-text'
+                            )
+                        ], style={'width': '100%', 'marginBottom': '10px'}),
+                        
+                        # Receiver selector
+                        html.Div([
+                            html.Label("Select receiver", 
+                                     style={'fontSize': '14px', 'color': dark_theme['text'], 'display': 'block', 'marginBottom': '5px'}),
+                            dcc.Dropdown(
+                                id='receiver-selector',
+                                options=[],  # Will be populated in callback
+                                style={
+                                    'backgroundColor': dark_theme['paper_bg'],
+                                    'color': dark_theme['text'],  # Light text color for better readability
+                                    'width': '100%'
+                                },
+                                # Add dropdown style for better readability of options
+                                className='dropdown-light-text'
+                            )
+                        ], style={'width': '100%', 'marginBottom': '10px'})
+                    ], style={'padding': '0px 10px'}),
+                    
+                    
+                    # Store for current position index
+                    dcc.Store(id='current-pos-idx', data=0),
+                    
+                    # Room visualization plot
                     dcc.Graph(
                         id='room-plot',
                         style={'height': '50vh', 'marginTop': '0px'}
-                    )
-                ], style={'width': '25%', 'display': 'inline-block', 'vertical-align': 'top'})
-            ])
-        ])
+                    ),
+                    
+                    # Position navigation buttons (at bottom)
+                    html.Div([
+                        html.Div(style={'textAlign': 'center', 'marginBottom': '5px', 'fontSize': '16px', 'color': dark_theme['text']}, children="Navigate Source-Mic Pairs"),
+                        html.Button('←', id='prev-pos', style={
+                            'fontSize': 20, 
+                            'marginRight': '10px',
+                            'backgroundColor': dark_theme['button_bg'],
+                            'color': dark_theme['button_text'],
+                            'border': 'none',
+                            'borderRadius': '4px',
+                            'padding': '0px 15px'
+                        }),
+                        html.Button('→', id='next-pos', style={
+                            'fontSize': 20,
+                            'backgroundColor': dark_theme['button_bg'],
+                            'color': dark_theme['button_text'],
+                            'border': 'none',
+                            'borderRadius': '4px',
+                            'padding': '0px 15px'
+                        }),
+                    ], style={'textAlign': 'center', 'marginTop': '10px'}),
+                    
+                    # Position info text
+                    html.Div(id='pos-info', 
+                           style={'textAlign': 'center', 'marginBottom': '5px', 'marginTop': '10px', 'fontSize': '14px', 'color': dark_theme['text']}),
+                ], style={'width': '25%', 'display': 'inline-block', 'verticalAlign': 'top'}),
+                
+                # Right side - empty space (25% width) for future use
+                html.Div([
+                    # Empty space for future extensions
+                    html.H3("Future Plot Area", 
+                           style={'textAlign': 'center', 'marginBottom': '5px', 'marginTop': '65px', 'color': dark_theme['text'], 'opacity': '0.5'}),
+                ], style={'width': '25%', 'display': 'inline-block', 'verticalAlign': 'top'})
+            ], style={'display': 'flex', 'alignItems': 'flex-start'})
+        ], style={
+            'backgroundColor': dark_theme['background'],
+            'minHeight': '100vh',
+            'fontFamily': 'Arial, sans-serif',
+            'padding': '10px'
+        })
         
-        # Callback for room and position navigation
+        # Combine the navigation and dropdown callbacks into a single callback
         @app.callback(
             [Output('current-room-idx', 'data'),
              Output('current-pos-idx', 'data'),
@@ -796,17 +1230,24 @@ class SDNExperimentManager:
              Output('experiment-table', 'data'),
              Output('experiment-table', 'columns'),
              Output('room-header', 'children'),
-             Output('rt-header', 'children')],
+             Output('rt-header', 'children'),
+             Output('source-selector', 'options'),
+             Output('source-selector', 'value'),
+             Output('receiver-selector', 'options'),
+             Output('receiver-selector', 'value')],
             [Input('prev-room', 'n_clicks'),
              Input('next-room', 'n_clicks'),
              Input('prev-pos', 'n_clicks'),
-             Input('next-pos', 'n_clicks')],
+             Input('next-pos', 'n_clicks'),
+             Input('source-selector', 'value'),
+             Input('receiver-selector', 'value')],
             [State('current-room-idx', 'data'),
              State('current-pos-idx', 'data')]
         )
-        def update_navigation(prev_room_clicks, next_room_clicks, 
-                            prev_pos_clicks, next_pos_clicks,
-                            current_room_idx, current_pos_idx):
+        def update_ui(prev_room_clicks, next_room_clicks, 
+                    prev_pos_clicks, next_pos_clicks,
+                    source_str, receiver_str,
+                    current_room_idx, current_pos_idx):
             ctx = dash.callback_context
             
             # Initialize indices if they're None
@@ -818,88 +1259,201 @@ class SDNExperimentManager:
             new_room_idx = current_room_idx
             new_pos_idx = current_pos_idx
             
-            # Handle button clicks if any
+            # Get the current room
+            room = self.rooms[room_names[new_room_idx]]
+            
+            # Create a mapping of source-receiver pairs to position indices
+            pos_indices = {}
+            source_positions = {}
+            receiver_positions = {}
+            
+            for idx, pos_key in enumerate(room.source_mic_pairs):
+                source_pos, mic_pos = pos_key
+                
+                # Format source position string
+                source_str_key = f"Source ({source_pos[0]:.1f}, {source_pos[1]:.1f})"
+                source_positions[source_str_key] = source_pos
+                
+                # Format receiver position string
+                if len(room.source_mic_pairs) <= 50:
+                    receiver_str_key = f"Mic ({mic_pos[0]:.1f}, {mic_pos[1]:.1f})"
+                else:
+                    receiver_str_key = f"Mic {len(receiver_positions) + 1} ({mic_pos[0]:.1f}, {mic_pos[1]:.1f})"
+                receiver_positions[receiver_str_key] = mic_pos
+                
+                # Store the mapping
+                pos_indices[(source_str_key, receiver_str_key)] = idx
+            
+            # Handle button clicks or dropdown changes
             if ctx.triggered:
-                button_id = ctx.triggered[0]['prop_id'].split('.')[0]
+                trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
                 
                 # Handle room navigation
-                if button_id in ['prev-room', 'next-room']:
-                    if button_id == 'prev-room':
+                if trigger_id in ['prev-room', 'next-room']:
+                    if trigger_id == 'prev-room':
                         new_room_idx = (current_room_idx - 1) % len(room_names)
                     else:  # next-room
                         new_room_idx = (current_room_idx + 1) % len(room_names)
                     # Reset position index when changing rooms
                     new_pos_idx = 0
                 
-                # Handle position navigation
-                elif button_id in ['prev-pos', 'next-pos']:
-                    room = self.rooms[room_names[current_room_idx]]
+                # Handle position navigation buttons
+                elif trigger_id in ['prev-pos', 'next-pos']:
                     if room.source_mic_pairs:
-                        if button_id == 'prev-pos':
+                        if trigger_id == 'prev-pos':
                             new_pos_idx = (current_pos_idx - 1) % len(room.source_mic_pairs)
                         else:  # next-pos
                             new_pos_idx = (current_pos_idx + 1) % len(room.source_mic_pairs)
+                
+                # Handle dropdown selection changes
+                elif trigger_id in ['source-selector', 'receiver-selector']:
+                    # Only try to update if both dropdowns have values
+                    if source_str and receiver_str:
+                        pos_key = (source_str, receiver_str)
+                        if pos_key in pos_indices:
+                            new_pos_idx = pos_indices[pos_key]
             
-            # Get current room and position info
+            # Get updated room (in case room changed)
             room = self.rooms[room_names[new_room_idx]]
+            
+            # Get active data for the new position
             pos_info = room.get_position_info(new_pos_idx)
-            
-            # Get active experiments for current position
             active_experiments = room.get_experiments_for_position(new_pos_idx)
+            table_data, columns = self._prepare_table_data(active_experiments)
             
-            # Create table data for active experiments
-            table_data = []
-            for exp in active_experiments:
-                row = {
-                    'Label': exp.get_label(),
-                    'Duration (s)': exp.duration
-                }
-                
-                # Add metrics
-                for metric, value in exp.metrics.items():
-                    row[f"Metric: {metric}"] = f"{value:.3f}"
-                
-                # Add flags that affect the simulation
-                if 'flags' in exp.config:
-                    for key, value in exp.config['flags'].items():
-                        if key in ['source_weighting', 'specular_source_injection']:
-                            row[f"Flag: {key}"] = str(value)
-                
-                table_data.append(row)
-            
-            # Create columns for table
-            columns = [{"name": col, "id": col} for col in (table_data[0].keys() if table_data else [])]
-            
-            # Create room visualization with current room and highlighted position
+            # Create room visualization with current position highlighted
             room_fig = self.create_room_visualization([room], highlight_pos_idx=new_pos_idx)
+            room_fig.update_layout(
+                template="plotly_dark",
+                paper_bgcolor="#1e2129",
+                plot_bgcolor="#1e2129",
+                font={"color": "#e0e0e0"}
+            )
             
-            # Create room header text
-            room_header = f"Room: {room.name}, dim: {room.dimensions_str}, abs={room.absorption_str}"
-            rt_header = room.theoretical_rt_str
+            # Create header information
+            room_header = f"Room: {room.display_name}"
+            rt_header = f"Dimensions: {room.dimensions_str}, abs={room.absorption_str}, {room.theoretical_rt_str}"
             
-            return new_room_idx, new_pos_idx, pos_info, room_fig, table_data, columns, room_header, rt_header
+            # Re-create the sources and receivers options based on current room
+            sources = []
+            receivers = []
+            pos_indices = {}
+            
+            for idx, pos_key in enumerate(room.source_mic_pairs):
+                source_pos, mic_pos = pos_key
+                
+                # Format source position
+                source_str_key = f"Source ({source_pos[0]:.1f}, {source_pos[1]:.1f})"
+                source_opt = {'label': source_str_key, 'value': source_str_key}
+                if source_opt not in sources:
+                    sources.append(source_opt)
+                
+                # Format receiver position
+                if len(room.source_mic_pairs) <= 50:
+                    receiver_str_key = f"Mic ({mic_pos[0]:.1f}, {mic_pos[1]:.1f})"
+                else:
+                    # For large number of receivers, use numbered format
+                    receiver_count = 0
+                    for prev_idx in range(idx):
+                        prev_src, prev_mic = room.source_mic_pairs[prev_idx]
+                        if tuple(prev_mic) == tuple(mic_pos):
+                            receiver_count += 1
+                    receiver_str_key = f"Mic {receiver_count + 1} ({mic_pos[0]:.1f}, {mic_pos[1]:.1f})"
+                
+                receiver_opt = {'label': receiver_str_key, 'value': receiver_str_key}
+                if receiver_opt not in receivers:
+                    receivers.append(receiver_opt)
+                
+                # Store the position index mapping
+                pos_indices[(source_str_key, receiver_str_key)] = idx
+            
+            # Store indices for future lookups
+            app.server.pos_indices = pos_indices
+            
+            # Get the current position details for dropdown selection
+            if room.source_mic_pairs:
+                current_source_pos, current_mic_pos = room.source_mic_pairs[new_pos_idx]
+                
+                # Find the matching string representations
+                current_source = f"Source ({current_source_pos[0]:.1f}, {current_source_pos[1]:.1f})"
+                
+                if len(room.source_mic_pairs) <= 50:
+                    current_receiver = f"Mic ({current_mic_pos[0]:.1f}, {current_mic_pos[1]:.1f})"
+                else:
+                    # For large number of receivers, need to find the correct mic number
+                    mic_count = 0
+                    for idx, (src, mic) in enumerate(room.source_mic_pairs):
+                        if tuple(mic) == tuple(current_mic_pos):
+                            if idx < new_pos_idx:
+                                mic_count += 1
+                            else:
+                                break
+                    current_receiver = f"Mic {mic_count + 1} ({current_mic_pos[0]:.1f}, {current_mic_pos[1]:.1f})"
+            else:
+                current_source = None
+                current_receiver = None
+            
+            return (
+                new_room_idx,
+                new_pos_idx,
+                pos_info,
+                room_fig,
+                table_data,
+                columns,
+                room_header,
+                rt_header,
+                sources,
+                current_source,
+                receivers,
+                current_receiver
+            )
 
-        # Update plot callbacks to use new room methods
+        # Add a callback to update all three plots simultaneously based on time range selection
         @app.callback(
-            Output('rir-plot', 'figure'),
+            [Output('rir-plot', 'figure'),
+             Output('edc-plot', 'figure'),
+             Output('ned-plot', 'figure')],
             [Input('current-room-idx', 'data'),
-             Input('current-pos-idx', 'data')]
+             Input('current-pos-idx', 'data'),
+             Input('time-range-selector', 'value')]
         )
-        def update_rir_plot(room_idx, pos_idx):
-            fig = go.Figure()
+        def update_all_plots(room_idx, pos_idx, time_range):
+            if room_idx is None or pos_idx is None:
+                # Return empty figures if data is not available
+                return go.Figure(), go.Figure(), go.Figure()
             
             room = self.rooms[room_names[room_idx]]
             active_experiments = room.get_experiments_for_position(pos_idx)
             
-            for exp in active_experiments:
-                fig.add_trace(go.Scatter(
+            # Function to set the x-axis range based on selected time range
+            def set_time_range(fig, max_time=None):
+                if time_range != 'full':
+                    fig.update_xaxes(range=[0, float(time_range)])
+                elif max_time is not None:
+                    fig.update_xaxes(range=[0, max_time])
+                return fig
+            
+            # Create RIR plot
+            rir_fig = go.Figure()
+            max_time = 0
+            
+            # Number the experiments for this position
+            for idx, exp in enumerate(active_experiments, 1):
+                exp.display_id = idx  # Store the ID on the experiment
+                method = exp.config.get('method', 'SDN')
+                
+                # Create enhanced legend name with ID and method
+                legend_name = f"{idx}: {method} {exp.get_label()}"
+                
+                rir_fig.add_trace(go.Scatter(
                     x=exp.time_axis,
                     y=exp.rir,
                     mode='lines',
-                    name=exp.get_label()
+                    name=legend_name
                 ))
+                max_time = max(max_time, exp.time_axis[-1] if len(exp.time_axis) > 0 else 0)
             
-            fig.update_layout(
+            rir_fig.update_layout(
                 title="Room Impulse Responses",
                 xaxis_title="Time (s)",
                 yaxis_title="Amplitude",
@@ -909,31 +1463,29 @@ class SDNExperimentManager:
                     y=0.99,
                     xanchor="right",
                     x=0.99
-                )
+                ),
+                template="plotly_dark",
+                paper_bgcolor="#1e2129",
+                plot_bgcolor="#1e2129",
+                font={"color": "#e0e0e0"}
             )
             
-            return fig
-
-        @app.callback(
-            Output('edc-plot', 'figure'),
-            [Input('current-room-idx', 'data'),
-             Input('current-pos-idx', 'data')]
-        )
-        def update_edc_plot(room_idx, pos_idx):
-            fig = go.Figure()
-            
-            room = self.rooms[room_names[room_idx]]
-            active_experiments = room.get_experiments_for_position(pos_idx)
+            # Create EDC plot
+            edc_fig = go.Figure()
             
             for exp in active_experiments:
-                fig.add_trace(go.Scatter(
+                method = exp.config.get('method', 'SDN')
+                # Use the same legend naming format for consistency
+                legend_name = f"{exp.display_id}: {method} {exp.get_label()}"
+                
+                edc_fig.add_trace(go.Scatter(
                     x=exp.time_axis,
                     y=exp.edc,
                     mode='lines',
-                    name=exp.get_label()
+                    name=legend_name
                 ))
             
-            fig.update_layout(
+            edc_fig.update_layout(
                 title="Energy Decay Curves",
                 xaxis_title="Time (s)",
                 yaxis_title="Energy (dB)",
@@ -943,31 +1495,29 @@ class SDNExperimentManager:
                     y=0.99,
                     xanchor="right",
                     x=0.99
-                )
+                ),
+                template="plotly_dark",
+                paper_bgcolor="#1e2129",
+                plot_bgcolor="#1e2129",
+                font={"color": "#e0e0e0"}
             )
             
-            return fig
-
-        @app.callback(
-            Output('ned-plot', 'figure'),
-            [Input('current-room-idx', 'data'),
-             Input('current-pos-idx', 'data')]
-        )
-        def update_ned_plot(room_idx, pos_idx):
-            fig = go.Figure()
-            
-            room = self.rooms[room_names[room_idx]]
-            active_experiments = room.get_experiments_for_position(pos_idx)
+            # Create NED plot
+            ned_fig = go.Figure()
             
             for exp in active_experiments:
-                fig.add_trace(go.Scatter(
+                method = exp.config.get('method', 'SDN')
+                # Use the same legend naming format for consistency
+                legend_name = f"{exp.display_id}: {method} {exp.get_label()}"
+                
+                ned_fig.add_trace(go.Scatter(
                     x=exp.ned_time_axis,
                     y=exp.ned,
                     mode='lines',
-                    name=exp.get_label()
+                    name=legend_name
                 ))
             
-            fig.update_layout(
+            ned_fig.update_layout(
                 title="Normalized Echo Density",
                 xaxis_title="Time (s)",
                 yaxis_title="Normalized Echo Density",
@@ -977,10 +1527,19 @@ class SDNExperimentManager:
                     y=0.99,
                     xanchor="right",
                     x=0.99
-                )
+                ),
+                template="plotly_dark",
+                paper_bgcolor="#1e2129",
+                plot_bgcolor="#1e2129",
+                font={"color": "#e0e0e0"}
             )
             
-            return fig
+            # Apply time range to all plots
+            set_time_range(rir_fig, max_time)
+            set_time_range(edc_fig, max_time)
+            set_time_range(ned_fig, max_time)
+            
+            return rir_fig, edc_fig, ned_fig
         
         # Open browser automatically
         def open_browser():
@@ -998,51 +1557,253 @@ class SDNExperimentManager:
         # Run the app
         app.run_server(debug=True, port=port)
 
-    def _identify_potential_duplicates(self, experiments):
+
+    def run_ism_experiment(self, room_parameters, max_order=12, ray_tracing=False, use_rand_ism=False, duration=0.5, fs=44100, force_rerun=False, room_name=None, label="ISM"):
         """
-        Identify potential duplicate experiments (same parameters but different IDs).
+        Run an Image Source Method (ISM) experiment.
         
         Args:
-            experiments (list): List of SDNExperiment objects to check
+            room_parameters (dict): Room parameters
+            max_order (int): Maximum reflection order
+            ray_tracing (bool): Whether to use ray tracing
+            use_rand_ism (bool): Whether to use randomized ISM
+            duration (float): Duration of the simulation in seconds
+            fs (int): Sampling frequency
+            force_rerun (bool): If True, rerun the experiment even if it exists
+            room_name (str, optional): Explicit name for the room
+            label (str): Label for the experiment
             
         Returns:
-            dict: Dictionary mapping parameter hash to list of experiment IDs
+            SDNExperiment: The experiment object
         """
-        # Group experiments by parameter signature
-        param_groups = {}
+        # Create config
+        config = {
+            'label': label,
+            'info': "",
+            'max_order': max_order,
+            'ray_tracing': ray_tracing,
+            'use_rand_ism': use_rand_ism,
+        }
         
-        for exp in experiments:
-            # Create a simplified parameter signature for comparison
-            params = {}
-            
-            # Add flags that significantly affect the algorithm
-            if 'flags' in exp.config:
-                flags = exp.config['flags']
-                for key in ['source_weighting', 'specular_source_injection', 
-                           'scattering_matrix_update_coef', 'coef']:
-                    if key in flags:
-                        params[key] = flags[key]
-            
-            # Add room parameters
-            if 'room_parameters' in exp.config:
-                room = exp.config['room_parameters']
-                for key in ['width', 'depth', 'height', 'absorption', 
-                           'source x', 'source y', 'source z',
-                           'mic x', 'mic y', 'mic z']:
-                    if key in room:
-                        params[key] = room[key]
-            
-            # Create a string representation for this parameter set
-            param_str = json.dumps(params, sort_keys=True)
-            
-            # Group by parameter string
-            if param_str not in param_groups:
-                param_groups[param_str] = []
-            param_groups[param_str].append(exp.experiment_id)
-        
-        # Filter to only include parameter sets with multiple experiments
-        return {k: v for k, v in param_groups.items() if len(v) > 1}
+        # Run the experiment
+        return self.run_experiment(
+            config=config,
+            room_parameters=room_parameters,
+            duration=duration,
+            fs=fs,
+            force_rerun=force_rerun,
+            room_name=room_name,
+            method='ISM'
+        )
 
+    def _get_column_config(self):
+        """
+        Define the configuration for table columns.
+        
+        This single source of truth controls:
+        1. Which columns are displayed
+        2. The order of columns
+        3. The display names of columns
+        4. Any custom formatting for values
+        
+        Returns:
+            list: List of column configurations in display order
+        """
+        return [
+            # ID column (leftmost)
+            {
+                'id': '#',
+                'display': True,
+                'name': '#',
+                'width': '30px',
+            },
+            # Core columns
+            {
+                'id': 'Method',
+                'display': True,
+                'name': 'Method',
+                'width': '70px',
+            },
+            {
+                'id': 'Label',
+                'display': True,
+                'name': 'Label',
+                'width': '180px',
+            },
+
+            
+            # SDN parameters
+            {
+                'id': 'sdn_source_weighting',
+                'display': True,
+                'name': 'SDN: source_weighting',
+                'width': '100px',
+            },
+            {
+                'id': 'sdn_specular_source_injection',
+                'display': True,
+                'name': 'SDN: specular_source_injection',
+                'width': '120px',
+            },
+            {
+                'id': 'sdn_scattering_matrix_update_coef',
+                'display': True,
+                'name': 'SDN: scattering_matrix_update_coef',
+                'width': '120px',
+            },
+            {
+                'id': 'sdn_coef',
+                'display': True,
+                'name': 'SDN: coef',
+                'width': '100px',
+            },
+            {
+                'id': 'sdn_source_pressure_injection_coeff',
+                'display': True,
+                'name': 'SDN: source_pressure_injection_coeff',
+                'width': '120px',
+            },
+            {
+                'id': 'sdn_specular_scattering',
+                'display': True,
+                'name': 'SDN: specular_scattering',
+                'width': '100px',
+            },
+            
+            # ISM parameters
+            {
+                'id': 'ism_max_order',
+                'display': False,  # Hidden by default as it's in the label
+                'name': 'ISM: max_order',
+                'width': '100px',
+            },
+            {
+                'id': 'ism_ray_tracing',
+                'display': True,
+                'name': 'ISM: ray_tracing',
+                'width': '100px',
+            },
+            {
+                'id': 'ism_use_rand_ism',
+                'display': False,
+                'name': 'ISM: use_rand_ism',
+                'width': '100px',
+            },
+
+            # Metrics
+            {
+                'id': 'rt60',
+                'display': True,
+                'name': 'Metric: rt60',
+                'format': lambda x: f"{x:.3f}" if x is not None else "",
+                'width': '100px',
+            },
+
+            # duration
+            {
+                'id': 'Duration',
+                'display': True,
+                'name': 'Duration (s)',
+                'width': '80px',
+            },
+        ]
+
+    def _prepare_table_data(self, active_experiments):
+        """
+        Prepare data for the DataTable based on column configuration.
+        
+        Args:
+            active_experiments (list): List of experiments to include in the table
+            
+        Returns:
+            tuple: (table_data, columns) for the DataTable
+        """
+        # Get the column configuration
+        column_config = {col['id']: col for col in self._get_column_config()}
+        
+        # Initialize table data
+        table_data = []
+        all_column_ids = set(['#'])  # Ensure ID column is always included
+        
+        # Process each experiment
+        for idx, exp in enumerate(active_experiments, 1):
+            method = exp.config.get('method', 'SDN')
+            row = {}
+            
+            # Add row ID (1, 2, 3, ...)
+            row['#'] = idx
+            
+            # Store the ID on the experiment object for reference in plots
+            exp.display_id = idx
+            
+            # 1. Add core columns
+            row['Method'] = method
+            row['Label'] = exp.get_label()
+            row['Duration'] = exp.duration
+            
+            # 2. Add metrics
+            for metric, value in exp.metrics.items():
+                # Use column_id directly as the metric name
+                column_id = metric
+                if column_id in column_config and 'format' in column_config[column_id]:
+                    row[column_id] = column_config[column_id]['format'](value)
+                else:
+                    row[column_id] = f"{value:.3f}" if value is not None else ""
+                all_column_ids.add(column_id)
+            
+            # 3. Add method-specific parameters
+            if method == 'SDN' and 'flags' in exp.config:
+                flags = exp.config['flags']
+                for key, value in flags.items():
+                    # Use standardized column_id format
+                    column_id = f"sdn_{key}"
+                    row[column_id] = str(value)
+                    all_column_ids.add(column_id)
+            
+            elif method == 'ISM':
+                ism_params = {
+                    'max_order': 'ism_max_order', 
+                    'ray_tracing': 'ism_ray_tracing', 
+                    'use_rand_ism': 'ism_use_rand_ism'
+                }
+                for param, column_id in ism_params.items():
+                    row[column_id] = str(exp.config.get(param, False))
+                    all_column_ids.add(column_id)
+            
+            table_data.append(row)
+        
+        # Ensure all rows have entries for all columns used
+        for row in table_data:
+            for col_id in all_column_ids:
+                if col_id not in row:
+                    row[col_id] = ""
+        
+        # Build column definitions for Dash
+        dash_columns = []
+        
+        # Loop through configured columns in their specified order
+        for col_config in self._get_column_config():
+            col_id = col_config['id']
+            
+            # Only include the column if:
+            # 1. It's marked for display in the config, AND
+            # 2. It actually appears in the data or is a core column
+            if col_config['display'] and (col_id in all_column_ids or col_id in ['#', 'Method', 'Label', 'Duration']):
+                dash_columns.append({
+                    "name": col_config['name'],
+                    "id": col_id
+                })
+        
+        # Handle any dynamic columns that weren't in the config but are in the data
+        # Sort these alphabetically after the configured columns
+        for col_id in sorted(all_column_ids):
+            if col_id not in column_config:
+                dash_columns.append({
+                    "name": col_id.replace('_', ' ').title(),
+                    "id": col_id
+                })
+        
+        return table_data, dash_columns
 
 def run_main_experiments():
     """Run experiments from main.py configurations."""
@@ -1053,44 +1814,67 @@ def run_main_experiments():
     # Create experiment manager
     manager = SDNExperimentManager()
     
-    # Run experiments from main.py configurations
+    # Determine which predefined room we're using
+    room_name = None
+    if hasattr(main, 'room_parameters'):
+        # Check if it matches a known room
+        params = main.room_parameters
+        if params == getattr(main, 'room_waspaa', None):
+            room_name = "room_waspaa"
+        elif params == getattr(main, 'room_aes', None):
+            room_name = "room_aes"
+        elif params == getattr(main, 'room_journal', None):
+            room_name = "room_journal"
+    
+    # Run ISM experiments if enabled
+    if hasattr(main, 'PLOT_ISM_with_pra') and main.PLOT_ISM_with_pra:
+        print("Running ISM experiment using pyroomacoustics")
+        max_order = getattr(main, 'pra_order', 12)
+        ray_tracing = getattr(main, 'ray_tracing_flag', False)
+        use_rand_ism = getattr(main, 'use_rand_ism', False)
+        manager.run_ism_experiment(
+            room_parameters=main.room_parameters,
+            max_order=max_order,
+            ray_tracing=ray_tracing,
+            use_rand_ism=use_rand_ism,
+            duration=getattr(main, 'duration', 0.5),
+            fs=getattr(main, 'Fs', 44100),
+            room_name=room_name
+        )
+    
+    # Run SDN experiments from main.py configurations
     if hasattr(main, 'sdn_tests') and hasattr(main, 'room_parameters'):
         for test_name, config in main.sdn_tests.items():
             if config.get('enabled', False):
-                print(f"Running experiment: {test_name}")
-                manager.run_experiment(config, main.room_parameters)
+                print(f"Running SDN experiment: {test_name}")
+                # Ensure method is set to SDN
+                config['method'] = 'SDN'
+                manager.run_experiment(config, main.room_parameters, room_name=room_name)
     
     return manager
 
 if __name__ == "__main__":
+    # Method 1: Run experiments directly
+    manager = SDNExperimentManager()
+    experiments = manager.get_all_experiments()
+    duration = 1
 
-    room_waspaa = {
-        'width': 6, 'depth': 4, 'height': 7,
-        'source x': 3.6, 'source y': 1.3, 'source z': 5.3,
-        'mic x': 1.2, 'mic y': 2.4, 'mic z': 1.8,
-        'absorption': 0.1,
-    }
-
+    # Example room parameters
     room_aes = {'width': 9, 'depth': 7, 'height': 4,
                 'source x': 4.5, 'source y': 3.5, 'source z': 2,
                 'mic x': 2, 'mic y': 2, 'mic z': 1.5,
-                'absorption': 0.2,
-                }
+                'absorption': 0.2}
 
-    room_journal = {'width': 3.2, 'depth': 4, 'height': 2.7,
-                    'source x': 2, 'source y': 3., 'source z': 2,
-                    'mic x': 1, 'mic y': 1, 'mic z': 1.5,
-                    'absorption': 0.1,
-                    }
+    room = room_aes
 
-    # Create an experiment manager
-    manager = SDNExperimentManager()
-    duration = 2
-    # Run an experiment with a specific configuration
-    experiment = manager.run_experiment(
+    
+    # Run an SDN experiment
+    # single source and receiver
+    manager.run_experiment(
         config={
-            'label': 'SDN',
-            'info': 'specular node receives all the psk',
+            'label': 'weighted psk',
+            'info': '',
+            'method': 'SDN',
             'flags': {
                 'specular_source_injection': True,
                 'source_weighting': 5,
@@ -1098,57 +1882,43 @@ if __name__ == "__main__":
         },
         room_parameters=room_aes,
         duration=duration,
-        fs=44100
+        fs=44100,
+        room_name="room_aes"
     )
 
-    experiment = manager.run_experiment(
-        config={
-            'label': 'SDN',
-            'info': 'specular node receives all the psk',
-            'flags': {
-                'specular_source_injection': True,
-                'source_weighting': 4,
-            }
-        },
-        room_parameters=room_aes,
-        duration=duration,
-        fs=44100
-    )
-    room_aes["source x"] = 2
-    experiment = manager.run_experiment(
-        config={
-            'label': 'SDN',
-            'info': '',
-            'flags': {
-                # 'specular_source_injection': True,
-                # 'source_weighting': 4,
-            }
-        },
-        room_parameters=room_aes,
-        duration=duration,
-        fs=44100
-    )
+    # Method 2: Run experiments from main.py (recommended)
+    # print("\nRunning experiments from main.py configuration...")
+    # main_manager = run_main_experiments()
+    # Optionally, visualize the main experiments
+    # print("\nLaunching visualization of main.py experiments...")
+    # main_manager.plot()
 
-    experiment = manager.run_experiment(
-        config={
-            'label': 'SDN',
-            'info': '',
-            'flags': {
-                # 'specular_source_injection': True,
-                # 'source_weighting': 4,
-            }
-        },
-        room_parameters=room_journal,
-        duration=duration,
-        fs=44100
-    )
+    # Generate source & receiver positions
+    receiver_positions = sa.generate_receiver_grid(room['width'], room['depth'], 5)
+    source_positions = sa.generate_source_positions(room)
 
-    """    # Or run all experiments from main.py
-    # import main
+    # Run the experiments in batch mode
+    experiment_ids = manager.run_experiment(
+    config={
+        'label': 'weighted psk',
+        'info': '',
+        'method': 'SDN',
+        'flags': {
+            'specular_source_injection': True,
+            'source_weighting': 5,
+        }
+    },
+    room_parameters=room_aes,
+    duration=0.5,  # Shorter duration for batch processing
+    fs=44100,
+    room_name="room_aes",
+    batch_processing=True,  # Enable batch processing
+    source_positions=source_positions,  # Provide source positions
+    receiver_positions=receiver_positions  # Provide receiver positions
+)
 
-    # for test_name, config in main.sdn_tests.items():
-    #     if config.get('enabled', False):
-    #         manager.run_experiment(config, main.room_parameters)"""
+    print(f"Completed {len(experiment_ids)} experiments")
 
-    # Launch visualization
+    # Launch visualization of direct experiments
+    print("\nLaunching visualization of direct experiments...")
     manager.plot()

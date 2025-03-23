@@ -19,4 +19,7 @@ __pycache__/
 # Ignore the latex folder
 latex/
 copy_of_treble_tsdk/
+tsdk-onboarding-notebook/
+results/
+experiments/
 ```

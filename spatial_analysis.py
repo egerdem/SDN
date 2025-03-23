@@ -27,6 +27,42 @@ def generate_receiver_grid(room_width: float, room_depth: float, n_points: int =
     X, Y = np.meshgrid(x, y)
     return list(zip(X.flatten(), Y.flatten()))
 
+
+def generate_source_positions(room_params: dict) -> list:
+    """Create a list of source positions within the room.
+
+    Args:
+        room_params (dict): Room parameters including dimensions and source positions.
+            Must contain 'width', 'depth', and 'source z' keys.
+
+    Returns:
+        If method is "sdn": List of (x, y, z) position tuples
+    """
+    # Extract room dimensions
+    room_width = room_params['width']
+    room_depth = room_params['depth']
+    source_z = room_params['source z']
+
+    # Define source positions
+    source_positions = [
+        # Source in the middle of the room
+        (room_width / 2, room_depth / 2, source_z, "Center_Source"),
+
+        # Source in the lower left corner
+        (1.0, 1.0, source_z, "Lower_Left_Source"),
+
+        # Source in the upper right corner, offset from the right wall
+        (room_width - 0.5, room_depth - 1.0, source_z, "Upper_Right_Source"),
+
+        # Source at the top middle wall
+        (room_width / 2, room_depth - 1.0, source_z, "Top_Middle_Source")
+    ]
+
+    # return position tuples for SDN
+    sources = [(pos[0], pos[1], pos[2], pos[3]) for pos in source_positions]
+
+    return sources
+
 def plot_rirs(rir_methods: Dict, receiver_positions: List[Tuple[float, float]],
              selected_positions: List[int] = None, Fs: int = 44100):
     """Plot RIRs from different methods at specified receiver positions.

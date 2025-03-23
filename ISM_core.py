@@ -49,6 +49,8 @@ class ISMNetwork:
         
         # Calculate gain including wall reflections
         reflection_gain = self.room.wallAttenuation[0] ** reflection_order  # Assuming uniform wall properties
+        # reflection_gain = 0.96 ** reflection_order  # Assuming uniform wall properties
+
         # reflection_gain = 1
         # distance_gain = self.c / (self.Fs * distance)  # 1/r law
         distance_gain = 1 / distance  # 1/r law

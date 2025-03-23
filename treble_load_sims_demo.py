@@ -38,10 +38,10 @@ results_1 = simulation_1.get_results_object(res_dir1)  # Using simulation_1 for 
 results_2 = simulation_0.get_results_object(res_dir2)  # Using simulation_0 for res_dir2
 
 # Display the results overview for each simulation
-# print("\nDisplaying results overview for Simulation 1:")
+print("\nDisplaying results overview for Simulation 1:")
 # results_1.plot()
 
-# print("\nDisplaying results overview for Simulation 0:")
+print("\nDisplaying results overview for Simulation 0:")
 # results_2.plot()
 
 
@@ -63,8 +63,18 @@ results_2 = simulation_0.get_results_object(res_dir2)  # Using simulation_0 for 
 treble_ir_1 = results_1.get_mono_ir("Omni_source", "mono_receiver")
 treble_ir_2 = results_2.get_mono_ir("Omni_source", "mono_receiver")
 
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('MacOSX')
+# Get unpadded array
+data = treble_ir_1.unpadded_data()
+time = treble_ir_1.unpadded_time()
+plt.plot(data)
+plt.plot(treble_ir_1.data)
+plt.legend(["Unpadded", "Padded"])
+plt.show()
 # Make a plot with each of those impulse responses in there
-treble_ir_1.plot(comparison={"s0r0": treble_ir_2})
+treble_ir_1.plot(comparison={"s0r0": data})
 
 # plot.results_parameters_plot_widget(res_obj.get_acoustic_parameters(simulation.sources[0], simulation.receivers[0]))
 # treble_ir = res_obj.get_mono_ir("Omni_source", "mono_receiver")
