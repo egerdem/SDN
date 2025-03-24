@@ -176,7 +176,10 @@ class SDNExperimentVisualizer:
                 x=0.01
             ),
             margin=dict(t=30, b=0, l=0, r=0),
-            plot_bgcolor='rgba(240, 240, 240, 0.5)'
+            plot_bgcolor='#1e2129',
+            paper_bgcolor='#282c34',
+            font={"color": "#e0e0e0"},
+            template="plotly_dark"
         )
         
         return fig
@@ -291,10 +294,18 @@ class SDNExperimentVisualizer:
 
                 # Middle - room visualization
                 html.Div([
-                    html.H3("Room Layout ***(Top View)",
+                    html.H3("Room Layout (Top View)",
                            style={'textAlign': 'center', 'marginBottom': '5px', 'marginTop': '65px', 'color': dark_theme['text']}),
                     dcc.Store(id='current-pos-idx', data=0),
-                    dcc.Graph(id='room-plot', style={'height': '50vh', 'marginTop': '0px'}),
+                    dcc.Graph(
+                        id='room-plot',
+                        style={
+                            'height': '50vh',
+                            'marginTop': '0px',
+                            'backgroundColor': dark_theme['paper_bg']
+                        },
+                        config={'displayModeBar': True}
+                    ),
                     
                     # Source and receiver dropdown selectors
                     html.Div([
