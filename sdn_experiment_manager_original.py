@@ -50,7 +50,10 @@ class Room:
         
     def _get_position_key(self, source_pos, mic_pos):
         """Create a tuple key for source-mic position."""
-        return (tuple(source_pos), tuple(mic_pos))
+        # Round to 6 decimal places to avoid floating point comparison issues
+        source_tuple = tuple(round(x, 6) for x in source_pos)
+        mic_tuple = tuple(round(x, 6) for x in mic_pos)
+        return (source_tuple, mic_tuple)
         
     @property
     def dimensions_str(self):
@@ -73,41 +76,24 @@ class Room:
         if experiment.experiment_id in self.experiments:
             # Just update the experiment if it already exists
             self.experiments[experiment.experiment_id] = experiment
-            # Update in position-based dictionary if it exists there
-            for pos_list in self.experiments_by_position.values():
-                for i, exp in enumerate(pos_list):
-                    if exp.experiment_id == experiment.experiment_id:
-                        pos_list[i] = experiment
+            # No need to add to source-mic pairs again as it's already there
             return
             
         # Add to main experiments dictionary
         self.experiments[experiment.experiment_id] = experiment
         
-        # Get source and mic positions from config
-        room_params = experiment.config.get('room_parameters', {})
-        
-        # For batch processing, check if positions are in receiver info
-        receiver_info = experiment.config.get('receiver', {})
-        if receiver_info and 'position' in receiver_info:
-            mic_pos = receiver_info['position']
-        else:
-            # Use standard room parameters
-            mic_pos = [
-                room_params.get('mic x', 0),
-                room_params.get('mic y', 0),
-                room_params.get('mic z', 0)
-            ]
-            
-        # Similarly for source position
-        source_info = experiment.config.get('source', {})
-        if source_info and 'position' in source_info:
-            source_pos = source_info['position']
-        else:
-            source_pos = [
-                room_params.get('source x', 0),
-                room_params.get('source y', 0),
-                room_params.get('source z', 0)
-            ]
+        # Get source and mic positions
+        room_params = experiment.config['room_parameters']
+        source_pos = [
+            room_params['source x'],
+            room_params['source y'],
+            room_params['source z']
+        ]
+        mic_pos = [
+            room_params['mic x'],
+            room_params['mic y'],
+            room_params['mic z']
+        ]
         
         # Add to position-based dictionary
         pos_key = self._get_position_key(source_pos, mic_pos)
@@ -117,10 +103,7 @@ class Room:
         # Check if experiment is already in the list for this position (prevent duplicates)
         if not any(exp.experiment_id == experiment.experiment_id for exp in self.experiments_by_position[pos_key]):
             self.experiments_by_position[pos_key].append(experiment)
-            
-        # print("Added experiment to position:", pos_key)
-        # print("Total positions:", len(self.experiments_by_position))
-        
+    
     def get_experiments_for_position(self, pos_idx):
         """Get all experiments for a given source-mic position index."""
         if not self.source_mic_pairs:
@@ -404,10 +387,6 @@ class SDNExperimentManager:
         self.ensure_dir_exists()
         self.load_experiments()
     
-    def _get_results_dir(self):
-        """Get the base results directory."""
-        return self.results_dir
-        
     def ensure_dir_exists(self):
         """Ensure the results directory exists."""
         os.makedirs(self.results_dir, exist_ok=True)
@@ -487,10 +466,11 @@ class SDNExperimentManager:
             param_set = "default"
             
         return param_set
-
+    
     def load_experiments(self):
         """Load all experiments from the results directory."""
         self.rooms = {}
+        loaded_experiment_ids = set()  # Track already loaded experiment IDs
         
         if not self.is_batch_manager:
             # Load singular experiments from room_singulars folder
@@ -507,17 +487,22 @@ class SDNExperimentManager:
                         try:
                             with open(room_info_path, 'r') as f:
                                 room_info = json.load(f)
-                            
+                                
                             # Create room with saved display name
                             room_parameters = room_info.get('parameters', {})
                             room = Room(room_info.get('name', room_name), room_parameters)
                             if 'display_name' in room_info:
                                 room.display_name = room_info['display_name']
-                                
+                            
                             # Load experiments for this room
                             for filename in os.listdir(room_path):
                                 if filename.endswith('.json') and filename not in ['room_parameters.json', 'room_info.json']:
                                     experiment_id = filename.split('.')[0]
+                                    
+                                    # Skip if already loaded
+                                    if experiment_id in loaded_experiment_ids:
+                                        continue
+                                        
                                     metadata_path = os.path.join(room_path, filename)
                                     rir_path = os.path.join(room_path, f"{experiment_id}.npy")
                                     
@@ -532,22 +517,14 @@ class SDNExperimentManager:
                                             
                                             # Create experiment object
                                             experiment = SDNExperiment.from_dict(metadata, rir)
-                                            # Only add experiment if successfully loaded
-                                            if experiment and hasattr(experiment, 'experiment_id'):
-                                                room.add_experiment(experiment)
-                                            else:
-                                                print(f"Skipping experiment {experiment_id}: Invalid experiment object")
+                                            room.add_experiment(experiment)
+                                            loaded_experiment_ids.add(experiment_id)
                                     except Exception as e:
                                         print(f"Error loading experiment {experiment_id}: {e}")
-                                        continue  # Skip this experiment and continue with the next
                             
-                            # Only add room if it has valid experiments
-                            if room.experiments:
-                                self.rooms[room.name] = room
-                            
+                            self.rooms[room.name] = room
                         except Exception as e:
                             print(f"Error loading room {room_name}: {e}")
-                            continue  # Skip this room and continue with the next
         else:
             # Load batch experiments from the structured directory
             rooms_dir = os.path.join(self.results_dir, 'rooms')
@@ -616,6 +593,13 @@ class SDNExperimentManager:
                                             if idx >= len(rirs):
                                                 break
                                                 
+                                            # Get experiment ID from receiver info
+                                            experiment_id = receiver_info.get('experiment_id')
+                                            
+                                            # Skip if already loaded
+                                            if experiment_id in loaded_experiment_ids:
+                                                continue
+                                                
                                             # Create a single experiment config
                                             receiver_config = config.copy()
                                             # Remove the receivers array
@@ -633,24 +617,20 @@ class SDNExperimentManager:
                                                 rir=rirs[idx],
                                                 fs=config.get('fs', 44100),
                                                 duration=config.get('duration', 0.5),
-                                                experiment_id=receiver_info.get('experiment_id')
+                                                experiment_id=experiment_id
                                             )
                                             
-                                            # Add experiment to room
-                                            if experiment and hasattr(experiment, 'experiment_id'):
-                                                room.add_experiment(experiment)
-                                            else:
-                                                print(f"Skipping experiment in {param_dir}: Invalid experiment object")
+                                            # Add experiment to room and track its ID
+                                            room.add_experiment(experiment)
+                                            loaded_experiment_ids.add(experiment_id)
                                     except Exception as e:
                                         print(f"Error loading simulation {param_set} for {source_label}: {e}")
                         
-                        # Only add room if it has valid experiments
-                        if room.experiments:
-                            self.rooms[room.name] = room
+                        # Add room to manager
+                        self.rooms[room.name] = room
                         
                     except Exception as e:
                         print(f"Error loading room {room_name}: {e}")
-                        continue  # Skip this room and continue with the next
     
     def run_experiment(self, config, room_parameters, duration=0.5, fs=44100, 
                       force_rerun=False, room_name=None, method='SDN',
@@ -676,7 +656,7 @@ class SDNExperimentManager:
         # Add method to config
         if 'method' not in config:
             config['method'] = method
-        
+            
         # Handle batch processing case
         if batch_processing:
             # Check if this manager is set up for batch processing
@@ -763,7 +743,7 @@ class SDNExperimentManager:
             if room_name is None:
                 # Generate a hash-based name if not provided
                 room_name = self._get_room_name(room_parameters)
-            
+                
             # Check if room exists with same parameters
             existing_room = None
             for existing_name, room in self.rooms.items():
@@ -771,7 +751,7 @@ class SDNExperimentManager:
                     existing_room = room
                     room_name = existing_name
                     break
-                
+                    
             if existing_room is None:
                 # Create new room with the specified name
                 room = Room(room_name, room_parameters)
@@ -787,134 +767,134 @@ class SDNExperimentManager:
                     json.dump(room.to_dict(), f, indent=2)
             else:
                 room = existing_room
+        
+        # Create a temporary config with all parameters for ID generation
+        full_config = {
+            **config,
+            'room_parameters': room_parameters,
+            'duration': duration,
+            'fs': fs,
+            'method': method
+        }
+        
+        # Generate experiment ID
+        temp_experiment = SDNExperiment(full_config, np.array([]), skip_metrics=True)
+        experiment_id = temp_experiment.experiment_id
+        
+        # Check if experiment exists
+        if experiment_id in room.experiments and not force_rerun:
+            print(f"Experiment {experiment_id} already exists in room {room.display_name}. Using cached results.")
+            return room.experiments[experiment_id]
+        
+        # Setup room geometry
+        geom_room = geometry.Room(
+            room_parameters['width'], 
+            room_parameters['depth'], 
+            room_parameters['height']
+        )
+        geom_room.set_microphone(
+            room_parameters['mic x'], 
+            room_parameters['mic y'], 
+            room_parameters['mic z']
+        )
+        geom_room.set_source(
+            room_parameters['source x'], 
+            room_parameters['source y'], 
+            room_parameters['source z'],
+            signal="will be replaced", 
+            Fs=fs
+        )
+        
+        # Calculate reflection coefficient
+        reflection = np.sqrt(1 - room_parameters['absorption'])
+        geom_room.wallAttenuation = [reflection] * 6
+        
+        # Setup signal
+        num_samples = int(fs * duration)
+        print(" num_samples: ", num_samples)
+        impulse_dirac = geometry.Source.generate_signal('dirac', num_samples)
+        geom_room.source.signal = impulse_dirac['signal']
+        
+        # Calculate RIR based on method
+        if method == 'SDN':
+            # Get flags from config
+            flags = config.get('flags', {})
             
-            # Create a temporary config with all parameters for ID generation
-            full_config = {
-                **config,
-                'room_parameters': room_parameters,
-                'duration': duration,
-                'fs': fs,
-                'method': method
-            }
+            # Create SDN instance with configured flags
+            sdn = DelayNetwork(geom_room, Fs=fs, label=config.get('label', ''), **flags)
             
-            # Generate experiment ID
-            temp_experiment = SDNExperiment(full_config, np.array([]), skip_metrics=True)
-            experiment_id = temp_experiment.experiment_id
+            # Calculate RIR
+            rir = sdn.calculate_rir(duration)
             
-            # Check if experiment exists
-            if experiment_id in room.experiments and not force_rerun:
-                print(f"Experiment {experiment_id} already exists in room {room.display_name}. Using cached results.")
-                return room.experiments[experiment_id]
+        elif method == 'ISM':
+            # Import pyroomacoustics
+            import pyroomacoustics as pra
             
-            # Setup room geometry
-            geom_room = geometry.Room(
-                room_parameters['width'], 
-                room_parameters['depth'], 
-                room_parameters['height']
-            )
-            geom_room.set_microphone(
-                room_parameters['mic x'], 
-                room_parameters['mic y'], 
-                room_parameters['mic z']
-            )
-            geom_room.set_source(
-                room_parameters['source x'], 
-                room_parameters['source y'], 
-                room_parameters['source z'],
-                signal="will be replaced", 
-                Fs=fs
-            )
+            # Get ISM parameters
+            max_order = config.get('max_order', 12)
+            ray_tracing = config.get('ray_tracing', False)
+            use_rand_ism = config.get('use_rand_ism', False)
             
-            # Calculate reflection coefficient
-            reflection = np.sqrt(1 - room_parameters['absorption'])
-            geom_room.wallAttenuation = [reflection] * 6
+            # Setup source and mic locations
+            source_loc = np.array([room_parameters['source x'], room_parameters['source y'], room_parameters['source z']])
+            mic_loc = np.array([room_parameters['mic x'], room_parameters['mic y'], room_parameters['mic z']])
+            room_dim = np.array([room_parameters['width'], room_parameters['depth'], room_parameters['height']])
             
-            # Setup signal
-            num_samples = int(fs * duration)
-            print(" num_samples: ", num_samples)
-            impulse_dirac = geometry.Source.generate_signal('dirac', num_samples)
-            geom_room.source.signal = impulse_dirac['signal']
-            
-            # Calculate RIR based on method
-            if method == 'SDN':
-                # Get flags from config
-                flags = config.get('flags', {})
-                
-                # Create SDN instance with configured flags
-                sdn = DelayNetwork(geom_room, Fs=fs, label=config.get('label', ''), **flags)
-                
-                # Calculate RIR
-                rir = sdn.calculate_rir(duration)
-                
-            elif method == 'ISM':
-                # Import pyroomacoustics
-                import pyroomacoustics as pra
-                
-                # Get ISM parameters
-                max_order = config.get('max_order', 12)
-                ray_tracing = config.get('ray_tracing', False)
-                use_rand_ism = config.get('use_rand_ism', False)
-                
-                # Setup source and mic locations
-                source_loc = np.array([room_parameters['source x'], room_parameters['source y'], room_parameters['source z']])
-                mic_loc = np.array([room_parameters['mic x'], room_parameters['mic y'], room_parameters['mic z']])
-                room_dim = np.array([room_parameters['width'], room_parameters['depth'], room_parameters['height']])
-                
-                # Create pra room
-                pra_room = pra.ShoeBox(
-                    room_dim, 
-                    fs=fs,
-                    materials=pra.Material(room_parameters['absorption']),
-                    max_order=max_order,
-                    air_absorption=False, 
-                    ray_tracing=ray_tracing,
-                    use_rand_ism=use_rand_ism
-                )
-                pra_room.set_sound_speed(343)
-                pra_room.add_source(source_loc).add_microphone(mic_loc)
-                
-                # Compute RIR
-                pra_room.compute_rir()
-                pra_rir = pra_room.rir[0][0]
-                
-                # Process the RIR
-                global_delay = pra.constants.get("frac_delay_length") // 2
-                pra_rir = pra_rir[global_delay:]  # Shift left by removing the initial delay
-                pra_rir = np.pad(pra_rir, (0, global_delay))  # Pad with zeros at the end to maintain length
-                if len(pra_rir) < num_samples:
-                # Pad with zeros to reach num_samples
-                    rir = np.pad(pra_rir, (0, num_samples - len(pra_rir)))
-                else:
-                # Truncate if longer
-                    rir = pra_rir[:num_samples]
-                
-            elif method == 'TRE':
-                # Placeholder for Treble method
-                # This would be implemented in the future
-                raise NotImplementedError("Treble method not yet implemented")
-                
-            else:
-                raise ValueError(f"Unknown simulation method: {method}")
-            
-            # Normalize RIR
-            rir = rir / np.max(np.abs(rir))
-            
-            # Create experiment object
-            experiment = SDNExperiment(
-                config=full_config,
-                rir=rir,
+            # Create pra room
+            pra_room = pra.ShoeBox(
+                room_dim, 
                 fs=fs,
-                duration=duration,
-                experiment_id=experiment_id
+                materials=pra.Material(room_parameters['absorption']),
+                max_order=max_order,
+                air_absorption=False, 
+                ray_tracing=ray_tracing,
+                use_rand_ism=use_rand_ism
             )
+            pra_room.set_sound_speed(343)
+            pra_room.add_source(source_loc).add_microphone(mic_loc)
             
-            # Save experiment
-            self.save_experiment(experiment, room_name)
+            # Compute RIR
+            pra_room.compute_rir()
+            pra_rir = pra_room.rir[0][0]
             
-            # Add to room's experiments
-            room.add_experiment(experiment)
+            # Process the RIR
+            global_delay = pra.constants.get("frac_delay_length") // 2
+            pra_rir = pra_rir[global_delay:]  # Shift left by removing the initial delay
+            pra_rir = np.pad(pra_rir, (0, global_delay))  # Pad with zeros at the end to maintain length
+            if len(pra_rir) < num_samples:
+                # Pad with zeros to reach num_samples
+                rir = np.pad(pra_rir, (0, num_samples - len(pra_rir)))
+            else:
+                # Truncate if longer
+                rir = pra_rir[:num_samples]
             
-            return experiment
+        elif method == 'TRE':
+            # Placeholder for Treble method
+            # This would be implemented in the future
+            raise NotImplementedError("Treble method not yet implemented")
+            
+        else:
+            raise ValueError(f"Unknown simulation method: {method}")
+        
+        # Normalize RIR
+        rir = rir / np.max(np.abs(rir))
+        
+        # Create experiment object
+        experiment = SDNExperiment(
+            config=full_config,
+            rir=rir,
+            fs=fs,
+            duration=duration,
+            experiment_id=experiment_id
+        )
+        
+        # Save experiment
+        self.save_experiment(experiment, room_name)
+        
+        # Add to room's experiments
+        room.add_experiment(experiment)
+        
+        return experiment
     
     def save_experiment(self, experiment, room_name):
         """
@@ -1052,14 +1032,14 @@ class SDNExperimentManager:
             
             # Save RIRs
             np.save(rirs_path, rirs)
-
+    
     def get_experiment(self, experiment_id):
         """
         Get an experiment by ID.
-
+        
         Args:
             experiment_id (str): The ID of the experiment
-
+            
         Returns:
             SDNExperiment: The experiment object
         """
@@ -1067,14 +1047,14 @@ class SDNExperimentManager:
             if experiment_id in room.experiments:
                 return room.experiments[experiment_id]
         return None
-
+    
     def get_experiments_by_label(self, label):
         """
         Get experiments by label.
-
+        
         Args:
             label (str): The label to search for
-
+            
         Returns:
             list: List of matching experiments
         """
@@ -1082,11 +1062,11 @@ class SDNExperimentManager:
         for room in self.rooms.values():
             experiments.extend([exp for exp in room.experiments.values() if label in exp.get_label()])
         return experiments
-
+    
     def get_all_experiments(self):
         """
         Get all experiments.
-
+        
         Returns:
             list: List of all experiments
         """
@@ -1094,7 +1074,7 @@ class SDNExperimentManager:
         for room in self.rooms.values():
             experiments.extend(list(room.experiments.values()))
         return experiments
-
+    
     def create_room_visualization(self, experiments, highlight_pos_idx=None):
         """
         Create a 2D top-view visualization of the room with source and receiver positions.
@@ -1147,10 +1127,12 @@ class SDNExperimentManager:
                 source_pos, mic_pos = src_mic_pair
                 
                 # Add to unique positions lists if not already present
-                if all(not np.array_equal(source_pos, pos) for pos in source_positions):
-                    source_positions.append(source_pos)
-                if all(not np.array_equal(mic_pos, pos) for pos in mic_positions):
-                    mic_positions.append(mic_pos)
+                source_tuple = tuple(source_pos)
+                mic_tuple = tuple(mic_pos)
+                if source_tuple not in source_positions:
+                    source_positions.append(source_tuple)
+                if mic_tuple not in mic_positions:
+                    mic_positions.append(mic_tuple)
             
             # Add all sources with low opacity
             x_sources = [pos[0] for pos in source_positions]
@@ -1333,7 +1315,7 @@ class SDNExperimentManager:
             </body>
         </html>
         '''
-
+        
         # Get list of rooms for navigation
         room_names = list(self.rooms.keys())
         current_room_idx = room_names.index(room_name)
@@ -1501,9 +1483,9 @@ class SDNExperimentManager:
                 # Middle - room visualization (25% width)
                 html.Div([
                     # Title
-                    html.H3("Room Layout (Top View)", 
-                           style={'textAlign': 'center', 'marginBottom': '5px', 'marginTop': '65px', 'color': dark_theme['text']}),
-                    
+                        html.H3("Room Layout (Top View)", 
+                               style={'textAlign': 'center', 'marginBottom': '5px', 'marginTop': '65px', 'color': dark_theme['text']}),
+
                     # Source and receiver dropdown selectors (NEW)
                     html.Div([
                         # Source selector
@@ -1543,7 +1525,7 @@ class SDNExperimentManager:
                     
                     
                     # Store for current position index
-                    dcc.Store(id='current-pos-idx', data=0),
+                        dcc.Store(id='current-pos-idx', data=0),
                     
                     # Room visualization plot
                     dcc.Graph(
@@ -1552,25 +1534,25 @@ class SDNExperimentManager:
                     ),
                     
                     # Position navigation buttons (at bottom)
-                    html.Div([
+                        html.Div([
                         html.Div(style={'textAlign': 'center', 'marginBottom': '5px', 'fontSize': '16px', 'color': dark_theme['text']}, children="Navigate Source-Mic Pairs"),
-                        html.Button('←', id='prev-pos', style={
-                            'fontSize': 20, 
-                            'marginRight': '10px',
-                            'backgroundColor': dark_theme['button_bg'],
-                            'color': dark_theme['button_text'],
-                            'border': 'none',
-                            'borderRadius': '4px',
-                            'padding': '0px 15px'
-                        }),
-                        html.Button('→', id='next-pos', style={
-                            'fontSize': 20,
-                            'backgroundColor': dark_theme['button_bg'],
-                            'color': dark_theme['button_text'],
-                            'border': 'none',
-                            'borderRadius': '4px',
-                            'padding': '0px 15px'
-                        }),
+                            html.Button('←', id='prev-pos', style={
+                                'fontSize': 20, 
+                                'marginRight': '10px',
+                                'backgroundColor': dark_theme['button_bg'],
+                                'color': dark_theme['button_text'],
+                                'border': 'none',
+                                'borderRadius': '4px',
+                                'padding': '0px 15px'
+                            }),
+                            html.Button('→', id='next-pos', style={
+                                'fontSize': 20,
+                                'backgroundColor': dark_theme['button_bg'],
+                                'color': dark_theme['button_text'],
+                                'border': 'none',
+                                'borderRadius': '4px',
+                                'padding': '0px 15px'
+                            }),
                     ], style={'textAlign': 'center', 'marginTop': '10px'}),
                     
                     # Position info text
@@ -1638,19 +1620,31 @@ class SDNExperimentManager:
             source_positions = {}
             receiver_positions = {}
             
+            # Collect unique source and receiver positions using tuple representation
+            unique_source_tuples = set()
+            unique_receiver_tuples = set()
+            
             for idx, pos_key in enumerate(room.source_mic_pairs):
                 source_pos, mic_pos = pos_key
                 
+                # Use tuple representation for consistent comparison
+                source_tuple = tuple(source_pos)
+                mic_tuple = tuple(mic_pos)
+                
+                # Add to unique sets if not already there
+                unique_source_tuples.add(source_tuple)
+                unique_receiver_tuples.add(mic_tuple)
+                
                 # Format source position string
                 source_str_key = f"Source ({source_pos[0]:.1f}, {source_pos[1]:.1f})"
-                source_positions[source_str_key] = source_pos
+                source_positions[source_str_key] = source_tuple
                 
                 # Format receiver position string
                 if len(room.source_mic_pairs) <= 50:
                     receiver_str_key = f"Mic ({mic_pos[0]:.1f}, {mic_pos[1]:.1f})"
                 else:
                     receiver_str_key = f"Mic {len(receiver_positions) + 1} ({mic_pos[0]:.1f}, {mic_pos[1]:.1f})"
-                receiver_positions[receiver_str_key] = mic_pos
+                receiver_positions[receiver_str_key] = mic_tuple
                 
                 # Store the mapping
                 pos_indices[(source_str_key, receiver_str_key)] = idx
@@ -1708,58 +1702,44 @@ class SDNExperimentManager:
             # Re-create the sources and receivers options based on current room
             sources = []
             receivers = []
-            pos_indices = {}
             
-            for idx, pos_key in enumerate(room.source_mic_pairs):
-                source_pos, mic_pos = pos_key
-                
-                # Format source position
-                source_str_key = f"Source ({source_pos[0]:.1f}, {source_pos[1]:.1f})"
-                source_opt = {'label': source_str_key, 'value': source_str_key}
-                if source_opt not in sources:
-                    sources.append(source_opt)
-                
-                # Format receiver position
-                if len(room.source_mic_pairs) <= 50:
-                    receiver_str_key = f"Mic ({mic_pos[0]:.1f}, {mic_pos[1]:.1f})"
-                else:
-                    # For large number of receivers, use numbered format
-                    receiver_count = 0
-                    for prev_idx in range(idx):
-                        prev_src, prev_mic = room.source_mic_pairs[prev_idx]
-                        if tuple(prev_mic) == tuple(mic_pos):
-                            receiver_count += 1
-                    receiver_str_key = f"Mic {receiver_count + 1} ({mic_pos[0]:.1f}, {mic_pos[1]:.1f})"
-                
-                receiver_opt = {'label': receiver_str_key, 'value': receiver_str_key}
-                if receiver_opt not in receivers:
-                    receivers.append(receiver_opt)
-                
-                # Store the position index mapping
-                pos_indices[(source_str_key, receiver_str_key)] = idx
+            # Create unique sources options from unique_source_tuples
+            for source_tuple in unique_source_tuples:
+                source_str_key = f"Source ({source_tuple[0]:.1f}, {source_tuple[1]:.1f})"
+                sources.append({'label': source_str_key, 'value': source_str_key})
             
-            # Store indices for future lookups
-            app.server.pos_indices = pos_indices
+            # Create unique receivers options from unique_receiver_tuples
+            if len(unique_receiver_tuples) <= 50:
+                for mic_tuple in unique_receiver_tuples:
+                    receiver_str_key = f"Mic ({mic_tuple[0]:.1f}, {mic_tuple[1]:.1f})"
+                    receivers.append({'label': receiver_str_key, 'value': receiver_str_key})
+            else:
+                # For large number of receivers, use numbered format
+                for i, mic_tuple in enumerate(sorted(unique_receiver_tuples)):
+                    receiver_str_key = f"Mic {i+1} ({mic_tuple[0]:.1f}, {mic_tuple[1]:.1f})"
+                    receivers.append({'label': receiver_str_key, 'value': receiver_str_key})
             
             # Get the current position details for dropdown selection
             if room.source_mic_pairs:
                 current_source_pos, current_mic_pos = room.source_mic_pairs[new_pos_idx]
                 
-                # Find the matching string representations
-                current_source = f"Source ({current_source_pos[0]:.1f}, {current_source_pos[1]:.1f})"
+                # Convert to tuples for consistent comparison
+                current_source_tuple = tuple(current_source_pos)
+                current_mic_tuple = tuple(current_mic_pos)
                 
-                if len(room.source_mic_pairs) <= 50:
-                    current_receiver = f"Mic ({current_mic_pos[0]:.1f}, {current_mic_pos[1]:.1f})"
+                # Find the matching string representations
+                current_source = f"Source ({current_source_tuple[0]:.1f}, {current_source_tuple[1]:.1f})"
+                
+                if len(unique_receiver_tuples) <= 50:
+                    current_receiver = f"Mic ({current_mic_tuple[0]:.1f}, {current_mic_tuple[1]:.1f})"
                 else:
                     # For large number of receivers, need to find the correct mic number
-                    mic_count = 0
-                    for idx, (src, mic) in enumerate(room.source_mic_pairs):
-                        if tuple(mic) == tuple(current_mic_pos):
-                            if idx < new_pos_idx:
-                                mic_count += 1
-                            else:
-                                break
-                    current_receiver = f"Mic {mic_count + 1} ({current_mic_pos[0]:.1f}, {current_mic_pos[1]:.1f})"
+                    for i, mic_tuple in enumerate(sorted(unique_receiver_tuples)):
+                        if mic_tuple == current_mic_tuple:
+                            current_receiver = f"Mic {i+1} ({current_mic_tuple[0]:.1f}, {current_mic_tuple[1]:.1f})"
+                            break
+                    else:
+                        current_receiver = f"Mic ({current_mic_tuple[0]:.1f}, {current_mic_tuple[1]:.1f})"
             else:
                 current_source = None
                 current_receiver = None
@@ -1877,7 +1857,7 @@ class SDNExperimentManager:
             # Set y-axis range for RIR plot when early part (50ms) is selected
             if time_range == 0.05 or time_range == '0.05':
                 edc_fig.update_yaxes(range=[-10, 2])
-
+            
             # Create NED plot
             ned_fig = go.Figure()
             
@@ -2214,11 +2194,11 @@ _singular_manager = None
 
 if __name__ == "__main__":
     
-    run_single_experiments = True
-    run_batch_experiments = False
+    run_single_experiments = False
+    run_batch_experiments = True
 
     duration = 1
-
+    
     # Example room parameters
     room_aes = {'width': 9, 'depth': 7, 'height': 4,
                 'source x': 4.5, 'source y': 3.5, 'source z': 2,
@@ -2234,44 +2214,44 @@ if __name__ == "__main__":
 
         # Run an SDN experiment - single source and receiver (uses singular manager)
         single_manager.run_experiment(
-            config={
-                'label': 'weighted psk',
-                'info': '',
-                'method': 'SDN',
-                'flags': {
-                    'specular_source_injection': True,
+        config={
+            'label': 'weighted psk',
+            'info': '',
+            'method': 'SDN',
+            'flags': {
+                'specular_source_injection': True,
                     'source_weighting': 4,
-                }
-            },
-            room_parameters=room_aes,
-            duration=duration,
-            fs=44100,
-            room_name="room_aes"
-        )
-
+            }
+        },
+        room_parameters=room_aes,
+        duration=duration,
+        fs=44100,
+        room_name="room_aes"
+    )
+    
         single_manager.run_experiment(
-            config={
-                'label': 'weighted psk',
-                'info': '',
-                'method': 'SDN',
-                'flags': {
-                    'specular_source_injection': True,
+        config={
+            'label': 'weighted psk',
+            'info': '',
+            'method': 'SDN',
+            'flags': {
+                'specular_source_injection': True,
                     'source_weighting': 5,
-                }
-            },
-            room_parameters=room_aes,
-            duration=duration,
-            fs=44100,
-            room_name="room_aes"
-        )
+            }
+        },
+        room_parameters=room_aes,
+        duration=duration,
+        fs=44100,
+        room_name="room_aes"
+    )
 
         # Run an ISM experiment
         single_manager.run_ism_experiment(
-            room_parameters=room_aes,
+        room_parameters=room_aes,
             max_order=12,
             ray_tracing=False,
-            duration=duration,
-            fs=44100,
+        duration=duration,
+        fs=44100,
             room_name="room_aes",
             label="",
         )
@@ -2287,31 +2267,31 @@ if __name__ == "__main__":
         # Run batch experiments (uses batch manager)
         batch_manager = get_batch_manager()  # Use the batch manager for batch processing
         batch_manager.run_experiment(
-            config={
+        config={
                 'label': 'weighted psk',
-                'info': '',
-                'method': 'SDN',
-                'flags': {
+            'info': '',
+            'method': 'SDN',
+            'flags': {
                     'specular_source_injection': True,
                     'source_weighting': 5,
-                }
-            },
-            room_parameters=room_aes,
+            }
+        },
+        room_parameters=room_aes,
             duration=0.5,  # Shorter duration for batch processing
-            fs=44100,
+        fs=44100,
             room_name="room_aes",
             batch_processing=True,  # Enable batch processing
             source_positions=source_positions,  # Provide source positions
             receiver_positions=receiver_positions  # Provide receiver positions
-        )
-
+    )
+    
         batch_manager.run_ism_experiment(
-            room_parameters=room_aes,
+        room_parameters=room_aes,
             duration=0.5,  # Shorter duration for batch processing
             fs=44100,
-            max_order=12,
-            ray_tracing=False,
-            room_name="room_aes",
+        max_order=12,
+        ray_tracing=False,
+        room_name="room_aes",
             batch_processing=True,  # Enable batch processing
             source_positions=source_positions,  # Provide source positions
             receiver_positions=receiver_positions,  # Provide receiver positions
