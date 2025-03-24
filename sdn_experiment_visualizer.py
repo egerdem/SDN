@@ -291,10 +291,43 @@ class SDNExperimentVisualizer:
 
                 # Middle - room visualization
                 html.Div([
-                    html.H3("Room Layout (Top View)", 
+                    html.H3("Room Layout ***(Top View)",
                            style={'textAlign': 'center', 'marginBottom': '5px', 'marginTop': '65px', 'color': dark_theme['text']}),
                     dcc.Store(id='current-pos-idx', data=0),
                     dcc.Graph(id='room-plot', style={'height': '50vh', 'marginTop': '0px'}),
+                    
+                    # Source and receiver dropdown selectors
+                    html.Div([
+                        # Source selector
+                        html.Div([
+                            dcc.Dropdown(
+                                id='source-selector',
+                                options=[],  # Will be populated in callback
+                                style={
+                                    'backgroundColor': dark_theme['paper_bg'],
+                                    'color': dark_theme['text'],
+                                    'width': '100%'
+                                },
+                                className='dropdown-light-text'
+                            )
+                        ], style={'width': '48%', 'display': 'inline-block', 'marginRight': '4%'}),
+                        
+                        # Receiver selector
+                        html.Div([
+                            dcc.Dropdown(
+                                id='receiver-selector',
+                                options=[],  # Will be populated in callback
+                                style={
+                                    'backgroundColor': dark_theme['paper_bg'],
+                                    'color': dark_theme['text'],
+                                    'width': '100%'
+                                },
+                                className='dropdown-light-text'
+                            )
+                        ], style={'width': '48%', 'display': 'inline-block'})
+                    ], style={'padding': '10px 20px', 'marginBottom': '0px'}),
+                    
+                    # Navigation buttons
                     html.Div([
                         html.Button('←', id='prev-pos', style={
                             'fontSize': 20, 
@@ -314,8 +347,7 @@ class SDNExperimentVisualizer:
                             'padding': '0px 15px'
                         })
                     ], style={'textAlign': 'center', 'marginTop': '10px'}),
-                    html.Div(id='pos-info', 
-                           style={'textAlign': 'center', 'marginTop': '10px', 'fontSize': '14px', 'color': dark_theme['text']})
+
                 ], style={'width': '25%', 'display': 'inline-block', 'verticalAlign': 'top'}),
 
                 # Right side - experiment table
@@ -345,48 +377,152 @@ class SDNExperimentVisualizer:
             'padding': '10px'
         })
 
-        # Add callbacks
+        # Add custom styles for dropdown options
+        app.index_string = '''
+        <!DOCTYPE html>
+        <html>
+            <head>
+                {%metas%}
+                <title>{%title%}</title>
+                {%favicon%}
+                {%css%}
+                <style>
+                    /* Make dropdown option text light-colored */
+                    .VirtualizedSelectOption {
+                        color: #e0e0e0 !important;
+                        background-color: #282c34 !important;
+                    }
+                    .VirtualizedSelectFocusedOption {
+                        background-color: #1e2129 !important;
+                    }
+                    /* Style for dropdown input text and selected value */
+                    .Select-value-label {
+                        color: #e0e0e0 !important;
+                    }
+                    .Select-control {
+                        background-color: #282c34 !important;
+                        border-color: #404040 !important;
+                    }
+                    .Select-menu-outer {
+                        background-color: #282c34 !important;
+                        border-color: #404040 !important;
+                    }
+                    .Select-input > input {
+                        color: #e0e0e0 !important;
+                    }
+                    /* Dropdown arrow color */
+                    .Select-arrow {
+                        border-color: #e0e0e0 transparent transparent !important;
+                    }
+                </style>
+            </head>
+            <body>
+                {%app_entry%}
+                <footer>
+                    {%config%}
+                    {%scripts%}
+                    {%renderer%}
+                </footer>
+            </body>
+        </html>
+        '''
+
+        # Combined callback for room/position navigation and dropdown selection
         @app.callback(
             [Output('current-room-idx', 'data'),
              Output('current-pos-idx', 'data'),
-             Output('pos-info', 'children'),
+             # Output('pos-info', 'children'),
              Output('room-plot', 'figure'),
              Output('room-header', 'children'),
-             Output('rt-header', 'children')],
+             Output('rt-header', 'children'),
+             Output('source-selector', 'options'),
+             Output('receiver-selector', 'options'),
+             Output('source-selector', 'value'),
+             Output('receiver-selector', 'value')],
             [Input('prev-room', 'n_clicks'),
              Input('next-room', 'n_clicks'),
              Input('prev-pos', 'n_clicks'),
-             Input('next-pos', 'n_clicks')],
+             Input('next-pos', 'n_clicks'),
+             Input('source-selector', 'value'),
+             Input('receiver-selector', 'value')],
             [State('current-room-idx', 'data'),
              State('current-pos-idx', 'data')]
         )
-        def update_room_and_position(prev_room, next_room, prev_pos, next_pos, room_idx, pos_idx):
+        def update_room_and_position(prev_room, next_room, prev_pos, next_pos, 
+                                   source_idx, receiver_idx, room_idx, pos_idx):
             ctx = dash.callback_context
             if not ctx.triggered:
                 button_id = 'no-click'
             else:
                 button_id = ctx.triggered[0]['prop_id'].split('.')[0]
 
+            # Handle room navigation
             if button_id == 'prev-room':
                 room_idx = (room_idx - 1) % len(room_names)
                 pos_idx = 0
             elif button_id == 'next-room':
                 room_idx = (room_idx + 1) % len(room_names)
                 pos_idx = 0
-            elif button_id == 'prev-pos':
-                room = self.manager.rooms[room_names[room_idx]]
+            
+            # Get current room
+            room = self.manager.rooms[room_names[room_idx]]
+            
+            # Get unique source and receiver positions
+            source_positions = []
+            receiver_positions = []
+            source_labels = []
+            receiver_labels = []
+            
+            for src_pos, rec_pos in room.source_mic_pairs:
+                src_str = f"({src_pos[0]:.2f}, {src_pos[1]:.2f}, {src_pos[2]:.2f})"
+                rec_str = f"({rec_pos[0]:.2f}, {rec_pos[1]:.2f}, {rec_pos[2]:.2f})"
+                
+                if src_str not in source_labels:
+                    source_positions.append(src_pos)
+                    source_labels.append(src_str)
+                if rec_str not in receiver_labels:
+                    receiver_positions.append(rec_pos)
+                    receiver_labels.append(rec_str)
+            
+            # Create dropdown options
+            source_options = [{'label': f"Source {i+1}: {pos}", 'value': i} 
+                            for i, pos in enumerate(source_labels)]
+            receiver_options = [{'label': f"Receiver {i+1}: {pos}", 'value': i} 
+                              for i, pos in enumerate(receiver_labels)]
+            
+            # Handle position navigation
+            if button_id == 'prev-pos':
                 pos_idx = (pos_idx - 1) % len(room.source_mic_pairs)
             elif button_id == 'next-pos':
-                room = self.manager.rooms[room_names[room_idx]]
                 pos_idx = (pos_idx + 1) % len(room.source_mic_pairs)
-
-            room = self.manager.rooms[room_names[room_idx]]
-            pos_info = room.get_position_info(pos_idx)
+            elif button_id in ['source-selector', 'receiver-selector']:
+                # Only update if both dropdowns have values
+                if source_idx is not None and receiver_idx is not None:
+                    # Find matching position index
+                    for i, (src_pos, rec_pos) in enumerate(room.source_mic_pairs):
+                        src_str = f"({src_pos[0]:.2f}, {src_pos[1]:.2f}, {src_pos[2]:.2f})"
+                        rec_str = f"({rec_pos[0]:.2f}, {rec_pos[1]:.2f}, {rec_pos[2]:.2f})"
+                        
+                        if (source_labels.index(src_str) == source_idx and 
+                            receiver_labels.index(rec_str) == receiver_idx):
+                            pos_idx = i
+                            break
+            
+            # Get current source and receiver indices for dropdowns
+            current_src_pos, current_rec_pos = room.source_mic_pairs[pos_idx]
+            current_src_str = f"({current_src_pos[0]:.2f}, {current_src_pos[1]:.2f}, {current_src_pos[2]:.2f})"
+            current_rec_str = f"({current_rec_pos[0]:.2f}, {current_rec_pos[1]:.2f}, {current_rec_pos[2]:.2f})"
+            current_source = source_labels.index(current_src_str)
+            current_receiver = receiver_labels.index(current_rec_str)
+            
+            # Update room visualization and info
+            # pos_info = room.get_position_info(pos_idx)
             room_plot = self.create_room_visualization([room], highlight_pos_idx=pos_idx)
             room_header = f"Room: {room.display_name}"
             rt_header = f"Dimensions: {room.dimensions_str}, abs={room.absorption_str}, {room.theoretical_rt_str}"
 
-            return room_idx, pos_idx, pos_info, room_plot, room_header, rt_header
+            return (room_idx, pos_idx,  room_plot, room_header, rt_header,
+                   source_options, receiver_options, current_source, current_receiver)
 
         @app.callback(
             [Output('rir-plot', 'figure'),
@@ -482,10 +618,11 @@ from sdn_manager_load_sims import Room
 
 if __name__ == "__main__":
     # Create a visualizer using the batch manager
-    batch_visualizer = SDNExperimentVisualizer(get_batch_manager())
+    batch_manager = get_batch_manager()
+    batch_visualizer = SDNExperimentVisualizer(batch_manager)
     batch_visualizer.show(port=9052)
-
+    
     # Create a visualizer using the singular manager
-    singular_visualizer = SDNExperimentVisualizer(get_singular_manager())
-    singular_visualizer.show(port=9051)
+    # singular_visualizer = SDNExperimentVisualizer(get_singular_manager())
+    # singular_visualizer.show(port=9051)
 
