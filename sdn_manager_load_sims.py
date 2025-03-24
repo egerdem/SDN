@@ -2,7 +2,7 @@ import os
 import json
 # import pickle
 import numpy as np
-import spatial_analysis as sa
+# import spatial_analysis as sa
 # import matplotlib.pyplot as plt
 import dash
 from dash import dcc, html, callback, Input, Output, State, dash_table
