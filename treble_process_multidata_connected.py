@@ -14,7 +14,7 @@ from treble_tsdk import tsdk_namespace as treble
 from treble_tsdk import display_data as dd
 from treble_tsdk.results import plot
 
-my_projects = tsdk.list_my_projects()
+"""my_projects = tsdk.list_my_projects()
 # dd.as_table(my_projects)
 
 project = my_projects[0]
@@ -47,7 +47,7 @@ source_info = simulation_info["sources"]
 source_positions = {}
 for source in source_info:
     source_position = [source["x"], source["y"], source["z"]]
-    source_positions[source["label"]] = source_position
+    source_positions[source["label"]] = source_position"""
 
 #also log "name", "simulationType",  "layerMaterialAssignments"[0]."materialName"
 
@@ -139,7 +139,12 @@ def load_treble_rirs(h5_file_path, receiver_map):
         fs_treble = f.attrs.get('sampling-rate', 32000)  # Default to 32000 if not found
         target_fs = 44100  # Target sampling rate for consistency with SDN/ISM
         
+        # Get zero-padding information
+        zero_pad_beginning = f.attrs.get('zero-pad-beginning', 0)
+        zero_pad_end = f.attrs.get('zero-pad-end', 0)
+        
         print(f"Treble sampling rate: {fs_treble} Hz, resampling to {target_fs} Hz")
+        print(f"Zero padding: beginning={zero_pad_beginning}, end={zero_pad_end} samples")
         
         # Load all mono IRs
         for receiver_id in f['mono_ir'].keys():
@@ -147,19 +152,35 @@ def load_treble_rirs(h5_file_path, receiver_map):
                 # Get the original RIR
                 original_rir = f['mono_ir'][receiver_id][:]
                 
+                # Remove zero-padding
+                if zero_pad_beginning > 0 or zero_pad_end > 0:
+                    if zero_pad_end > 0:
+                        unpadded_rir = original_rir[zero_pad_beginning:-zero_pad_end]
+                    else:
+                        unpadded_rir = original_rir[zero_pad_beginning:]
+                    print(f"Removed padding: original length={len(original_rir)}, unpadded length={len(unpadded_rir)}")
+                else:
+                    unpadded_rir = original_rir
+                
                 # Resample using librosa
                 resampled_rir = librosa.resample(
-                    y=original_rir, 
+                    y=unpadded_rir, 
                     orig_sr=fs_treble, 
                     target_sr=target_fs
                 )
+                
+                # Normalize RIR to max amplitude of 1 after resampling
+                if np.max(np.abs(resampled_rir)) > 0:
+                    resampled_rir = resampled_rir / np.max(np.abs(resampled_rir))
                 
                 rirs[receiver_id] = {
                     "rir": resampled_rir,
                     "position": receiver_map[receiver_id]["position"],
                     "label": receiver_map[receiver_id]["label"],
                     "fs": target_fs,
-                    "original_fs": fs_treble
+                    "original_fs": fs_treble,
+                    "zero_pad_beginning": zero_pad_beginning,
+                    "zero_pad_end": zero_pad_end
                 }
             else:
                 print(f"Warning: Receiver ID {receiver_id} not found in simulation info")
@@ -204,7 +225,8 @@ def create_treble_experiments(simulation_info, source_info, rirs):
     duration = simulation_info.get("impulseLengthSec", 2.0)
     sim_type = simulation_info.get("simulationType", "Hybrid")
     crossover = simulation_info.get("crossoverFrequency", 250)
-    
+    sim_settings = simulation_info.get("simulationSettings", {})
+
     # For each source in the simulation
     source_pos = [source_info["x"], source_info["y"], source_info["z"]]
     source_label = source_info["label"]
@@ -245,6 +267,7 @@ def create_treble_experiments(simulation_info, source_info, rirs):
             },
             'treble_settings': {
                 'simulation_type': sim_type,
+                'simulation_settings': sim_settings,
                 'crossover_frequency': crossover,
                 'simulation_id': simulation_info.get('id', ''),
                 'original_fs': rir_data.get("original_fs", 32000)

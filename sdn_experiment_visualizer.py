@@ -5,10 +5,10 @@ import plotly.graph_objects as go
 import numpy as np
 import webbrowser
 from threading import Timer
-
-from sdn_manager_load_sims import get_batch_manager, get_singular_manager
+from sdn_experiment_manager import Room
 
 class SDNExperimentVisualizer:
+    print("eetjaj")
     """Class to visualize SDN experiment data using Dash."""
     
     def __init__(self, manager=None):
@@ -90,6 +90,11 @@ class SDNExperimentVisualizer:
                     line=dict(color='black', width=2),
                     opacity=0.2
                 ),
+                # Add customdata to identify points when clicked
+                customdata=[[i, 'source'] for i in range(len(source_positions))],
+                hoverinfo='text',
+                hovertext=[f"Source {i+1}: ({pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f})" 
+                          for i, pos in enumerate(source_positions)],
                 name='All Sources',
                 showlegend=False
             ))
@@ -107,6 +112,11 @@ class SDNExperimentVisualizer:
                     line=dict(color='black', width=2),
                     opacity=0.2
                 ),
+                # Add customdata to identify points when clicked
+                customdata=[[i, 'receiver'] for i in range(len(mic_positions))],
+                hoverinfo='text',
+                hovertext=[f"Receiver {i+1}: ({pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f})" 
+                          for i, pos in enumerate(mic_positions)],
                 name='All Microphones',
                 showlegend=False
             ))
@@ -176,10 +186,7 @@ class SDNExperimentVisualizer:
                 x=0.01
             ),
             margin=dict(t=30, b=0, l=0, r=0),
-            plot_bgcolor='#1e2129',
-            paper_bgcolor='#282c34',
-            font={"color": "#e0e0e0"},
-            template="plotly_dark"
+            plot_bgcolor='rgba(240, 240, 240, 0.5)'
         )
         
         return fig
@@ -294,7 +301,7 @@ class SDNExperimentVisualizer:
 
                 # Middle - room visualization
                 html.Div([
-                    html.H3("Room Layout (Top View)",
+                    html.H3("Room Layout **rty (Top View)",
                            style={'textAlign': 'center', 'marginBottom': '5px', 'marginTop': '65px', 'color': dark_theme['text']}),
                     dcc.Store(id='current-pos-idx', data=0),
                     dcc.Graph(
@@ -442,7 +449,6 @@ class SDNExperimentVisualizer:
         @app.callback(
             [Output('current-room-idx', 'data'),
              Output('current-pos-idx', 'data'),
-             # Output('pos-info', 'children'),
              Output('room-plot', 'figure'),
              Output('room-header', 'children'),
              Output('rt-header', 'children'),
@@ -455,12 +461,13 @@ class SDNExperimentVisualizer:
              Input('prev-pos', 'n_clicks'),
              Input('next-pos', 'n_clicks'),
              Input('source-selector', 'value'),
-             Input('receiver-selector', 'value')],
+             Input('receiver-selector', 'value'),
+             Input('room-plot', 'clickData')],
             [State('current-room-idx', 'data'),
              State('current-pos-idx', 'data')]
         )
         def update_room_and_position(prev_room, next_room, prev_pos, next_pos, 
-                                   source_idx, receiver_idx, room_idx, pos_idx):
+                                   source_value, receiver_value, click_data, room_idx, pos_idx):
             ctx = dash.callback_context
             if not ctx.triggered:
                 button_id = 'no-click'
@@ -474,65 +481,121 @@ class SDNExperimentVisualizer:
             elif button_id == 'next-room':
                 room_idx = (room_idx + 1) % len(room_names)
                 pos_idx = 0
-            
-            # Get current room
-            room = self.manager.rooms[room_names[room_idx]]
-            
-            # Get unique source and receiver positions
-            source_positions = []
-            receiver_positions = []
-            source_labels = []
-            receiver_labels = []
-            
-            for src_pos, rec_pos in room.source_mic_pairs:
-                src_str = f"({src_pos[0]:.2f}, {src_pos[1]:.2f}, {src_pos[2]:.2f})"
-                rec_str = f"({rec_pos[0]:.2f}, {rec_pos[1]:.2f}, {rec_pos[2]:.2f})"
-                
-                if src_str not in source_labels:
-                    source_positions.append(src_pos)
-                    source_labels.append(src_str)
-                if rec_str not in receiver_labels:
-                    receiver_positions.append(rec_pos)
-                    receiver_labels.append(rec_str)
-            
-            # Create dropdown options
-            source_options = [{'label': f"Source {i+1}: {pos}", 'value': i} 
-                            for i, pos in enumerate(source_labels)]
-            receiver_options = [{'label': f"Receiver {i+1}: {pos}", 'value': i} 
-                              for i, pos in enumerate(receiver_labels)]
-            
-            # Handle position navigation
-            if button_id == 'prev-pos':
+            elif button_id == 'prev-pos':
+                room = self.manager.rooms[room_names[room_idx]]
                 pos_idx = (pos_idx - 1) % len(room.source_mic_pairs)
             elif button_id == 'next-pos':
+                room = self.manager.rooms[room_names[room_idx]]
                 pos_idx = (pos_idx + 1) % len(room.source_mic_pairs)
-            elif button_id in ['source-selector', 'receiver-selector']:
-                # Only update if both dropdowns have values
-                if source_idx is not None and receiver_idx is not None:
-                    # Find matching position index
-                    for i, (src_pos, rec_pos) in enumerate(room.source_mic_pairs):
-                        src_str = f"({src_pos[0]:.2f}, {src_pos[1]:.2f}, {src_pos[2]:.2f})"
-                        rec_str = f"({rec_pos[0]:.2f}, {rec_pos[1]:.2f}, {rec_pos[2]:.2f})"
+
+            room = self.manager.rooms[room_names[room_idx]]
+            
+            # Get unique sources and receivers for dropdown menus
+            source_positions = {}
+            receiver_positions = {}
+            
+            for idx, pos_key in enumerate(room.source_mic_pairs):
+                source_pos, mic_pos = pos_key
+                source_key = f"({source_pos[0]:.1f}, {source_pos[1]:.1f}, {source_pos[2]:.1f})"
+                receiver_key = f"({mic_pos[0]:.1f}, {mic_pos[1]:.1f}, {mic_pos[2]:.1f})"
+                
+                if source_key not in source_positions:
+                    source_positions[source_key] = idx
+                
+                if receiver_key not in receiver_positions:
+                    receiver_positions[receiver_key] = idx
+
+            # Create dropdown options with explicit labels
+            source_options = [{'label': f'Source: {key}', 'value': key} for key in source_positions.keys()]
+            receiver_options = [{'label': f'Receiver: {key}', 'value': key} for key in receiver_positions.keys()]
+            
+            # Handle clicks on the room plot
+            if button_id == 'room-plot' and click_data is not None:
+                # Extract the customdata to identify what was clicked
+                if 'customdata' in click_data['points'][0]:
+                    point_idx = click_data['points'][0]['customdata'][0]
+                    point_type = click_data['points'][0]['customdata'][1]
+                    
+                    # Get list of position keys
+                    source_keys = list(source_positions.keys())
+                    receiver_keys = list(receiver_positions.keys())
+                    
+                    # Determine which unique positions we need
+                    if point_type == 'source' and point_idx < len(source_keys):
+                        # Get the source position string key
+                        source_value = source_keys[point_idx]
                         
-                        if (source_labels.index(src_str) == source_idx and 
-                            receiver_labels.index(rec_str) == receiver_idx):
-                            pos_idx = i
-                            break
+                        # Find position with this source and current receiver
+                        for i, (s_pos, r_pos) in enumerate(room.source_mic_pairs):
+                            s_key = f"({s_pos[0]:.1f}, {s_pos[1]:.1f}, {s_pos[2]:.1f})"
+                            r_key = f"({r_pos[0]:.1f}, {r_pos[1]:.1f}, {r_pos[2]:.1f})"
+                            if s_key == source_value and (not receiver_value or r_key == receiver_value):
+                                pos_idx = i
+                                break
+                    
+                    elif point_type == 'receiver' and point_idx < len(receiver_keys):
+                        # Get the receiver position string key
+                        receiver_value = receiver_keys[point_idx]
+                        
+                        # Find position with this receiver and current source
+                        for i, (s_pos, r_pos) in enumerate(room.source_mic_pairs):
+                            s_key = f"({s_pos[0]:.1f}, {s_pos[1]:.1f}, {s_pos[2]:.1f})"
+                            r_key = f"({r_pos[0]:.1f}, {r_pos[1]:.1f}, {r_pos[2]:.1f})"
+                            if r_key == receiver_value and (not source_value or s_key == source_value):
+                                pos_idx = i
+                                break
             
-            # Get current source and receiver indices for dropdowns
-            current_src_pos, current_rec_pos = room.source_mic_pairs[pos_idx]
-            current_src_str = f"({current_src_pos[0]:.2f}, {current_src_pos[1]:.2f}, {current_src_pos[2]:.2f})"
-            current_rec_str = f"({current_rec_pos[0]:.2f}, {current_rec_pos[1]:.2f}, {current_rec_pos[2]:.2f})"
-            current_source = source_labels.index(current_src_str)
-            current_receiver = receiver_labels.index(current_rec_str)
+            # Handle dropdown selection
+            if button_id == 'source-selector' and source_value:
+                for i, (s_pos, r_pos) in enumerate(room.source_mic_pairs):
+                    s_key = f"({s_pos[0]:.1f}, {s_pos[1]:.1f}, {s_pos[2]:.1f})"
+                    r_key = f"({r_pos[0]:.1f}, {r_pos[1]:.1f}, {r_pos[2]:.1f})"
+                    if s_key == source_value and (not receiver_value or r_key == receiver_value):
+                        pos_idx = i
+                        break
             
-            # Update room visualization and info
-            # pos_info = room.get_position_info(pos_idx)
+            elif button_id == 'receiver-selector' and receiver_value:
+                for i, (s_pos, r_pos) in enumerate(room.source_mic_pairs):
+                    s_key = f"({s_pos[0]:.1f}, {s_pos[1]:.1f}, {s_pos[2]:.1f})"
+                    r_key = f"({r_pos[0]:.1f}, {r_pos[1]:.1f}, {r_pos[2]:.1f})"
+                    if r_key == receiver_value and (not source_value or s_key == source_value):
+                        pos_idx = i
+                        break
+            
+            # Get current position info
+            if not room.source_mic_pairs:
+                current_source = None
+                current_receiver = None
+            else:
+                current_pos = room.source_mic_pairs[pos_idx % len(room.source_mic_pairs)]
+                source_pos, mic_pos = current_pos
+                
+                # Set current dropdown values
+                current_source = f"({source_pos[0]:.1f}, {source_pos[1]:.1f}, {source_pos[2]:.1f})"
+                current_receiver = f"({mic_pos[0]:.1f}, {mic_pos[1]:.1f}, {mic_pos[2]:.1f})"
+            
+            # Create room visualization
             room_plot = self.create_room_visualization([room], highlight_pos_idx=pos_idx)
+            
+            # Update room plot colors to match original implementation
+            room_plot.update_layout(
+                plot_bgcolor=dark_theme['plot_bg'],
+                paper_bgcolor=dark_theme['paper_bg'],
+                font={'color': dark_theme['text']},
+                title={'font': {'color': dark_theme['text']}},
+                xaxis={'gridcolor': dark_theme['grid'], 'zerolinecolor': dark_theme['grid']},
+                yaxis={'gridcolor': dark_theme['grid'], 'zerolinecolor': dark_theme['grid']}
+            )
+            
+            # For room outline, update to match dark theme
+            for shape in room_plot.layout.shapes:
+                shape.line.color = 'rgba(255, 255, 255, 0.5)'
+                shape.fillcolor = 'rgba(50, 50, 50, 0.1)'
+            
             room_header = f"Room: {room.display_name}"
             rt_header = f"Dimensions: {room.dimensions_str}, abs={room.absorption_str}, {room.theoretical_rt_str}"
 
-            return (room_idx, pos_idx,  room_plot, room_header, rt_header,
+            return (room_idx, pos_idx, room_plot, room_header, rt_header, 
                    source_options, receiver_options, current_source, current_receiver)
 
         @app.callback(
@@ -625,15 +688,29 @@ class SDNExperimentVisualizer:
         app.run_server(debug=True, port=port)
 
 # Import needed for Room class access
-from sdn_manager_load_sims import Room
+# from sdn_manager_load_sims import Room
+# from sdn_manager_load_sims import get_batch_manager, get_singular_manager
 
 if __name__ == "__main__":
+
+    from sdn_manager_load_sims import get_batch_manager, get_singular_manager
     # Create a visualizer using the batch manager
+    print("d")
     batch_manager = get_batch_manager()
+    # single_manager = get_singular_manager()
+
+    print("r")
+
+    # print("r")
     batch_visualizer = SDNExperimentVisualizer(batch_manager)
-    batch_visualizer.show(port=9052)
+    batch_visualizer.show(port=9062)
     
     # Create a visualizer using the singular manager
     # singular_visualizer = SDNExperimentVisualizer(get_singular_manager())
     # singular_visualizer.show(port=9051)
 
+    import sdn_experiment_visualizer as sev
+    import importlib
+    importlib.reload(sev)
+    batch_visualizer = sev.SDNExperimentVisualizer(batch_manager)
+    batch_visualizer.show(port=9062)

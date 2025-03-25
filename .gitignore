@@ -1,7 +1,9 @@
 .idea/
 __pycache__/
 *.pyc
-
+*.pkl
+*.json
+*.npy
 # Ignore image files
 *.jpeg
 *.jpg

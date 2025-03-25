@@ -6,7 +6,7 @@ from sdn_core import DelayNetwork
 from sdn_base import calculate_sdn_base_rir
 import pyroomacoustics as pra
 from scipy import signal
-import seaborn as sns
+# import seaborn as sns
 from analysis import calculate_smoothed_energy, calculate_error_metric, plot_smoothing_comparison, compute_RMS, compute_edc
 
 def generate_receiver_grid(room_width: float, room_depth: float, n_points: int = 50) -> List[Tuple[float, float]]:

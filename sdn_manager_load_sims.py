@@ -1,171 +1,14 @@
 import os
 import json
-# import pickle
 import numpy as np
-# import spatial_analysis as sa
-# import matplotlib.pyplot as plt
-import dash
-from dash import dcc, html, callback, Input, Output, State, dash_table
-import plotly.graph_objects as go
-# from plotly.subplots import make_subplots
-# import pandas as pd
 from datetime import datetime
 import hashlib
-# import importlib
-import sys
-# from pathlib import Path
-import webbrowser
-from threading import Timer
 
 # Import modules from the main codebase
-import geometry
 import plot_room as pp
 import EchoDensity as ned
 import analysis as an
-from sdn_core import DelayNetwork
-
-
-class Room:
-    """Class to manage room-specific data and associated experiments."""
-    
-    def __init__(self, name, parameters):
-        """
-        Initialize a room with its parameters.
-        
-        Args:
-            name (str): Unique identifier for the room (e.g. 'room_aes')
-            parameters (dict): Room parameters including dimensions, absorption, etc.
-        """
-        self.name = name
-        self.parameters = parameters
-        # Store additional metadata for better display
-        self.parameters['room_name'] = name
-        self.experiments = {}  # experiment_id -> SDNExperiment
-        self.experiments_by_position = {}  # (source_pos, mic_pos) -> list of experiments
-        # Use the provided name as display name
-        self.display_name = name
-        
-    def _get_position_key(self, source_pos, mic_pos):
-        """Create a tuple key for source-mic position."""
-        return (tuple(source_pos), tuple(mic_pos))
-        
-    @property
-    def dimensions_str(self):
-        """Get formatted string of room dimensions."""
-        return f"{self.parameters['width']}x{self.parameters['depth']}x{self.parameters['height']}m"
-    
-    @property
-    def absorption_str(self):
-        """Get formatted absorption coefficient."""
-        return f"{self.parameters['absorption']:.2f}"
-    
-    @property
-    def source_mic_pairs(self):
-        """Get list of unique source-mic pairs."""
-        return list(self.experiments_by_position.keys())
-        
-    def add_experiment(self, experiment):
-        """Add an experiment to this room."""
-        # First check if experiment with this ID already exists - don't duplicate
-        if experiment.experiment_id in self.experiments:
-            # Just update the experiment if it already exists
-            self.experiments[experiment.experiment_id] = experiment
-            # Update in position-based dictionary if it exists there
-            for pos_list in self.experiments_by_position.values():
-                for i, exp in enumerate(pos_list):
-                    if exp.experiment_id == experiment.experiment_id:
-                        pos_list[i] = experiment
-            return
-            
-        # Add to main experiments dictionary
-        self.experiments[experiment.experiment_id] = experiment
-        
-        # Get source and mic positions from config
-        room_params = experiment.config.get('room_parameters', {})
-        
-        # For batch processing, check if positions are in receiver info
-        receiver_info = experiment.config.get('receiver', {})
-        if receiver_info and 'position' in receiver_info:
-            mic_pos = receiver_info['position']
-        else:
-            # Use standard room parameters
-            mic_pos = [
-                room_params.get('mic x', 0),
-                room_params.get('mic y', 0),
-                room_params.get('mic z', 0)
-            ]
-            
-        # Similarly for source position
-        source_info = experiment.config.get('source', {})
-        if source_info and 'position' in source_info:
-            source_pos = source_info['position']
-        else:
-            source_pos = [
-                room_params.get('source x', 0),
-                room_params.get('source y', 0),
-                room_params.get('source z', 0)
-            ]
-        
-        # Add to position-based dictionary
-        pos_key = self._get_position_key(source_pos, mic_pos)
-        if pos_key not in self.experiments_by_position:
-            self.experiments_by_position[pos_key] = []
-        
-        # Check if experiment is already in the list for this position (prevent duplicates)
-        if not any(exp.experiment_id == experiment.experiment_id for exp in self.experiments_by_position[pos_key]):
-            self.experiments_by_position[pos_key].append(experiment)
-    
-    def get_experiments_for_position(self, pos_idx):
-        """Get all experiments for a given source-mic position index."""
-        if not self.source_mic_pairs:
-            return []
-        
-        pos_key = self.source_mic_pairs[pos_idx % len(self.source_mic_pairs)]
-        return self.experiments_by_position[pos_key]
-    
-    def get_position_info(self, pos_idx):
-        """Get formatted string describing the source-mic position."""
-        if not self.source_mic_pairs:
-            return "No source-mic pairs"
-        
-        pos_key = self.source_mic_pairs[pos_idx % len(self.source_mic_pairs)]
-        source_pos, mic_pos = pos_key
-        return f"Source: ({source_pos[0]:.1f}, {source_pos[1]:.1f}, {source_pos[2]:.1f}), Mic: ({mic_pos[0]:.1f}, {mic_pos[1]:.1f}, {mic_pos[2]:.1f})"
-    
-    @property
-    def theoretical_rt_str(self):
-        """Get formatted string of theoretical RT values."""
-        room_dim = np.array([self.parameters['width'], 
-                           self.parameters['depth'], 
-                           self.parameters['height']])
-        rt60_sabine, rt60_eyring = pp.calculate_rt60_theoretical(room_dim, self.parameters['absorption'])
-        return f"RT sabine={rt60_sabine:.1f}s eyring={rt60_eyring:.1f}s"
-    
-    def get_header_info(self):
-        """Get room information for display header."""
-        return {
-            'name': self.name,
-            'dimensions': self.dimensions_str,
-            'absorption': self.absorption_str,
-            'rt_values': self.theoretical_rt_str,
-            'n_experiments': len(self.experiments),
-            'n_source_mic_pairs': len(self.source_mic_pairs)
-        }
-    
-    def matches_parameters(self, parameters):
-        """Check if given parameters match this room's parameters."""
-        for key in ['width', 'depth', 'height', 'absorption']:
-            if abs(self.parameters[key] - parameters[key]) > 1e-6:
-                return False
-        return True
-
-    def to_dict(self):
-        """Convert room to a dictionary for serialization."""
-        return {
-            'name': self.name,
-            'display_name': self.display_name,
-            'parameters': self.parameters
-        }
+from sdn_experiment_manager import Room
 
 
 class SDNExperiment:
@@ -188,6 +31,8 @@ class SDNExperiment:
         self.fs = fs
         self.duration = duration
         self.timestamp = datetime.now().isoformat()
+        self._metrics_calculated = False
+        self.metrics = {}
         
         # Generate a unique ID if not provided
         if experiment_id is None:
@@ -200,6 +45,7 @@ class SDNExperiment:
             
         # Calculate metrics if not skipped
         if not skip_metrics:
+            print("Calculating metrics for", self.experiment_id)
             self._calculate_metrics()
     
     def _prepare_config_for_id(self, config):
@@ -273,6 +119,11 @@ class SDNExperiment:
             except (TypeError, OverflowError):
                 return str(obj)
     
+    def ensure_metrics_calculated(self):
+        """Ensure metrics are calculated if they haven't been already."""
+        if not hasattr(self, '_metrics_calculated') or not self._metrics_calculated:
+            self._calculate_metrics()
+    
     def _calculate_metrics(self):
         """Calculate various acoustic metrics for the RIR."""
         self.metrics = {}
@@ -283,6 +134,7 @@ class SDNExperiment:
             self.ned = np.array([])
             self.time_axis = np.array([])
             self.ned_time_axis = np.array([])
+            self._metrics_calculated = True
             return
         
         # Calculate RT60 if the RIR is long enough
@@ -298,6 +150,27 @@ class SDNExperiment:
         # Time axis for plotting
         self.time_axis = np.arange(len(self.rir)) / self.fs
         self.ned_time_axis = np.arange(len(self.ned)) / self.fs
+        
+        self._metrics_calculated = True
+    
+    # Add property accessors that ensure metrics are calculated
+    @property
+    def rt60(self):
+        """Get RT60 value, calculating metrics if needed."""
+        self.ensure_metrics_calculated()
+        return self.metrics.get('rt60', None)
+    
+    @property
+    def edc_data(self):
+        """Get EDC data, calculating metrics if needed."""
+        self.ensure_metrics_calculated()
+        return self.edc
+    
+    @property
+    def ned_data(self):
+        """Get NED data, calculating metrics if needed."""
+        self.ensure_metrics_calculated()
+        return self.ned
     
     def get_label(self):
         """Generate a descriptive label for the experiment."""
@@ -382,20 +255,22 @@ class SDNExperiment:
 class SDNExperimentManager:
     """Class to manage loading and accessing acoustic simulation experiments from storage."""
     
-    def __init__(self, results_dir='results', is_batch_manager=False):
+    def __init__(self, results_dir='results', is_batch_manager=False, skip_metrics=False):
         """
         Initialize the experiment manager.
         
         Args:
             results_dir (str): Base directory to store experiment data
             is_batch_manager (bool): If True, this manager handles batch processing experiments
+            skip_metrics (bool): If True, skip calculating metrics during loading
         """
         self.results_dir = results_dir
         self.is_batch_manager = is_batch_manager
         self.rooms = {}  # name -> Room
+        self.skip_metrics = skip_metrics
         self.ensure_dir_exists()
         self.load_experiments()
-    
+
     def ensure_dir_exists(self):
         """Ensure the results directory exists."""
         os.makedirs(self.results_dir, exist_ok=True)
@@ -476,7 +351,8 @@ class SDNExperimentManager:
                                                 rir=rir,
                                                 fs=fs,
                                                 duration=duration,
-                                                experiment_id=experiment_id
+                                                experiment_id=experiment_id,
+                                                skip_metrics=self.skip_metrics
                                             )
                                             
                                             # Add experiment to room
@@ -491,17 +367,20 @@ class SDNExperimentManager:
             # Load batch experiments from the structured directory
             rooms_dir = os.path.join(self.results_dir, 'rooms')
             if not os.path.exists(rooms_dir):
+                print("No rooms directory found")
                 return
             
             # Iterate through room directories
             for room_name in os.listdir(rooms_dir):
                 room_path = os.path.join(rooms_dir, room_name)
                 if not os.path.isdir(room_path):
+                    print(f"Skipping non-directory {room_name}")
                     continue
                     
                 # Load room info
                 room_info_path = os.path.join(room_path, 'room_info.json')
                 if os.path.exists(room_info_path):
+                    print(f"Loading room {room_info_path}")
                     try:
                         with open(room_info_path, 'r') as f:
                             room_info = json.load(f)
@@ -522,6 +401,7 @@ class SDNExperimentManager:
                             
                             # For each method directory
                             for method in os.listdir(source_path):
+                                print(f"Loading method {method}")
                                 method_path = os.path.join(source_path, method)
                                 if not os.path.isdir(method_path):
                                     continue
@@ -531,7 +411,7 @@ class SDNExperimentManager:
                                     param_path = os.path.join(method_path, param_set)
                                     if not os.path.isdir(param_path):
                                         continue
-                                    
+                                    print(f"Loading parameter set {param_set}")
                                     # Load config and RIRs
                                     config_path = os.path.join(param_path, 'config.json')
                                     rirs_path = os.path.join(param_path, 'rirs.npy')
@@ -542,7 +422,7 @@ class SDNExperimentManager:
                                             with open(config_path, 'r') as f:
                                                 config_data = json.load(f)
                                             rirs = np.load(rirs_path)
-                                            
+                                            print(f"Loaded {len(rirs)} RIRs")
                                             # Check if this is a nested config structure
                                             if 'config' in config_data and 'room_parameters' in config_data['config']:
                                                 actual_config = config_data['config']
@@ -578,7 +458,8 @@ class SDNExperimentManager:
                                                     rir=rirs[idx],
                                                     fs=fs,
                                                     duration=duration,
-                                                    experiment_id=receiver_info.get('experiment_id')
+                                                    experiment_id=receiver_info.get('experiment_id'),
+                                                    skip_metrics=self.skip_metrics
                                                 )
                                                 
                                                 # Add experiment to room
@@ -633,18 +514,52 @@ class SDNExperimentManager:
             experiments.extend(list(room.experiments.values()))
         return experiments
 
-def get_batch_manager():
+def get_batch_manager(results_dir='results', skip_metrics=False):
+    """
+    Get a batch experiment manager.
+    
+    Args:
+        results_dir (str): Directory containing the results
+        skip_metrics (bool): If True, skip calculating metrics during loading (they'll be calculated on-demand)
+        
+    Returns:
+        SDNExperimentManager: The batch experiment manager
+    """
     _batch_manager = SDNExperimentManager(
-        results_dir='results',
-        is_batch_manager=True
+        results_dir=results_dir,
+        is_batch_manager=True,
+        skip_metrics=skip_metrics
     )
     return _batch_manager
 
-def get_singular_manager():
+def get_fast_batch_manager(results_dir='results'):
+    """
+    Get a batch manager with faster loading speed by skipping metric calculations.
+    Metrics will be calculated on-demand when needed.
+    
+    Args:
+        results_dir (str): Directory containing the results
+        
+    Returns:
+        SDNExperimentManager: The batch experiment manager with lazy metric calculation
+    """
+    return get_batch_manager(results_dir=results_dir, skip_metrics=True)
 
+def get_singular_manager(results_dir='results', skip_metrics=False):
+    """
+    Get a singular experiment manager.
+    
+    Args:
+        results_dir (str): Directory containing the results
+        skip_metrics (bool): If True, skip calculating metrics during loading
+        
+    Returns:
+        SDNExperimentManager: The singular experiment manager
+    """
     _singular_manager = SDNExperimentManager(
-        results_dir='results',
-        is_batch_manager=False
+        results_dir=results_dir,
+        is_batch_manager=False,
+        skip_metrics=skip_metrics
     )
     return _singular_manager
 
@@ -653,7 +568,7 @@ def get_singular_manager():
 # load_manager.load_experiments()
 
 # Or use the singletons
-# batch_manager = get_batch_manager()
+# batch_manager = get_batch_manager(results_dir='results')
 # singular_manager = get_singular_manager()
 
 # Access experiments
@@ -671,3 +586,21 @@ def get_singular_manager():
 # visualizer = SDNExperimentVisualizer()
 # visualizer.show(is_batch=True)  # For batch experiments
 # visualizer.show(is_batch=False)  # For singular experiments
+
+from sdn_experiment_visualizer import SDNExperimentVisualizer
+# Create a visualizer using the batch manager
+
+results_dir = 'results'  # Default: uses results/rooms/
+
+print("d")
+# Use fast loading by skipping metric calculations initially
+batch_manager = get_batch_manager(results_dir=results_dir)
+print("r")
+
+batch_visualizer = SDNExperimentVisualizer(batch_manager)
+batch_visualizer.show(port=9043)
+
+# Create a visualizer using the singular manager
+# single_manager = get_singular_manager()
+# singular_visualizer = SDNExperimentVisualizer(single_manager)
+# singular_visualizer.show(port=9051)

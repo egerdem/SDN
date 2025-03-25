@@ -1,12 +1,23 @@
 import os
 import json
+# import pickle
 import numpy as np
+import spatial_analysis as sa
+# import matplotlib.pyplot as plt
+import dash
+from dash import dcc, html, callback, Input, Output, State, dash_table
+import plotly.graph_objects as go
+# from plotly.subplots import make_subplots
+# import pandas as pd
 from datetime import datetime
 import hashlib
+# import importlib
 import sys
-import spatial_analysis as sa
+# from pathlib import Path
+import webbrowser
+from threading import Timer
 
-# Import modules for core functionality
+# Import modules from the main codebase
 import geometry
 import plot_room as pp
 import EchoDensity as ned
@@ -16,9 +27,6 @@ from sdn_core import DelayNetwork
 # Set matplotlib backend to match main script
 import matplotlib
 matplotlib.use('Qt5Agg')  # Set the backend to Qt5
-
-# Note: Visualization functionality has been moved to sdn_experiment_visualizer.py
-# For visualization, import and use the SDNExperimentVisualizer class
 
 class Room:
     """Class to manage room-specific data and associated experiments."""
@@ -109,6 +117,9 @@ class Room:
         # Check if experiment is already in the list for this position (prevent duplicates)
         if not any(exp.experiment_id == experiment.experiment_id for exp in self.experiments_by_position[pos_key]):
             self.experiments_by_position[pos_key].append(experiment)
+            
+        # print("Added experiment to position:", pos_key)
+        # print("Total positions:", len(self.experiments_by_position))
         
     def get_experiments_for_position(self, pos_idx):
         """Get all experiments for a given source-mic position index."""
@@ -377,49 +388,21 @@ class SDNExperiment:
 
 
 class SDNExperimentManager:
-    """Class to manage multiple acoustic simulation experiments and store results."""
+    """Class to manage multiple acoustic simulation experiments, store results, and provide visualization."""
     
-    def __init__(self, results_dir='results', is_batch_manager=False, dont_check_duplicates=False):
+    def __init__(self, results_dir='results', is_batch_manager=False):
         """
         Initialize the experiment manager.
         
         Args:
-            results_dir (str): Base directory to store experiment data. Can be customized
-                             to separate different sets of experiments.
-                              
+            results_dir (str): Base directory to store experiment data
             is_batch_manager (bool): If True, this manager handles batch processing experiments
-                                   with multiple source/receiver positions.
-            
-            dont_check_duplicates (bool): If True, skip loading existing experiments.
-                                        This can significantly speed up initialization
-                                        when you don't need to check for duplicates.
-        
-        Directory Structure:
-            When is_batch_manager=False (singular):
-                {results_dir}/room_singulars/{room_name}/{experiment_id}.json
-                {results_dir}/room_singulars/{room_name}/{experiment_id}.npy
-                
-            When is_batch_manager=True (batch):
-                {results_dir}/rooms/{room_name}/{source_label}/{method}/{param_set}/config.json
-                {results_dir}/rooms/{room_name}/{source_label}/{method}/{param_set}/rirs.npy
-                
-        Example:
-            # Create a manager for singular experiments in custom directory
-            singular_mgr = SDNExperimentManager(results_dir='custom_results', is_batch_manager=False)
-            
-            # Create a manager for batch experiments in default directory
-            batch_mgr = SDNExperimentManager(results_dir='results', is_batch_manager=True)
         """
         self.results_dir = results_dir
         self.is_batch_manager = is_batch_manager
         self.rooms = {}  # name -> Room
         self.ensure_dir_exists()
-        
-        # Only load experiments if not skipping duplicate checks
-        if not dont_check_duplicates:
-            self.load_experiments()
-        else:
-            print("Skipping experiment loading (dont_check_duplicates=True)")
+        self.load_experiments()
     
     def _get_results_dir(self):
         """Get the base results directory."""
@@ -441,23 +424,7 @@ class SDNExperimentManager:
         return f"room_{room_hash}"
     
     def _get_room_dir(self, room_name):
-        """
-        Get the directory path for a room based on experiment type.
-        
-        Directory structure:
-        - Singular experiments: {results_dir}/room_singulars/{room_name}/
-          All files are stored directly in this directory.
-          
-        - Batch experiments: {results_dir}/rooms/{room_name}/
-          Further organized by source/method/params structure:
-          {results_dir}/rooms/{room_name}/{source_label}/{method}/{param_set}/
-        
-        Args:
-            room_name (str): The name of the room
-            
-        Returns:
-            str: The path to the room directory
-        """
+        """Get the directory path for a room."""
         if not self.is_batch_manager:
             # For singular experiments, use the room_singulars folder
             return os.path.join(self.results_dir, 'room_singulars', room_name)
@@ -685,7 +652,7 @@ class SDNExperimentManager:
                         print(f"Error loading room {room_name}: {e}")
                         continue  # Skip this room and continue with the next
     
-    def run_experiment(self, config, room_parameters, duration, fs=44100,
+    def run_experiment(self, config, room_parameters, duration=0.5, fs=44100, 
                       force_rerun=False, room_name=None, method='SDN',
                       batch_processing=False, source_positions=None, receiver_positions=None):
         """
@@ -982,14 +949,14 @@ class SDNExperimentManager:
             # Get source and mic positions from config
             room_params = experiment.config.get('room_parameters', {})
             source_pos = [
-                room_params.get('source x'),
-                room_params.get('source y'),
-                room_params.get('source z')
+                room_params.get('source x', 0),
+                room_params.get('source y', 0),
+                room_params.get('source z', 0)
             ]
             mic_pos = [
-                room_params.get('mic x'),
-                room_params.get('mic y'),
-                room_params.get('mic z')
+                room_params.get('mic x', 0),
+                room_params.get('mic y', 0),
+                room_params.get('mic z', 0)
             ]
             
             # Get the source label or use position-based label
@@ -1089,10 +1056,10 @@ class SDNExperimentManager:
     def get_experiment(self, experiment_id):
         """
         Get an experiment by ID.
-        
+
         Args:
             experiment_id (str): The ID of the experiment
-            
+
         Returns:
             SDNExperiment: The experiment object
         """
@@ -1100,14 +1067,14 @@ class SDNExperimentManager:
             if experiment_id in room.experiments:
                 return room.experiments[experiment_id]
         return None
-    
+
     def get_experiments_by_label(self, label):
         """
         Get experiments by label.
-        
+
         Args:
             label (str): The label to search for
-            
+
         Returns:
             list: List of matching experiments
         """
@@ -1115,11 +1082,11 @@ class SDNExperimentManager:
         for room in self.rooms.values():
             experiments.extend([exp for exp in room.experiments.values() if label in exp.get_label()])
         return experiments
-    
+
     def get_all_experiments(self):
         """
         Get all experiments.
-        
+
         Returns:
             list: List of all experiments
         """
@@ -1128,9 +1095,848 @@ class SDNExperimentManager:
             experiments.extend(list(room.experiments.values()))
         return experiments
 
+    def create_room_visualization(self, experiments, highlight_pos_idx=None):
+        """
+        Create a 2D top-view visualization of the room with source and receiver positions.
+        
+        Args:
+            experiments (list): List of SDNExperiment objects or Room objects to visualize
+            highlight_pos_idx (int, optional): Index of source-mic pair to highlight
+            
+        Returns:
+            go.Figure: Plotly figure with room visualization
+        """
+        fig = go.Figure()
+        
+        # Keep track of room dimensions
+        min_x, max_x = float('inf'), float('-inf')
+        min_y, max_y = float('inf'), float('-inf')
+        
+        # Get the current room and its experiments
+        room = experiments[0] if isinstance(experiments[0], Room) else None
+        if room is None:
+            return fig
+            
+        # Get room dimensions
+        width = room.parameters['width']
+        depth = room.parameters['depth']
+        height = room.parameters['height']
+        
+        # Update plot bounds
+        min_x = min(min_x, 0)
+        max_x = max(max_x, width)
+        min_y = min(min_y, 0)
+        max_y = max(max_y, depth)
+        
+        # Draw room outline
+        fig.add_shape(
+            type="rect",
+            x0=0, y0=0, x1=width, y1=depth,
+            line=dict(color='black', width=2),
+            fillcolor="rgba(240, 240, 240, 0.1)",
+            layer="above"
+        )
+        
+        # Draw all source-mic pairs with reduced opacity
+        if room.source_mic_pairs:
+            # Extract all unique source positions
+            source_positions = []
+            mic_positions = []
+            
+            for src_mic_pair in room.source_mic_pairs:
+                source_pos, mic_pos = src_mic_pair
+                
+                # Add to unique positions lists if not already present
+                if all(not np.array_equal(source_pos, pos) for pos in source_positions):
+                    source_positions.append(source_pos)
+                if all(not np.array_equal(mic_pos, pos) for pos in mic_positions):
+                    mic_positions.append(mic_pos)
+            
+            # Add all sources with low opacity
+            x_sources = [pos[0] for pos in source_positions]
+            y_sources = [pos[1] for pos in source_positions]
+            fig.add_trace(go.Scatter(
+                x=x_sources, y=y_sources,
+                mode='markers',
+                marker=dict(
+                    color='red',
+                    size=12,
+                    symbol='circle',
+                    line=dict(color='black', width=2),
+                    opacity=0.2
+                ),
+                name='All Sources',
+                showlegend=False
+            ))
+            
+            # Add all mics with low opacity
+            x_mics = [pos[0] for pos in mic_positions]
+            y_mics = [pos[1] for pos in mic_positions]
+            fig.add_trace(go.Scatter(
+                x=x_mics, y=y_mics,
+                mode='markers',
+                marker=dict(
+                    color='green',
+                    size=12,
+                    symbol='circle',
+                    line=dict(color='black', width=2),
+                    opacity=0.2
+                ),
+                name='All Microphones',
+                showlegend=False
+            ))
+        
+        # Get current source-mic pair and highlight it
+        current_pos = None
+        if highlight_pos_idx is not None and room.source_mic_pairs:
+            current_pos = room.source_mic_pairs[highlight_pos_idx % len(room.source_mic_pairs)]
+            source_pos, mic_pos = current_pos
+            
+            # Add highlighted source marker (red)
+            fig.add_trace(go.Scatter(
+                x=[source_pos[0]], y=[source_pos[1]],
+                mode='markers',
+                marker=dict(
+                    color='red',
+                    size=12,
+                    symbol='circle',
+                    line=dict(color='black', width=2)
+                ),
+                name='Active Source'
+            ))
+            
+            # Add highlighted microphone marker (green)
+            fig.add_trace(go.Scatter(
+                x=[mic_pos[0]], y=[mic_pos[1]],
+                mode='markers',
+                marker=dict(
+                    color='green',
+                    size=12,
+                    symbol='circle',
+                    line=dict(color='black', width=2)
+                ),
+                name='Active Microphone'
+            ))
+        
+        # Add some padding
+        padding = 0.5
+        x_range = [min_x - padding, max_x + padding]
+        y_range = [min_y - padding, max_y + padding]
+        
+        # Update layout
+        fig.update_layout(
+            title=f"{room.display_name}: {room.dimensions_str}",
+            xaxis=dict(
+                title="Width (m)",
+                range=x_range,
+                constrain="domain",
+                showgrid=True,
+                gridcolor='rgba(200, 200, 200, 0.2)',
+                zerolinecolor='rgba(200, 200, 200, 0.2)'
+            ),
+            yaxis=dict(
+                title="Depth (m)",
+                range=y_range,
+                scaleanchor="x",
+                scaleratio=1,
+                showgrid=True,
+                gridcolor='rgba(200, 200, 200, 0.2)',
+                zerolinecolor='rgba(200, 200, 200, 0.2)'
+            ),
+            showlegend=True,
+            legend=dict(
+                yanchor="top",
+                y=0.99,
+                xanchor="left",
+                x=0.01
+            ),
+            margin=dict(t=30, b=0, l=0, r=0),  # Added top margin for title
+            plot_bgcolor='rgba(240, 240, 240, 0.5)'
+        )
+        
+        return fig
+    
+    def plot(self, room_name=None):
+        """
+        Launch an interactive dashboard to visualize experiments for a specific room.
+        
+        Args:
+            room_name (str, optional): Name of the room to display. If None, displays the first room.
+        """
+        if not self.rooms:
+            print("No rooms with experiments to plot.")
+            return
+        
+        # Get the room to display
+        if room_name is None:
+            room_name = next(iter(self.rooms.keys()))
+        elif room_name not in self.rooms:
+            print(f"Room {room_name} not found.")
+            return
+        
+        room = self.rooms[room_name]
+        if not room.experiments:
+            print(f"No experiments in room {room_name}.")
+            return
+        
+        # Create a Dash app
+        app = dash.Dash(__name__)
+        server = app.server
+        port = 8050
+
+        # Add custom styles for dropdown options
+        app.index_string = '''
+        <!DOCTYPE html>
+        <html>
+            <head>
+                {%metas%}
+                <title>{%title%}</title>
+                {%favicon%}
+                {%css%}
+                <style>
+                    /* Make dropdown option text light-colored */
+                    .VirtualizedSelectOption {
+                        color: #e0e0e0 !important;
+                        background-color: #282c34 !important;
+                    }
+                    .VirtualizedSelectFocusedOption {
+                        background-color: #1e2129 !important;
+                    }
+                    /* Style for dropdown input text and selected value */
+                    .Select-value-label {
+                        color: #e0e0e0 !important;
+                    }
+                    .Select-control {
+                        background-color: #282c34 !important;
+                        border-color: #404040 !important;
+                    }
+                    .Select-menu-outer {
+                        background-color: #282c34 !important;
+                        border-color: #404040 !important;
+                    }
+                    .Select-input > input {
+                        color: #e0e0e0 !important;
+                    }
+                    /* Dropdown arrow color */
+                    .Select-arrow {
+                        border-color: #e0e0e0 transparent transparent !important;
+                    }
+                </style>
+            </head>
+            <body>
+                {%app_entry%}
+                <footer>
+                    {%config%}
+                    {%scripts%}
+                    {%renderer%}
+                </footer>
+            </body>
+        </html>
+        '''
+
+        # Get list of rooms for navigation
+        room_names = list(self.rooms.keys())
+        current_room_idx = room_names.index(room_name)
+        
+        # Dark theme colors
+        dark_theme = {
+            'background': '#2d3038',
+            'paper_bg': '#282c34',
+            'text': '#e0e0e0',
+            'grid': 'rgba(255, 255, 255, 0.1)',
+            'button_bg': '#404040',
+            'button_text': '#ffffff',
+            'header_bg': '#1e2129',
+            'plot_bg': '#1e2129',
+            'accent': '#61dafb'
+        }
+        
+        # Create app layout
+        app.layout = html.Div([
+            # Room navigation header
+            html.Div([
+                html.Div([
+                    html.H2(
+                        id='room-header',
+                        style={'margin': '0 20px', 'color': dark_theme['text']}
+                    ),
+                    html.H3(
+                        id='rt-header',
+                        style={'margin': '10px 20px', 'color': dark_theme['accent']}
+                    )
+                ], style={'display': 'inline-block', 'position': 'relative'}),
+                html.Div([
+                    html.Button('←', id='prev-room', style={
+                        'fontSize': 24, 
+                        'marginRight': '10px',
+                        'backgroundColor': dark_theme['button_bg'],
+                        'color': dark_theme['button_text'],
+                        'border': 'none',
+                        'borderRadius': '4px',
+                        'padding': '0px 15px'
+                    }),
+                    html.Button('→', id='next-room', style={
+                        'fontSize': 24,
+                        'backgroundColor': dark_theme['button_bg'],
+                        'color': dark_theme['button_text'],
+                        'border': 'none',
+                        'borderRadius': '4px',
+                        'padding': '0px 15px'
+                    }),
+                ], style={'position': 'absolute', 'left': '50%', 'top': '%50', 'transform': 'translateX(-50%)'}),
+                dcc.Store(id='current-room-idx', data=current_room_idx)
+            ], style={'textAlign': 'center', 'margin': '20px', 'position': 'relative'}),
+            
+            # Main content with plots and room visualization
+            html.Div([
+                # Left side - plots and table (50% width instead of 75%)
+                html.Div([
+                    # Time range selector
+                    html.Div([
+                        html.H4("Time Range:", style={'display': 'inline-block', 'marginRight': '15px', 'color': dark_theme['text']}),
+                        dcc.RadioItems(
+                            id='time-range-selector',
+                            options=[
+                                {'label': 'Early Part (50ms)', 'value': 0.05},
+                                {'label': 'First 0.5s', 'value': 0.5},
+                                {'label': 'Whole RIR', 'value': 'full'}
+                            ],
+                            value='0.05',  # Default to early part view
+                            labelStyle={'display': 'inline-block', 'marginRight': '20px', 'cursor': 'pointer'},
+                            style={'color': dark_theme['text'], 'fontSize': '14px'},
+                            inputStyle={'marginRight': '5px'}
+                        )
+                    ], style={'margin': '10px 0 0 20px', 'display': 'flex', 'alignItems': 'center'}),
+                    
+                    # Plots
+                    dcc.Tabs([
+                        dcc.Tab(label="Room Impulse Responses", children=[
+                            dcc.Graph(id='rir-plot', style={'height': '50vh'})
+                        ],
+                        style={
+                            'backgroundColor': dark_theme['paper_bg'],
+                            'color': dark_theme['text']
+                        },
+                        selected_style={
+                            'backgroundColor': dark_theme['header_bg'],
+                            'color': dark_theme['accent'],
+                            'borderTop': f'2px solid {dark_theme["accent"]}'
+                        }),
+                        dcc.Tab(label="Energy Decay Curves", children=[
+                            dcc.Graph(id='edc-plot', style={'height': '50vh'})
+                        ],
+                        style={
+                            'backgroundColor': dark_theme['paper_bg'],
+                            'color': dark_theme['text']
+                        },
+                        selected_style={
+                            'backgroundColor': dark_theme['header_bg'],
+                            'color': dark_theme['accent'],
+                            'borderTop': f'2px solid {dark_theme["accent"]}'
+                        }),
+                        dcc.Tab(label="Normalized Echo Density", children=[
+                            dcc.Graph(id='ned-plot', style={'height': '50vh'})
+                        ],
+                        style={
+                            'backgroundColor': dark_theme['paper_bg'],
+                            'color': dark_theme['text']
+                        },
+                        selected_style={
+                            'backgroundColor': dark_theme['header_bg'],
+                            'color': dark_theme['accent'],
+                            'borderTop': f'2px solid {dark_theme["accent"]}'
+                        })
+                    ], style={'backgroundColor': dark_theme['paper_bg'], 'margin': '10px 0'}),
+                    
+                    # Experiment table for current position (now below the plots)
+                    html.Div([
+                        html.H3("Active Experiments", style={'color': dark_theme['text']}),
+                        dash_table.DataTable(
+                            id='experiment-table',
+                            style_table={
+                                'overflowX': 'auto',
+                                'maxWidth': '100%'
+                            },
+                            style_cell={
+                                'textAlign': 'left',
+                                'minWidth': '5px',     # Smaller minimum width
+                                'width': '100px',      # Smaller default width
+                                'maxWidth': '150px',   # Smaller maximum width
+                                'padding': '5px',      # Reduced padding
+                                'backgroundColor': dark_theme['paper_bg'],
+                                'color': dark_theme['text'],
+                                'whiteSpace': 'normal',
+                                'height': 'auto',
+                                'overflow': 'hidden',
+                                'textOverflow': 'ellipsis'
+                            },
+                            style_cell_conditional=[
+                                # Generate conditional styling for each column from config
+                                {'if': {'column_id': col_config['id']},
+                                 'width': col_config['width']}
+                                for col_config in self._get_column_config()
+                                if 'width' in col_config
+                            ],
+                            style_header={
+                                'backgroundColor': dark_theme['header_bg'],
+                                'fontWeight': 'bold',
+                                'color': dark_theme['text'],
+                                'whiteSpace': 'normal',
+                                'height': 'auto',
+                                'textAlign': 'center'
+                            },
+                            style_data_conditional=[
+                                {
+                                    'if': {'row_index': 'odd'},
+                                    'backgroundColor': 'rgba(255, 255, 255, 0.05)'
+                                }
+                            ],
+                            filter_action="native",
+                            sort_action="native",
+                            sort_mode="multi"
+                        )
+                    ], style={'margin': '20px'})
+                ], style={'width': '50%', 'display': 'inline-block', 'verticalAlign': 'top'}),
+                
+                # Middle - room visualization (25% width)
+                html.Div([
+                    # Title
+                    html.H3("Room Layout (Top View)", 
+                           style={'textAlign': 'center', 'marginBottom': '5px', 'marginTop': '65px', 'color': dark_theme['text']}),
+                    
+                    # Source and receiver dropdown selectors (NEW)
+                    html.Div([
+                        # Source selector
+                        html.Div([
+                            html.Label("Select source", 
+                                     style={'fontSize': '14px', 'color': dark_theme['text'], 'display': 'block', 'marginBottom': '5px'}),
+                            dcc.Dropdown(
+                                id='source-selector',
+                                options=[],  # Will be populated in callback
+                                style={
+                                    'backgroundColor': dark_theme['paper_bg'],
+                                    'color': dark_theme['text'],  # Light text color for better readability
+                                    'width': '100%'
+                                },
+                                # Add dropdown style for better readability of options
+                                className='dropdown-light-text'
+                            )
+                        ], style={'width': '100%', 'marginBottom': '10px'}),
+                        
+                        # Receiver selector
+                        html.Div([
+                            html.Label("Select receiver", 
+                                     style={'fontSize': '14px', 'color': dark_theme['text'], 'display': 'block', 'marginBottom': '5px'}),
+                            dcc.Dropdown(
+                                id='receiver-selector',
+                                options=[],  # Will be populated in callback
+                                style={
+                                    'backgroundColor': dark_theme['paper_bg'],
+                                    'color': dark_theme['text'],  # Light text color for better readability
+                                    'width': '100%'
+                                },
+                                # Add dropdown style for better readability of options
+                                className='dropdown-light-text'
+                            )
+                        ], style={'width': '100%', 'marginBottom': '10px'})
+                    ], style={'padding': '0px 10px'}),
+                    
+                    
+                    # Store for current position index
+                    dcc.Store(id='current-pos-idx', data=0),
+                    
+                    # Room visualization plot
+                    dcc.Graph(
+                        id='room-plot',
+                        style={'height': '50vh', 'marginTop': '0px'}
+                    ),
+                    
+                    # Position navigation buttons (at bottom)
+                    html.Div([
+                        html.Div(style={'textAlign': 'center', 'marginBottom': '5px', 'fontSize': '16px', 'color': dark_theme['text']}, children="Navigate Source-Mic Pairs"),
+                        html.Button('←', id='prev-pos', style={
+                            'fontSize': 20, 
+                            'marginRight': '10px',
+                            'backgroundColor': dark_theme['button_bg'],
+                            'color': dark_theme['button_text'],
+                            'border': 'none',
+                            'borderRadius': '4px',
+                            'padding': '0px 15px'
+                        }),
+                        html.Button('→', id='next-pos', style={
+                            'fontSize': 20,
+                            'backgroundColor': dark_theme['button_bg'],
+                            'color': dark_theme['button_text'],
+                            'border': 'none',
+                            'borderRadius': '4px',
+                            'padding': '0px 15px'
+                        }),
+                    ], style={'textAlign': 'center', 'marginTop': '10px'}),
+                    
+                    # Position info text
+                    html.Div(id='pos-info', 
+                           style={'textAlign': 'center', 'marginBottom': '5px', 'marginTop': '10px', 'fontSize': '14px', 'color': dark_theme['text']}),
+                ], style={'width': '25%', 'display': 'inline-block', 'verticalAlign': 'top'}),
+                
+                # Right side - empty space (25% width) for future use
+                html.Div([
+                    # Empty space for future extensions
+                    html.H3("Future Plot Area", 
+                           style={'textAlign': 'center', 'marginBottom': '5px', 'marginTop': '65px', 'color': dark_theme['text'], 'opacity': '0.5'}),
+                ], style={'width': '25%', 'display': 'inline-block', 'verticalAlign': 'top'})
+            ], style={'display': 'flex', 'alignItems': 'flex-start'})
+        ], style={
+            'backgroundColor': dark_theme['background'],
+            'minHeight': '100vh',
+            'fontFamily': 'Arial, sans-serif',
+            'padding': '10px'
+        })
+        
+        # Combine the navigation and dropdown callbacks into a single callback
+        @app.callback(
+            [Output('current-room-idx', 'data'),
+             Output('current-pos-idx', 'data'),
+             Output('pos-info', 'children'),
+             Output('room-plot', 'figure'),
+             Output('experiment-table', 'data'),
+             Output('experiment-table', 'columns'),
+             Output('room-header', 'children'),
+             Output('rt-header', 'children'),
+             Output('source-selector', 'options'),
+             Output('source-selector', 'value'),
+             Output('receiver-selector', 'options'),
+             Output('receiver-selector', 'value')],
+            [Input('prev-room', 'n_clicks'),
+             Input('next-room', 'n_clicks'),
+             Input('prev-pos', 'n_clicks'),
+             Input('next-pos', 'n_clicks'),
+             Input('source-selector', 'value'),
+             Input('receiver-selector', 'value')],
+            [State('current-room-idx', 'data'),
+             State('current-pos-idx', 'data')]
+        )
+        def update_ui(prev_room_clicks, next_room_clicks, 
+                    prev_pos_clicks, next_pos_clicks,
+                    source_str, receiver_str,
+                    current_room_idx, current_pos_idx):
+            ctx = dash.callback_context
+            
+            # Initialize indices if they're None
+            if current_room_idx is None:
+                current_room_idx = 0
+            if current_pos_idx is None:
+                current_pos_idx = 0
+            
+            new_room_idx = current_room_idx
+            new_pos_idx = current_pos_idx
+            
+            # Get the current room
+            room = self.rooms[room_names[new_room_idx]]
+            
+            # Create a mapping of source-receiver pairs to position indices
+            pos_indices = {}
+            source_positions = {}
+            receiver_positions = {}
+            
+            for idx, pos_key in enumerate(room.source_mic_pairs):
+                source_pos, mic_pos = pos_key
+                
+                # Format source position string
+                source_str_key = f"Source ({source_pos[0]:.1f}, {source_pos[1]:.1f})"
+                source_positions[source_str_key] = source_pos
+                
+                # Format receiver position string
+                if len(room.source_mic_pairs) <= 50:
+                    receiver_str_key = f"Mic ({mic_pos[0]:.1f}, {mic_pos[1]:.1f})"
+                else:
+                    receiver_str_key = f"Mic {len(receiver_positions) + 1} ({mic_pos[0]:.1f}, {mic_pos[1]:.1f})"
+                receiver_positions[receiver_str_key] = mic_pos
+                
+                # Store the mapping
+                pos_indices[(source_str_key, receiver_str_key)] = idx
+            
+            # Handle button clicks or dropdown changes
+            if ctx.triggered:
+                trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
+                
+                # Handle room navigation
+                if trigger_id in ['prev-room', 'next-room']:
+                    if trigger_id == 'prev-room':
+                        new_room_idx = (current_room_idx - 1) % len(room_names)
+                    else:  # next-room
+                        new_room_idx = (current_room_idx + 1) % len(room_names)
+                    # Reset position index when changing rooms
+                    new_pos_idx = 0
+                
+                # Handle position navigation buttons
+                elif trigger_id in ['prev-pos', 'next-pos']:
+                    if room.source_mic_pairs:
+                        if trigger_id == 'prev-pos':
+                            new_pos_idx = (current_pos_idx - 1) % len(room.source_mic_pairs)
+                        else:  # next-pos
+                            new_pos_idx = (current_pos_idx + 1) % len(room.source_mic_pairs)
+                
+                # Handle dropdown selection changes
+                elif trigger_id in ['source-selector', 'receiver-selector']:
+                    # Only try to update if both dropdowns have values
+                    if source_str and receiver_str:
+                        pos_key = (source_str, receiver_str)
+                        if pos_key in pos_indices:
+                            new_pos_idx = pos_indices[pos_key]
+            
+            # Get updated room (in case room changed)
+            room = self.rooms[room_names[new_room_idx]]
+            
+            # Get active data for the new position
+            pos_info = room.get_position_info(new_pos_idx)
+            active_experiments = room.get_experiments_for_position(new_pos_idx)
+            table_data, columns = self._prepare_table_data(active_experiments)
+            
+            # Create room visualization with current position highlighted
+            room_fig = self.create_room_visualization([room], highlight_pos_idx=new_pos_idx)
+            room_fig.update_layout(
+                template="plotly_dark",
+                paper_bgcolor="#1e2129",
+                plot_bgcolor="#1e2129",
+                font={"color": "#e0e0e0"}
+            )
+            
+            # Create header information
+            room_header = f"Room: {room.display_name}"
+            rt_header = f"Dimensions: {room.dimensions_str}, abs={room.absorption_str}, {room.theoretical_rt_str}"
+            
+            # Re-create the sources and receivers options based on current room
+            sources = []
+            receivers = []
+            pos_indices = {}
+            
+            for idx, pos_key in enumerate(room.source_mic_pairs):
+                source_pos, mic_pos = pos_key
+                
+                # Format source position
+                source_str_key = f"Source ({source_pos[0]:.1f}, {source_pos[1]:.1f})"
+                source_opt = {'label': source_str_key, 'value': source_str_key}
+                if source_opt not in sources:
+                    sources.append(source_opt)
+                
+                # Format receiver position
+                if len(room.source_mic_pairs) <= 50:
+                    receiver_str_key = f"Mic ({mic_pos[0]:.1f}, {mic_pos[1]:.1f})"
+                else:
+                    # For large number of receivers, use numbered format
+                    receiver_count = 0
+                    for prev_idx in range(idx):
+                        prev_src, prev_mic = room.source_mic_pairs[prev_idx]
+                        if tuple(prev_mic) == tuple(mic_pos):
+                            receiver_count += 1
+                    receiver_str_key = f"Mic {receiver_count + 1} ({mic_pos[0]:.1f}, {mic_pos[1]:.1f})"
+                
+                receiver_opt = {'label': receiver_str_key, 'value': receiver_str_key}
+                if receiver_opt not in receivers:
+                    receivers.append(receiver_opt)
+                
+                # Store the position index mapping
+                pos_indices[(source_str_key, receiver_str_key)] = idx
+            
+            # Store indices for future lookups
+            app.server.pos_indices = pos_indices
+            
+            # Get the current position details for dropdown selection
+            if room.source_mic_pairs:
+                current_source_pos, current_mic_pos = room.source_mic_pairs[new_pos_idx]
+                
+                # Find the matching string representations
+                current_source = f"Source ({current_source_pos[0]:.1f}, {current_source_pos[1]:.1f})"
+                
+                if len(room.source_mic_pairs) <= 50:
+                    current_receiver = f"Mic ({current_mic_pos[0]:.1f}, {current_mic_pos[1]:.1f})"
+                else:
+                    # For large number of receivers, need to find the correct mic number
+                    mic_count = 0
+                    for idx, (src, mic) in enumerate(room.source_mic_pairs):
+                        if tuple(mic) == tuple(current_mic_pos):
+                            if idx < new_pos_idx:
+                                mic_count += 1
+                            else:
+                                break
+                    current_receiver = f"Mic {mic_count + 1} ({current_mic_pos[0]:.1f}, {current_mic_pos[1]:.1f})"
+            else:
+                current_source = None
+                current_receiver = None
+            
+            return (
+                new_room_idx,
+                new_pos_idx,
+                pos_info,
+                room_fig,
+                table_data,
+                columns,
+                room_header,
+                rt_header,
+                sources,
+                current_source,
+                receivers,
+                current_receiver
+            )
+
+        # Add a callback to update all three plots simultaneously based on time range selection
+        @app.callback(
+            [Output('rir-plot', 'figure'),
+             Output('edc-plot', 'figure'),
+             Output('ned-plot', 'figure')],
+            [Input('current-room-idx', 'data'),
+             Input('current-pos-idx', 'data'),
+             Input('time-range-selector', 'value')]
+        )
+        def update_all_plots(room_idx, pos_idx, time_range):
+            if room_idx is None or pos_idx is None:
+                # Return empty figures if data is not available
+                return go.Figure(), go.Figure(), go.Figure()
+            
+            room = self.rooms[room_names[room_idx]]
+            active_experiments = room.get_experiments_for_position(pos_idx)
+            
+            # Function to set the x-axis range based on selected time range
+            def set_time_range(fig, max_time=None):
+                if time_range != 'full':
+                    fig.update_xaxes(range=[0, float(time_range)])
+                elif max_time is not None:
+                    fig.update_xaxes(range=[0, max_time])
+                return fig
+            
+            # Create RIR plot
+            rir_fig = go.Figure()
+            max_time = 0
+            
+            # Number the experiments for this position
+            for idx, exp in enumerate(active_experiments, 1):
+                exp.display_id = idx  # Store the ID on the experiment
+                method = exp.config.get('method', 'SDN')
+                
+                # Create enhanced legend name with ID and method
+                legend_name = f"{idx}: {method} {exp.get_label()}"
+                
+                rir_fig.add_trace(go.Scatter(
+                    x=exp.time_axis,
+                    y=exp.rir,
+                    mode='lines',
+                    name=legend_name
+                ))
+                max_time = max(max_time, exp.time_axis[-1] if len(exp.time_axis) > 0 else 0)
+            
+            rir_fig.update_layout(
+                title="Room Impulse Responses",
+                xaxis_title="Time (s)",
+                yaxis_title="Amplitude",
+                showlegend=True,
+                legend=dict(
+                    yanchor="top",
+                    y=0.99,
+                    xanchor="right",
+                    x=0.99
+                ),
+                template="plotly_dark",
+                paper_bgcolor="#1e2129",
+                plot_bgcolor="#1e2129",
+                font={"color": "#e0e0e0"}
+            )
+            
+            
+            # Create EDC plot
+            edc_fig = go.Figure()
+            
+            for exp in active_experiments:
+                method = exp.config.get('method', 'SDN')
+                # Use the same legend naming format for consistency
+                legend_name = f"{exp.display_id}: {method} {exp.get_label()}"
+                
+                edc_fig.add_trace(go.Scatter(
+                    x=exp.time_axis,
+                    y=exp.edc,
+                    mode='lines',
+                    name=legend_name
+                ))
+            
+            edc_fig.update_layout(
+                title="Energy Decay Curves",
+                xaxis_title="Time (s)",
+                yaxis_title="Energy (dB)",
+                showlegend=True,
+                legend=dict(
+                    yanchor="top",
+                    y=0.99,
+                    xanchor="right",
+                    x=0.99
+                ),
+                template="plotly_dark",
+                paper_bgcolor="#1e2129",
+                plot_bgcolor="#1e2129",
+                font={"color": "#e0e0e0"}
+            )
+            
+            # Set y-axis range for RIR plot when early part (50ms) is selected
+            if time_range == 0.05 or time_range == '0.05':
+                edc_fig.update_yaxes(range=[-10, 2])
+
+            # Create NED plot
+            ned_fig = go.Figure()
+            
+            for exp in active_experiments:
+                method = exp.config.get('method', 'SDN')
+                # Use the same legend naming format for consistency
+                legend_name = f"{exp.display_id}: {method} {exp.get_label()}"
+                
+                ned_fig.add_trace(go.Scatter(
+                    x=exp.ned_time_axis,
+                    y=exp.ned,
+                    mode='lines',
+                    name=legend_name
+                ))
+            
+            ned_fig.update_layout(
+                title="Normalized Echo Density",
+                xaxis_title="Time (s)",
+                yaxis_title="Normalized Echo Density",
+                showlegend=True,
+                legend=dict(
+                    yanchor="top",
+                    y=0.99,
+                    xanchor="right",
+                    x=0.99
+                ),
+                template="plotly_dark",
+                paper_bgcolor="#1e2129",
+                plot_bgcolor="#1e2129",
+                font={"color": "#e0e0e0"}
+            )
+            
+            # Apply time range to all plots
+            set_time_range(rir_fig, max_time)
+            set_time_range(edc_fig, max_time)
+            set_time_range(ned_fig, max_time)
+            
+            return rir_fig, edc_fig, ned_fig
+        
+        # Open browser automatically
+        def open_browser():
+            webbrowser.open_new(f"http://127.0.0.1:{port}/")
+        
+        Timer(1, open_browser).start()
+        
+        # Print message to console
+        server_address = f"http://127.0.0.1:{port}/"
+        print("\n" + "=" * 70)
+        print(f"Dash server is running at: {server_address}")
+        print("If the browser doesn't open automatically, please copy and paste the URL above.")
+        print("=" * 70)
+        
+        # Run the app
+        app.run_server(debug=True, port=port)
+
+
     def run_ism_experiment(self, room_parameters, max_order=12, ray_tracing=False, use_rand_ism=False, duration=0.5, fs=44100, force_rerun=False, room_name=None, label="ISM", batch_processing=False, source_positions=None, receiver_positions=None):
         """
-        Run an Image Source Method (ISM) experiment.
+        Run an Image Source Method (ISM) experiment, supporting both single and batch processing.
         
         Args:
             room_parameters (dict): Room parameters
@@ -1142,12 +1948,12 @@ class SDNExperimentManager:
             force_rerun (bool): If True, rerun the experiment even if it exists
             room_name (str, optional): Explicit name for the room
             label (str): Label for the experiment
-            batch_processing (bool): If True, run as batch processing with multiple source/receiver positions
-            source_positions (list, optional): List of source positions for batch processing
-            receiver_positions (list, optional): List of receiver positions for batch processing
+            batch_processing (bool): If True, run for multiple source-mic positions
+            source_positions (list): List of source positions [(x,y,z,label), ...] 
+            receiver_positions (list): List of receiver positions [(x,y,z), ...]
             
         Returns:
-            SDNExperiment or dict: The experiment object or dict of experiment objects for batch processing
+            SDNExperiment or list: The experiment object or list of experiment IDs if batch processing
         """
         # Create config
         config = {
@@ -1172,61 +1978,246 @@ class SDNExperimentManager:
             receiver_positions=receiver_positions
         )
 
-# Singleton pattern for batch manager
-# _batch_manager = None
+    def _get_column_config(self):
+        """
+        Define the configuration for table columns.
+        
+        This single source of truth controls:
+        1. Which columns are displayed
+        2. The order of columns
+        3. The display names of columns
+        4. Any custom formatting for values
+        
+        Returns:
+            list: List of column configurations in display order
+        """
+        return [
+            # ID column (leftmost)
+            {
+                'id': '#',
+                'display': True,
+                'name': '#',
+                'width': '30px',
+            },
+            # Core columns
+            {
+                'id': 'Method',
+                'display': True,
+                'name': 'Method',
+                'width': '70px',
+            },
+            {
+                'id': 'Label',
+                'display': True,
+                'name': 'Label',
+                'width': '180px',
+            },
 
-def get_batch_manager(results_dir='results', dont_check_duplicates=False):
-    """
-    Get or create the batch experiment manager singleton.
-    
-    Args:
-        results_dir (str): Custom directory to store batch experiment results
-                          Default is 'results' with data in 'results/rooms/'
-        dont_check_duplicates (bool): If True, skip loading existing experiments.
-                                    This significantly speeds up initialization
-                                    when you don't need to check for duplicates.
-    
-    Returns:
-        SDNExperimentManager: The batch experiment manager instance
-    """
-    _batch_manager = SDNExperimentManager(
-        results_dir=results_dir,
-        is_batch_manager=True,
-        dont_check_duplicates=dont_check_duplicates
-    )
+            
+            # SDN parameters
+            {
+                'id': 'sdn_source_weighting',
+                'display': True,
+                'name': 'SDN: source_weighting',
+                'width': '100px',
+            },
+            {
+                'id': 'sdn_specular_source_injection',
+                'display': True,
+                'name': 'SDN: specular_source_injection',
+                'width': '120px',
+            },
+            {
+                'id': 'sdn_scattering_matrix_update_coef',
+                'display': True,
+                'name': 'SDN: scattering_matrix_update_coef',
+                'width': '120px',
+            },
+            {
+                'id': 'sdn_coef',
+                'display': True,
+                'name': 'SDN: coef',
+                'width': '100px',
+            },
+            {
+                'id': 'sdn_source_pressure_injection_coeff',
+                'display': True,
+                'name': 'SDN: source_pressure_injection_coeff',
+                'width': '120px',
+            },
+            {
+                'id': 'sdn_specular_scattering',
+                'display': True,
+                'name': 'SDN: specular_scattering',
+                'width': '100px',
+            },
+            
+            # ISM parameters
+            {
+                'id': 'ism_max_order',
+                'display': False,  # Hidden by default as it's in the label
+                'name': 'ISM: max_order',
+                'width': '100px',
+            },
+            {
+                'id': 'ism_ray_tracing',
+                'display': True,
+                'name': 'ISM: ray_tracing',
+                'width': '100px',
+            },
+            {
+                'id': 'ism_use_rand_ism',
+                'display': False,
+                'name': 'ISM: use_rand_ism',
+                'width': '100px',
+            },
+
+            # Metrics
+            {
+                'id': 'rt60',
+                'display': True,
+                'name': 'Metric: rt60',
+                'format': lambda x: f"{x:.3f}" if x is not None else "",
+                'width': '100px',
+            },
+
+            # duration
+            {
+                'id': 'Duration',
+                'display': True,
+                'name': 'Duration (s)',
+                'width': '80px',
+            },
+        ]
+
+    def _prepare_table_data(self, active_experiments):
+        """
+        Prepare data for the DataTable based on column configuration.
+        
+        Args:
+            active_experiments (list): List of experiments to include in the table
+            
+        Returns:
+            tuple: (table_data, columns) for the DataTable
+        """
+        # Get the column configuration
+        column_config = {col['id']: col for col in self._get_column_config()}
+        
+        # Initialize table data
+        table_data = []
+        all_column_ids = set(['#'])  # Ensure ID column is always included
+        
+        # Process each experiment
+        for idx, exp in enumerate(active_experiments, 1):
+            method = exp.config.get('method', 'SDN')
+            row = {}
+            
+            # Add row ID (1, 2, 3, ...)
+            row['#'] = idx
+            
+            # Store the ID on the experiment object for reference in plots
+            exp.display_id = idx
+            
+            # 1. Add core columns
+            row['Method'] = method
+            row['Label'] = exp.get_label()
+            row['Duration'] = exp.duration
+            
+            # 2. Add metrics
+            for metric, value in exp.metrics.items():
+                # Use column_id directly as the metric name
+                column_id = metric
+                if column_id in column_config and 'format' in column_config[column_id]:
+                    row[column_id] = column_config[column_id]['format'](value)
+                else:
+                    row[column_id] = f"{value:.3f}" if value is not None else ""
+                all_column_ids.add(column_id)
+            
+            # 3. Add method-specific parameters
+            if method == 'SDN' and 'flags' in exp.config:
+                flags = exp.config['flags']
+                for key, value in flags.items():
+                    # Use standardized column_id format
+                    column_id = f"sdn_{key}"
+                    row[column_id] = str(value)
+                    all_column_ids.add(column_id)
+            
+            elif method == 'ISM':
+                ism_params = {
+                    'max_order': 'ism_max_order', 
+                    'ray_tracing': 'ism_ray_tracing', 
+                    'use_rand_ism': 'ism_use_rand_ism'
+                }
+                for param, column_id in ism_params.items():
+                    row[column_id] = str(exp.config.get(param, False))
+                    all_column_ids.add(column_id)
+            
+            table_data.append(row)
+        
+        # Ensure all rows have entries for all columns used
+        for row in table_data:
+            for col_id in all_column_ids:
+                if col_id not in row:
+                    row[col_id] = ""
+        
+        # Build column definitions for Dash
+        dash_columns = []
+        
+        # Loop through configured columns in their specified order
+        for col_config in self._get_column_config():
+            col_id = col_config['id']
+            
+            # Only include the column if:
+            # 1. It's marked for display in the config, AND
+            # 2. It actually appears in the data or is a core column
+            if col_config['display'] and (col_id in all_column_ids or col_id in ['#', 'Method', 'Label', 'Duration']):
+                dash_columns.append({
+                    "name": col_config['name'],
+                    "id": col_id
+                })
+        
+        # Handle any dynamic columns that weren't in the config but are in the data
+        # Sort these alphabetically after the configured columns
+        for col_id in sorted(all_column_ids):
+            if col_id not in column_config:
+                dash_columns.append({
+                    "name": col_id.replace('_', ' ').title(),
+                    "id": col_id
+                })
+        
+        return table_data, dash_columns
+
+# Singleton pattern for batch manager
+_batch_manager = None
+
+def get_batch_manager():
+    """Get or create the batch experiment manager singleton."""
+    global _batch_manager
+    if _batch_manager is None:
+        _batch_manager = SDNExperimentManager(
+            results_dir='results',
+            is_batch_manager=True
+        )
     return _batch_manager
 
-def get_singular_manager(results_dir='results', dont_check_duplicates=False):
-    """
-    Get or create the singular experiment manager singleton.
-    
-    Args:
-        results_dir (str): Custom directory to store singular experiment results
-                          Default is 'results' with data in 'results/room_singulars/'
-        dont_check_duplicates (bool): If True, skip loading existing experiments.
-                                    This significantly speeds up initialization
-                                    when you don't need to check for duplicates.
-    
-    Returns:
-        SDNExperimentManager: The singular experiment manager instance  
-    """
+def get_singular_manager():
+    """Get or create the singular experiment manager singleton."""
     global _singular_manager
-    if _singular_manager is None or _singular_manager.results_dir != results_dir:
+    if _singular_manager is None:
         _singular_manager = SDNExperimentManager(
-            results_dir=results_dir,
-            is_batch_manager=False,
-            dont_check_duplicates=dont_check_duplicates
+            results_dir='results',
+            is_batch_manager=False
         )
     return _singular_manager
 
 _singular_manager = None
 
 if __name__ == "__main__":
+    
+    run_single_experiments = True
+    run_batch_experiments = False
 
     duration = 1
-
-    # Use this as a parent directory for the results (optional)
-    results_dir = 'results'  # Default: uses results/rooms/
 
     # Example room parameters
     room_aes = {'width': 9, 'depth': 7, 'height': 4,
@@ -1235,65 +2226,11 @@ if __name__ == "__main__":
                 'absorption': 0.2}
 
     room = room_aes
-    room_name = "room_aes"
-
-    # Generate source & receiver positions
-    receiver_positions = sa.generate_receiver_grid(room['width'], room['depth'], 50)
-    source_positions = sa.generate_source_positions(room)
-
-    run_single_experiments = False
-    run_batch_experiments = True
-
-
-    if run_batch_experiments:
-
-        # Run batch experiments
-        # Use custom results directory for batch experiments (optional)
-        # batch_manager = get_batch_manager("batch_results")  # Will use batch_results/rooms/
-        batch_manager = get_batch_manager(results_dir, dont_check_duplicates=True)  # Default: uses results/rooms/
-        # batch_manager = get_cached_batch_manager(results_dir=results_dir, cache_file='experiment_cache.pkl')
-        
-        print(f"Batch experiments saved in: {batch_manager._get_room_dir(room_name)}")
-        
-        batch_manager.run_experiment(
-            config={
-                'label': 'original',
-                'info': '',
-                'method': 'SDN',
-                'flags': {
-                    # 'specular_source_injection': True,
-                    # 'source_weighting': 5,
-                }
-            },
-            room_parameters=room_aes,
-            duration=duration,
-            fs=44100,
-            room_name="room_aes",
-            batch_processing=True,  # Enable batch processing
-            source_positions=source_positions,  # Provide source positions
-            receiver_positions=receiver_positions  # Provide receiver positions
-        )
-
-        # batch_manager.run_ism_experiment(
-        #     room_parameters=room_aes,
-        #     duration=0.5,  # Shorter duration for batch processing
-        #     fs=44100,
-        #     max_order=12,
-        #     ray_tracing=False,
-        #     room_name="room_aes",
-        #     batch_processing=True,  # Enable batch processing
-        #     source_positions=source_positions,  # Provide source positions
-        #     receiver_positions=receiver_positions,  # Provide receiver positions
-        #     label = "pra"
-        # )
 
     if run_single_experiments:
         # Method 1: Run experiments directly
-        # Use custom results directory for singular experiments (optional)
-        # single_manager = get_singular_manager("results_custom")  # Will use results_custom/room_singulars/
-        single_manager = get_singular_manager(results_dir)  # Default: uses results/room_singulars/
-
-        print(f"Singular experiments saved in: {single_manager._get_room_dir(room_name)}")
+        single_manager = get_singular_manager()  # Use the singular manager for direct experiments
+        
 
         # Run an SDN experiment - single source and receiver (uses singular manager)
         single_manager.run_experiment(
@@ -1339,8 +2276,50 @@ if __name__ == "__main__":
             label="",
         )
 
-    #dump batch_manager to pickle
-    # import pickle
-    # with open('batch_manager_roomaes_4exp.pkl', 'wb') as f:
-    #     pickle.dump(batch_manager.rooms, f)
+        # Launch visualization for singular experiments
+        single_manager.plot()
 
+    if run_batch_experiments:
+        # Generate source & receiver positions
+        receiver_positions = sa.generate_receiver_grid(room['width'], room['depth'], 5)
+        source_positions = sa.generate_source_positions(room)
+
+        # Run batch experiments (uses batch manager)
+        batch_manager = get_batch_manager()  # Use the batch manager for batch processing
+        batch_manager.run_experiment(
+            config={
+                'label': 'weighted psk',
+                'info': '',
+                'method': 'SDN',
+                'flags': {
+                    'specular_source_injection': True,
+                    'source_weighting': 5,
+                }
+            },
+            room_parameters=room_aes,
+            duration=0.5,  # Shorter duration for batch processing
+            fs=44100,
+            room_name="room_aes",
+            batch_processing=True,  # Enable batch processing
+            source_positions=source_positions,  # Provide source positions
+            receiver_positions=receiver_positions  # Provide receiver positions
+        )
+
+        batch_manager.run_ism_experiment(
+            room_parameters=room_aes,
+            duration=0.5,  # Shorter duration for batch processing
+            fs=44100,
+            max_order=12,
+            ray_tracing=False,
+            room_name="room_aes",
+            batch_processing=True,  # Enable batch processing
+            source_positions=source_positions,  # Provide source positions
+            receiver_positions=receiver_positions,  # Provide receiver positions
+            label = "pra"
+        )
+
+        # print(f"Completed {len(experiment_ids)} experiments")
+
+        # Launch visualization for batch experiments
+        print("\nLaunching visualization of batch experiments...")
+        batch_manager.plot()

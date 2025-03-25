@@ -268,12 +268,27 @@ dd.as_table(project.estimate())
 # using .as_live_progress().
 # simulation.as_live_progress()
 
-
 simulations = project.get_simulations()
 dd.as_table(simulations)
 
 res = project.start_simulations()
 dd.as_table(project.get_progress())
+
+Flag_download = False
+
+base_dir = "./results/treble/"
+project_name = "room_aes_abs02"
+
+if Flag_download:
+    import os
+    destination_directory = os.join(base_dir, project_name)
+    project.download_results(destination_directory, rename_rule=treble.ResultRenameRule.by_label)
+
+project = my_projects[0]
+simulations = project.get_simulations()
+# Get the two different simulations
+simulation_0 = simulations[0]  # First simulation
+print(f"Simulation 0: {simulation_0.name}")
 
 
 
