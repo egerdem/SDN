@@ -1,3 +1,54 @@
+"""
+Treble Data Processing Script
+
+This script processes Treble simulation results and converts them into a format compatible with the SDN visualization system.
+
+Input Directory Structure:
+------------------------
+./results/treble/single_experiments/           # Base directory for singular experiments
+    ├── direct_result_folders/                 # Direct simulation result folders
+    │   ├── simulation_info.json              # Simulation configuration
+    │   └── *.h5                              # Simulation RIR data
+    │
+    └── grouped_experiment_sets/              # Groups of related experiments
+        ├── experiment1/                      # Individual experiment folders
+        │   ├── simulation_info.json
+        │   └── *.h5
+        └── experiment2/
+            ├── simulation_info.json
+            └── *.h5
+
+OR
+
+./results/treble/multi_experiments/           # Base directory for batch experiments
+    └── project_name/                        # Project-specific folder
+        ├── experiment1/                     # Individual experiment folders
+        │   ├── simulation_info.json
+        │   └── *.h5
+        └── experiment2/
+            ├── simulation_info.json
+            └── *.h5
+
+Output Directory Structure:
+-------------------------
+For Singular Case:
+./results/room_singulars/                    # Output directory for singular experiments
+    ├── room_info.json                       # Room configuration
+    ├── config_experiment1.json              # Experiment configurations
+    ├── rirs_experiment1.npy                 # Processed RIR data
+    └── ...
+
+For Batch Case:
+./results/rooms/                             # Output directory for batch experiments
+    └── room_name/                           # Room-specific folder
+        ├── room_info.json                   # Room configuration
+        └── source_label/                    # Source-specific folder
+            └── method/                      # Method-specific folder (e.g., TREBLE)
+                └── param_set/               # Parameter set folder
+                    ├── config.json          # Configuration
+                    └── rirs.npy             # RIR data
+"""
+
 import os
 import json
 import numpy as np
@@ -174,7 +225,7 @@ class SDNExperiment:
     
     def get_label(self):
         """Generate a descriptive label for the experiment."""
-        method = self.config.get('method', 'SDN')
+        method = self.config.get('method')
         
         if 'label' in self.config and self.config['label']:
             label = f"{self.config['label']}"
@@ -187,9 +238,23 @@ class SDNExperiment:
         # Add method-specific details
         if method == 'ISM':
             if 'max_order' in self.config:
-                label += f" order={self.config['max_order']}"
-        
-        return label
+                label += f"PRA order={self.config['max_order']}"
+        elif method == 'SDN':
+            # Add SDN-specific flags that affect the simulation
+            if 'flags' in self.config:
+                flags = self.config['flags']
+                if flags.get('source_weighting'):
+                    label += f" {flags['source_weighting']}"
+                if flags.get('specular_source_injection'):
+                    label += " specular"
+                if 'source_pressure_injection_coeff' in flags:
+                    label += f" src constant coef={flags['source_pressure_injection_coeff']}"
+                if 'scattering_matrix_update_coef' in flags:
+                    label += f" scat={flags['scattering_matrix_update_coef']}"
+        label_for_legend = f"{method}, {label}" # complete label
+        # return label and label_for_legend as a single dictionary
+        labels = {"label": label, "label_for_legend": label_for_legend}
+        return labels
     
     def get_key_parameters(self):
         """Extract and return the key parameters that define this experiment."""
@@ -292,77 +357,139 @@ class SDNExperimentManager:
         room_dir = self._get_room_dir(room_name)
         return os.path.join(room_dir, source_label)  
     
+    def get_display_name_from_folder(self, folder_name):
+        """Create display name from folder name.
+        e.g., 'aes_absorptioncoeffs' -> 'AES - absorptioncoeffs'"""
+        parts = folder_name.split('_', 1)  # Split at first underscore
+        if len(parts) == 2:
+            prefix, rest = parts
+            return f"{prefix.upper()} - {rest}"
+        return folder_name.upper()
+
     def load_experiments(self):
         """Load all experiments from the results directory."""
         self.rooms = {}
+        unified_rooms = {}  # To collect experiments for unified rooms
         
         if not self.is_batch_manager:
-            # Load singular experiments from room_singulars folder
             singulars_dir = os.path.join(self.results_dir, 'room_singulars')
             if os.path.exists(singulars_dir):
-                for room_name in os.listdir(singulars_dir):
-                    room_path = os.path.join(singulars_dir, room_name)
-                    if not os.path.isdir(room_path):
+                # Process each experiment group (subfolder)
+                for folder_name in os.listdir(singulars_dir):
+                    folder_path = os.path.join(singulars_dir, folder_name)
+                    # Skip non-directories, hidden folders, and folders starting with underscore
+                    if not os.path.isdir(folder_path) or folder_name.startswith('.') or folder_name.startswith('_'):
                         continue
-                        
-                    # Check for room info first (preferred method)
-                    room_info_path = os.path.join(room_path, 'room_info.json')
-                    if os.path.exists(room_info_path):
-                        try:
-                            with open(room_info_path, 'r') as f:
-                                room_info = json.load(f)
-                            
-                            # Create room with saved display name
-                            room_parameters = room_info.get('parameters', {})
-                            room = Room(room_info.get('name', room_name), room_parameters)
-                            if 'display_name' in room_info:
-                                room.display_name = room_info['display_name']
-                            
-                            # Load experiments from this room
-                            for experiment_file in os.listdir(room_path):
-                                if experiment_file.endswith('.json') and experiment_file != 'room_info.json':
-                                    config_path = os.path.join(room_path, experiment_file)
-                                    rir_path = os.path.join(room_path, experiment_file.replace('.json', '.npy'))
-                                    
-                                    # Load experiment (singular case)
-                                    if os.path.exists(config_path) and os.path.exists(rir_path):
-                                        try:
-                                            with open(config_path, 'r') as f:
-                                                config_data = json.load(f)
-                                            rir = np.load(rir_path)
-                                            
-                                            # Check if this is a nested config structure
-                                            # (singular experiments store room_parameters inside a nested config key)
-                                            if 'config' in config_data and 'room_parameters' in config_data['config']:
-                                                experiment_config = config_data['config']
-                                                experiment_id = config_data.get('experiment_id')
-                                                fs = config_data.get('fs', 44100)
-                                                duration = config_data.get('duration', 0.5)
-                                            else:
-                                                # Original format expected
-                                                experiment_config = config_data
-                                                experiment_id = config_data.get('experiment_id')
-                                                fs = config_data.get('fs', 44100)
-                                                duration = config_data.get('duration', 0.5)
-                                            
-                                            # Create experiment object
-                                            experiment = SDNExperiment(
-                                                config=experiment_config,
-                                                rir=rir,
-                                                fs=fs,
-                                                duration=duration,
-                                                experiment_id=experiment_id,
-                                                skip_metrics=self.skip_metrics
-                                            )
-                                            
-                                            # Add experiment to room
-                                            room.add_experiment(experiment)
-                                        except Exception as e:
-                                            print(f"Error loading experiment {experiment_file}: {e}")
-                            
-                            self.rooms[room.name] = room
-                        except Exception as e:
-                            print(f"Error loading room {room_name}: {e}")
+
+                    try:
+                        # Determine which room_info to use based on folder name
+                        if 'aes' in folder_name.lower():
+                            room_info_file = 'room_info_aes.json'
+                        elif 'journal' in folder_name.lower():
+                            room_info_file = 'room_info_journal.json'
+                        elif 'waspaa' in folder_name.lower():
+                            room_info_file = 'room_info_waspaa.json'
+                        else:
+                            print(f"Warning: Could not determine room type for {folder_name}")
+                            continue
+
+                        # Load room info
+                        room_info_path = os.path.join(singulars_dir, room_info_file)
+                        if not os.path.exists(room_info_path):
+                            print(f"Warning: Room info file {room_info_file} not found")
+                            continue
+
+                        with open(room_info_path, 'r') as f:
+                            room_info = json.load(f)
+
+                        # Create individual room with formatted display name
+                        individual_room = Room(folder_name, room_info['parameters'])
+                        individual_room.display_name = self.get_display_name_from_folder(folder_name)
+                        self.rooms[folder_name] = individual_room
+
+                        # Get room type for unified room
+                        room_type = folder_name.split('_')[0].lower()
+
+                        # Create unified room if it doesn't exist
+                        if room_type not in unified_rooms:
+                            unified_room = Room(room_info['name'], room_info['parameters'])
+                            unified_room.display_name = room_info['display_name']
+                            unified_rooms[room_type] = unified_room
+
+                        # Load experiments using existing logic
+                        for file_name in os.listdir(folder_path):
+                            if file_name.endswith('.json') and file_name != 'room_info.json':
+                                config_path = os.path.join(folder_path, file_name)
+                                
+                                # Handle both naming patterns for RIR files
+                                if file_name.startswith('config_'):
+                                    base_name = file_name[7:-5]  # Remove 'config_' and '.json'
+                                    rir_file = f'rirs_{base_name}.npy'
+                                else:
+                                    rir_file = file_name[:-5] + '.npy'
+                                
+                                rir_path = os.path.join(folder_path, rir_file)
+                                
+                                # Load experiment if both files exist
+                                if os.path.exists(config_path) and os.path.exists(rir_path):
+                                    try:
+                                        with open(config_path, 'r') as f:
+                                            config_data = json.load(f)
+                                        
+                                        # Load RIR data and ensure correct shape
+                                        rir_data = np.load(rir_path)
+                                        if rir_data.ndim > 1:
+                                            # If RIR is 2D array, take first row
+                                            rir = rir_data[0]
+                                        else:
+                                            # If RIR is already 1D array, use as is
+                                            rir = rir_data
+                                        
+                                        # Handle both config formats
+                                        if 'config' in config_data and 'room_parameters' in config_data['config']:
+                                            experiment_config = config_data['config']
+                                            fs = config_data.get('fs')
+                                            duration = config_data.get('duration')
+                                        else:
+                                            experiment_config = config_data
+                                            fs = config_data.get('fs')
+                                            duration = config_data.get('duration')
+                                        
+                                        # Set experiment_id based on file naming
+                                        if file_name.startswith('config_'):
+                                            experiment_id = file_name[7:-5]
+                                        else:
+                                            experiment_id = config_data.get('experiment_id')
+                                        
+                                        # Create experiment object
+                                        experiment = SDNExperiment(
+                                            config=experiment_config,
+                                            rir=rir,
+                                            fs=fs,
+                                            duration=duration,
+                                            experiment_id=experiment_id,  # Now using unique ID
+                                            skip_metrics=self.skip_metrics
+                                        )
+                                        
+                                        # Add experiment to both individual and unified rooms
+                                        individual_room.add_experiment(experiment)
+                                        unified_rooms[room_type].add_experiment(experiment)
+                                        
+                                        print(f"Successfully loaded experiment: {file_name} with ID: {experiment_id}")
+                                    except Exception as e:
+                                        print(f"Error loading experiment {file_name}: {str(e)}")
+                                        import traceback
+                                        traceback.print_exc()
+
+                        print(f"Loaded experiments from {folder_name} as room {individual_room.display_name}")
+                    except Exception as e:
+                        print(f"Error processing folder {folder_name}: {str(e)}")
+
+                # Add unified rooms to self.rooms
+                for unified_room in unified_rooms.values():
+                    self.rooms[unified_room.name] = unified_room
+                    print(f"Created unified room {unified_room.display_name} with {len(unified_room.experiments)} total experiments")
+
         else:
             # Load batch experiments from the structured directory
             rooms_dir = os.path.join(self.results_dir, 'rooms')
@@ -426,12 +553,12 @@ class SDNExperimentManager:
                                             # Check if this is a nested config structure
                                             if 'config' in config_data and 'room_parameters' in config_data['config']:
                                                 actual_config = config_data['config']
-                                                fs = config_data.get('fs', 44100)
-                                                duration = config_data.get('duration', 0.5)
+                                                fs = config_data.get('fs')
+                                                duration = config_data.get('duration')
                                             else:
                                                 actual_config = config_data
-                                                fs = config_data.get('fs', 44100)
-                                                duration = config_data.get('duration', 0.5)
+                                                fs = config_data.get('fs')
+                                                duration = config_data.get('duration')
                                             
                                             # Get receivers from the config
                                             receivers_data = actual_config.get('receivers', config_data.get('receivers', []))
@@ -594,11 +721,11 @@ results_dir = 'results'  # Default: uses results/rooms/
 
 print("d")
 # Use fast loading by skipping metric calculations initially
-batch_manager = get_batch_manager(results_dir=results_dir)
+batch_manager = get_singular_manager(results_dir=results_dir)
 print("r")
 
 batch_visualizer = SDNExperimentVisualizer(batch_manager)
-batch_visualizer.show(port=9043)
+batch_visualizer.show(port=9025)
 
 # Create a visualizer using the singular manager
 # single_manager = get_singular_manager()

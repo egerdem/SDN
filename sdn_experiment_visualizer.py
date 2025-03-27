@@ -8,7 +8,8 @@ from threading import Timer
 from sdn_experiment_manager import Room
 
 class SDNExperimentVisualizer:
-    print("eetjaj")
+    print("visualizer started")
+
     """Class to visualize SDN experiment data using Dash."""
     
     def __init__(self, manager=None):
@@ -301,7 +302,7 @@ class SDNExperimentVisualizer:
 
                 # Middle - room visualization
                 html.Div([
-                    html.H3("Room Layout **rty (Top View)",
+                    html.H3("Room Layout (Top View)",
                            style={'textAlign': 'center', 'marginBottom': '5px', 'marginTop': '65px', 'color': dark_theme['text']}),
                     dcc.Store(id='current-pos-idx', data=0),
                     dcc.Graph(
@@ -625,32 +626,35 @@ class SDNExperimentVisualizer:
                 {'name': 'Label', 'id': 'label'},
                 {'name': 'RT60', 'id': 'rt60'}
             ]
-
-            for idx, exp in enumerate(experiments, 1):
+            
+            sorted_experiments = sorted(experiments, key=lambda exp: exp.get_label()['label_for_legend'])
+            for idx, exp in enumerate(sorted_experiments, 1):
                 # Add traces to plots
+                label_dict= exp.get_label()
                 rir_fig.add_trace(go.Scatter(
                     x=exp.time_axis,
                     y=exp.rir,
-                    name=f"{idx}: {exp.get_label()}"
+
+                    name=f"{idx}: {label_dict['label_for_legend']}"
                 ))
 
                 edc_fig.add_trace(go.Scatter(
                     x=exp.time_axis,
                     y=exp.edc,
-                    name=f"{idx}: {exp.get_label()}"
+                    name=f"{idx}: {label_dict['label_for_legend']}"
                 ))
 
                 ned_fig.add_trace(go.Scatter(
                     x=exp.ned_time_axis,
                     y=exp.ned,
-                    name=f"{idx}: {exp.get_label()}"
+                    name=f"{idx}: {label_dict['label_for_legend']}"
                 ))
 
                 # Add table row
                 table_data.append({
                     'id': idx,
                     'method': exp.config.get('method', 'Unknown'),
-                    'label': exp.get_label(),
+                    'label': label_dict['label'],
                     'rt60': f"{exp.metrics.get('rt60', 'N/A'):.2f}" if 'rt60' in exp.metrics else 'N/A'
                 })
 

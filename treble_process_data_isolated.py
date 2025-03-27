@@ -158,25 +158,32 @@ def create_treble_experiments(simulation_info, source_info, rirs):
         'width': 9.0,  # Default values, may need to extract from simulation geometry
         'depth': 7.0,
         'height': 4.0,
-        'absorption': 0.2  # Extract from material properties if possible
     }
 
-    # Try to extract material absorption
+    # Extract absorption from material assignments
     if "layerMaterialAssignments" in simulation_info and simulation_info["layerMaterialAssignments"]:
+        # Take the first material since all are the same
         material_name = simulation_info["layerMaterialAssignments"][0].get("materialName", "")
-        if "-" in material_name:
-            try:
-                # Extract absorption value from name like "SDN-AES-0.2"
-                absorption_str = material_name.split("-")[-1]
-                room_params['absorption'] = float(absorption_str)
-            except (ValueError, IndexError):
-                pass
+
 
     # Extract simulation parameters
     duration = simulation_info.get("impulseLengthSec")
     sim_type = simulation_info.get("simulationType", "empty")
     sim_settings = simulation_info.get("simulationSettings", {})
     crossover = simulation_info.get("crossoverFrequency", 250)
+    
+    # Extract ISM order if available
+    ism_order = sim_settings.get("gaSettings", {}).get("ISMOrder", "")
+    
+    # Create more descriptive label components
+    method_str = "TRE"
+    label_str = f"{sim_type}"
+    if ism_order:
+        label_str += f" ISM{ism_order}"
+    
+    # Add absorption to info if available
+    # info_str = f"{material_name} , XO={crossover}Hz"
+    info_str = f"{material_name}"
 
     # For each source in the simulation
     source_pos = [source_info["x"], source_info["y"], source_info["z"]]
@@ -190,16 +197,15 @@ def create_treble_experiments(simulation_info, source_info, rirs):
 
         # Create config similar to SDN/ISM configs
         config = {
-            'method': 'TREBLE',
-            'label': f"TREBLE {sim_type}",
-            'info': f"XO={crossover}Hz",
+            'method': method_str,
+            'label': label_str,
+            'info': info_str,
             'fs': fs,
             'duration': duration,
             'room_parameters': {
                 'width': room_params['width'],
                 'depth': room_params['depth'],
                 'height': room_params['height'],
-                'absorption': room_params['absorption'],
                 'source x': source_pos[0],
                 'source y': source_pos[1],
                 'source z': source_pos[2],
@@ -221,9 +227,13 @@ def create_treble_experiments(simulation_info, source_info, rirs):
                 'simulation_settings': sim_settings,
                 'crossover_frequency': crossover,
                 'simulation_id': simulation_info.get('id', ''),
-                'original_fs': rir_data.get("original_fs", 32000)
+                'original_fs': rir_data.get("original_fs")
             }
         }
+
+        # Only add absorption if we have it
+        if 'absorption' in room_params:
+            config['room_parameters']['absorption'] = room_params['absorption']
 
         # Create a unique experiment ID
         experiment_id = f"treble_{source_label}_{receiver_label}_{receiver_id[:8]}"
@@ -293,13 +303,16 @@ def process_treble_source_directory(source_dir):
         source_dir: Path to the Treble source directory
 
     Returns:
-        tuple: (source_label, list of TrebleExperiment objects)
+        tuple: (source_label, list of TrebleExperiment objects, source_folder_name)
     """
+    # Get the folder name
+    source_folder_name = os.path.basename(source_dir)
+    
     # Find the simulation_info.json file
     sim_info_path = os.path.join(source_dir, "simulation_info.json")
     if not os.path.exists(sim_info_path):
         print(f"No simulation_info.json found in {source_dir}")
-        return None, []
+        return None, [], None
 
     # Load simulation info
     with open(sim_info_path, 'r') as f:
@@ -309,7 +322,7 @@ def process_treble_source_directory(source_dir):
     h5_files = [f for f in os.listdir(source_dir) if f.endswith('.h5')]
     if not h5_files:
         print(f"No H5 file found in {source_dir}")
-        return None, []
+        return None, [], None
 
     h5_file_path = os.path.join(source_dir, h5_files[0])
 
@@ -328,38 +341,63 @@ def process_treble_source_directory(source_dir):
 
     print(f"Processed {len(experiments)} Treble experiments from {source_dir}")
 
-    return source_label, experiments
+    return source_label, experiments, source_folder_name
 
 
-def process_all_treble_sources(project_dir):
+def process_all_treble_sources(project_dir, is_singular=False):
     """
-    Process all Treble results in the base directory.
-
+    Process all Treble results in the base directory, handling both direct and grouped experiments.
+    
     Args:
-        treble_base_dir: Path to the base directory containing Treble results
-
-    Returns:
-        dict: Mapping from source label to list of TrebleExperiment objects
+        project_dir: Path to the base directory containing Treble results
+        is_singular: If True, use folder names as keys
     """
     if not os.path.exists(project_dir):
         print(f"Treble base directory {project_dir} not found")
-        return {}
+        return {}, {}
 
     experiments_by_source = {}
+    folder_names_by_source = {}
 
-    # Process each source directory
+    # Process each directory in the project folder
     for item in os.listdir(project_dir):
-        source_dir = os.path.join(project_dir, item)
-        if os.path.isdir(source_dir) and not item.startswith('.') and item != "processed":
-            print(f"Processing Treble source directory: {item}")
-            source_label, experiments = process_treble_source_directory(source_dir)
+        if item.startswith('.') or item == "processed":
+            continue
+
+        item_path = os.path.join(project_dir, item)
+        if not os.path.isdir(item_path):
+            continue
+
+        # Check if this is a grouped experiment set
+        if any(f.endswith('.h5') for f in os.listdir(item_path)):
+            # This is a direct result folder
+            print(f"Processing direct result directory: {item}")
+            source_label, experiments, folder_name = process_treble_source_directory(item_path)
             if source_label and experiments:
-                experiments_by_source[source_label] = experiments
+                key = folder_name if is_singular else source_label
+                experiments_by_source[key] = experiments
+                folder_names_by_source[key] = folder_name
+        else:
+            # This is a grouped experiment set
+            print(f"Processing grouped experiment set: {item}")
+            # Process each subdirectory in the group
+            for subdir in os.listdir(item_path):
+                subdir_path = os.path.join(item_path, subdir)
+                if not os.path.isdir(subdir_path) or subdir.startswith('.'):
+                    continue
+                
+                print(f"  Processing sub-experiment: {subdir}")
+                source_label, experiments, folder_name = process_treble_source_directory(subdir_path)
+                if source_label and experiments:
+                    # Use parent folder name + subfolder name as the unique identifier
+                    unique_key = f"{item}_{subdir}"
+                    experiments_by_source[unique_key] = experiments
+                    folder_names_by_source[unique_key] = unique_key
 
-    return experiments_by_source
+    return experiments_by_source, folder_names_by_source
 
 
-def save_treble_experiments_matching_sdn_structure(treble_base_dir, experiments_by_source, room_name):
+def save_treble_experiments_matching_sdn_structure(treble_base_dir, experiments_by_source, PROJECT_NAME, room_name):
     """
     Save Treble experiments to match the SDN/ISM directory structure.
 
@@ -404,6 +442,8 @@ def save_treble_experiments_matching_sdn_structure(treble_base_dir, experiments_
             os.makedirs(method_dir, exist_ok=True)
 
             param_set = sim_type.lower()
+            # prepend PROJECT_NAME to the param_set string
+            param_set = f"{PROJECT_NAME}_{param_set}"
             param_dir = os.path.join(method_dir, param_set)
             os.makedirs(param_dir, exist_ok=True)
 
@@ -433,48 +473,146 @@ def save_treble_experiments_matching_sdn_structure(treble_base_dir, experiments_
             rirs_array = np.array(rirs)
             np.save(os.path.join(param_dir, 'rirs.npy'), rirs_array)
 
+
+def save_treble_experiments_for_singulars(global_results_dir, experiments_by_source, room_name, source_folder_name):
+    """
+    Save Treble experiments for singular cases with a flattened structure.
+    All experiments are saved directly in the room_singulars directory with unique names.
+    Uses the original experiment folder name as the unique identifier.
+    
+    Args:
+        global_results_dir: Base results directory
+        experiments_by_source: Dictionary of experiments grouped by source
+        room_name: Name of the room
+        source_folder_name: Original folder name of the experiment (e.g., 'journal_single loc_abs10_ism12_1sec')
+    """
+    # Base directory for singular rooms
+    rooms_dir = os.path.join(global_results_dir, "room_singulars", "PROCESSED EXP_saved ")
+    os.makedirs(rooms_dir, exist_ok=True)
+
+    for source_label, experiments in experiments_by_source.items():
+        # Get a sample experiment for room parameters
+        sample_exp = experiments[0]
+        room_params = sample_exp.config.get('room_parameters', {})
+
+        # Save room info if it doesn't exist
+        room_info_path = os.path.join(rooms_dir, 'room_info.json')
+        if not os.path.exists(room_info_path):
+            with open(room_info_path, 'w') as f:
+                json.dump({
+                    'name': room_name,
+                    'display_name': room_name,
+                    'parameters': room_params
+                }, f, indent=2, cls=NumpyEncoder)
+
+        # Use the source folder name as the unique identifier
+        unique_id = source_folder_name
+
+        # Prepare config with receivers
+        config = experiments[0].config.copy()
+        receivers = []
+        rirs = []
+
+        # Add each experiment as a receiver
+        for exp in experiments:
+            receiver_info = exp.config.get('receiver', {})
+            receiver_info['experiment_id'] = f"{unique_id}_{exp.experiment_id}"
+            receivers.append(receiver_info)
+            rirs.append(exp.rir)
+
+        # Set the receivers list in config
+        config['receivers'] = receivers
+
+        # Save config with unique name based on folder name
+        config_path = os.path.join(rooms_dir, f'config_{unique_id}.json')
+        with open(config_path, 'w') as f:
+            json.dump(config, f, indent=2, cls=NumpyEncoder)
+
+        # Save RIRs with unique name based on folder name
+        rirs_array = np.array(rirs)
+        rirs_path = os.path.join(rooms_dir, f'rirs_{unique_id}.npy')
+        np.save(rirs_path, rirs_array)
+
+
 # Main function
 if __name__ == "__main__":
     import sys
     import os
-    global_results_dir = "./results"
-    # Process command line arguments
-    treble_base_dir = "./results/treble"
-    project_name = "room_aes_abs02" # this is the original treble results folder
-    project_dir = os.path.join(treble_base_dir, project_name)
+    
+    # Configuration flags
+    IS_SINGULAR = True  # Set to False for batch processing
+    PREPROCESS_TREBLE_RESULTS = True
 
-    preprocess_treble_results = True
-    # load_preprocessed_data_to_sdn_batch_manager = False
+    # Directory setup
+    PROJECT_ROOT = "./results"
+    
+    if IS_SINGULAR:
+        PROJECT_NAME = "single_experiments"
+        OUTPUT_DIR = os.path.join(PROJECT_ROOT, "room_singulars")
+        TREBLE_BASE_DIR = os.path.join(PROJECT_ROOT, "treble", "single_experiments")  # Direct path
+        PROJECT_DIR = TREBLE_BASE_DIR  # Use TREBLE_BASE_DIR directly
+    else:
+        PROJECT_NAME = "aes_abs20"  # Original treble batch results folder
+        OUTPUT_DIR = os.path.join(PROJECT_ROOT, "rooms")
+        TREBLE_BASE_DIR = os.path.join(PROJECT_ROOT, "treble", "multi_experiments")
+        PROJECT_DIR = os.path.join(TREBLE_BASE_DIR, PROJECT_NAME)
 
-    if preprocess_treble_results:
+    # PROJECT_DIR = TREBLE_BASE_DIR  # Use TREBLE_BASE_DIR directly
 
+    if PREPROCESS_TREBLE_RESULTS:
         if len(sys.argv) > 1:
-            treble_base_dir = sys.argv[1]
+            TREBLE_BASE_DIR = sys.argv[1]
 
         # First, explore an H5 file to understand its structure
-        sample_dirs = [d for d in os.listdir(project_dir)
-                       if os.path.isdir(os.path.join(treble_base_dir, d))
-                       and not d.startswith('.') and d != "processed"]
+        # Example: ./results/treble/single_experiments/aes_absorptioncoeffs/
+        sample_dirs = [d for d in os.listdir(PROJECT_DIR)
+                      if os.path.isdir(os.path.join(PROJECT_DIR, d))
+                      and not d.startswith('.') and d != "processed"]
 
         if sample_dirs:
-            sample_dir = os.path.join(project_dir, sample_dirs[0])
+            # Example: ./results/treble/single_experiments/aes_absorptioncoeffs/
+            sample_dir = os.path.join(PROJECT_DIR, sample_dirs[0])
             h5_files = [f for f in os.listdir(sample_dir) if f.endswith('.h5')]
             if h5_files:
+                # Example: ./results/treble/single_experiments/aes_absorptioncoeffs/simulation_results.h5
                 h5_file_path = os.path.join(sample_dir, h5_files[0])
                 explore_h5_file(h5_file_path)
 
-        # Process all Treble source directories
-        experiments_by_source = process_all_treble_sources(project_dir)
+        # Process all Treble source directories with appropriate mode
+        # Example input PROJECT_DIR: ./results/treble/single_experiments/
+        # Example folders inside: aes_absorptioncoeffs/, aes_simtypes_scattering/, aes_sdn_treblehybrid/
+        experiments_by_source, folder_names_by_source = process_all_treble_sources(PROJECT_DIR, is_singular=IS_SINGULAR)
 
-        # Save processed data for later loading by SDN batch manager
-        # save_treble_experiments(project_dir, experiments_by_source) #old method
-        save_treble_experiments_matching_sdn_structure(global_results_dir, experiments_by_source, room_name = "room_aes")
+        # Save processed data based on the mode
+        if IS_SINGULAR:
+            print("\nSaving experiments:")
+            # Example folder_name: "aes_absorptioncoeffs" or "aes_simtypes_scattering"
+            for folder_name, experiments in experiments_by_source.items():
+                print(f"Saving {folder_name} with {len(experiments)} experiments")
+                
+                # Create a clean version of the folder name for file naming
+                # Example: "aes simtypes scattering" -> "aes_simtypes_scattering"
+                clean_folder_name = folder_name.replace(' ', '_')
+                
+                # Example output:
+                # ./results/room_singulars/config_aes_absorptioncoeffs.json
+                # ./results/room_singulars/rirs_aes_absorptioncoeffs.npy
+                save_treble_experiments_for_singulars(
+                    PROJECT_ROOT,  # Example: ./results/
+                    {folder_name: experiments},
+                    room_name="room_aes",
+                    source_folder_name=clean_folder_name
+                )
+        else:
+            # Example output structure for batch mode:
+            # ./results/rooms/room_aes/source1/TREBLE/aes_abs20_hybrid/config.json
+            # ./results/rooms/room_aes/source1/TREBLE/aes_abs20_hybrid/rirs.npy
+            save_treble_experiments_matching_sdn_structure(
+                PROJECT_ROOT, 
+                experiments_by_source,
+                PROJECT_NAME,
+                room_name="room_aes"
+            )
 
-        # Print summary
-        total_exps = sum(len(exps) for exps in experiments_by_source.values())
-        print(f"\nTotal experiments processed: {total_exps}")
-        for source_label, experiments in experiments_by_source.items():
-            print(f"Source {source_label}: {len(experiments)} experiments")
-
-        print("\nTreble data has been processed and saved. You can now use sdn_experiment_manager.py to visualize it.")
+        print("\nYou can now use sdn_experiment_manager.py to visualize it.")
 

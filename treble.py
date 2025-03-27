@@ -11,7 +11,7 @@ from treble_tsdk.results import plot
 import librosa
 import numpy as np
 
-def generate_receiver_grid(room_width: float, room_depth: float, n_points: int = 50):
+def generate_receiver_grid(room_width: float, room_depth: float, margin = 1, n_points: int = 50):
     """Generate a grid of receiver positions within the room.
 
     Args:
@@ -23,7 +23,7 @@ def generate_receiver_grid(room_width: float, room_depth: float, n_points: int =
         List[treble.Receiver]: List of Receiver objects for the grid positions
     """
     # Create a grid of points, avoiding walls (1m margin)
-    margin = 1
+    # margin = 1
     x = np.linspace(margin, room_width - margin, int(np.sqrt(n_points)))
     y = np.linspace(margin, room_depth - margin, int(np.sqrt(n_points)))
     X, Y = np.meshgrid(x, y)
@@ -92,36 +92,51 @@ def create_sources(room: dict) -> list:
     
     return sources
 
-project_name = f"SDN Treble Room Aes "
-project = tsdk.get_or_create_project(name=project_name, description="SDN Treble Room Aes with flat %20 absorption but fitting abs=0.32")
+project_name = f"AES_single_ga-dg-hybrid"
+project = tsdk.get_or_create_project(name=project_name, description="original location, single")
 
-# tsdk.delete_project("4ce330fd-fa65-4756-89df-2efe94019320")
+# tsdk.delete_project("dcdc0b0b-3c2e-4441-8c9b-3888de56279c")
 my_projects = tsdk.list_my_projects()
 dd.as_table(my_projects)
-# dd.as_table(tsdk.geometry_library.list_datasets_with_count())
 
-
-room_aes_abs02 = {'width': 9, 'depth': 7, 'height': 4,
+room_aes = {'width': 9, 'depth': 7, 'height': 4,
                    'source x': 4.5, 'source y': 3.5, 'source z': 2,
                    'mic x': 2, 'mic y': 2, 'mic z': 1.5,
                    'absorption': 0.2,
                    }
-room = room_aes_abs02
 
+room_journal = {'width': 3.2, 'depth': 4, 'height': 2.7,
+                   'source x': 2, 'source y': 3., 'source z': 2,
+                   'mic x': 1, 'mic y': 1, 'mic z': 1.5,
+                   'absorption': 0.1,
+                   }
 
-"""source_list = []
-source_list.append(
-    treble.Source(
-        x=room['source x'],
-        y=room['source y'],
-        z=room['source z'],
-        source_type=treble.SourceType.omni,
-        label="Omni_source",
-    ))
-"""
+room_waspaa = {
+        'width': 6, 'depth': 4, 'height': 7,
+        'source x': 3.6, 'source y': 1.3, 'source z': 5.3,
+        'mic x': 1.2, 'mic y': 2.4, 'mic z': 1.8,
+        'absorption': 0.1,
+    }
+
+room = room_aes
+
+# Multiple Sources and Receivers
 source_list = create_sources(room)
-receiver_list = generate_receiver_grid(room['width'], room['depth'])#room aes
+# receiver_list = generate_receiver_grid(room['width'], room['depth'], n_points=50) #room aes
 
+# retrieve only the left bottom quarter of the room
+receiver_list = generate_receiver_grid(room['width']/2, room['depth']/2, n_points=16, margin=0.5) #room aes
+
+"""# plot the receivers in 2d using matplotlib
+import matplotlib
+matplotlib.use('MacOSX')
+import matplotlib.pyplot as plt
+receiver_positions = [(r.x, r.y) for r in receiver_list]
+receiver_positions = np.array(receiver_positions)
+plt.scatter(receiver_positions[:, 0], receiver_positions[:, 1])
+#also plot the room as a rectangle, no z.
+plt.gca().add_patch(plt.Rectangle((0, 0), room['width'], room['depth'], fill=None))
+plt.show()"""
 
 # All geometry generation functions have a join_wall_layers flag which tells the generator whether walls should all share one layer
 # or if each wall segment should have it's own layer.
@@ -146,9 +161,11 @@ reflection_coefficients = [r]*24
 
 # name = "SDN-AES-0.89-r_for_abs_0.2"
 name = '20% Absorption'
+# name = "Reflection of 10% Absorption"
 material = tsdk.material_library.get_by_name(name)
+# z = tsdk.material_library.get() # get all materials
 
-if material is None:
+"""if material is None:
     print("Material not found, creating new material")
     # First we define a material definition which is used to perform material fitting
     material_definition = treble.MaterialDefinition(
@@ -169,126 +186,129 @@ if material is None:
     material = tsdk.material_library.create(fitted_material)
     dd.as_tree(material)
 
+else:
+    print("Material found")
+    dd.as_tree(material)"""
+
 material_assignment = [
     treble.MaterialAssignment("shoebox_walls", material),
     treble.MaterialAssignment("shoebox_floor", material),
     treble.MaterialAssignment("shoebox_ceiling", material),
 ]
 
-# SDN-AES-0.2
-
 # treble.MaterialRequestType.full_octave_absorption, \
 # treble.MaterialRequestType.third_octave_absorption, \
 # treble.MaterialRequestType.surface_impedance, \
 # treble.MaterialRequestType.reflection_coefficient
 
-# source_list = []
-# source_list.append(
-#     treble.Source(
-#         x=room['source x'],
-#         y=room['source y'],
-#         z=room['source z'],
-#         source_type=treble.SourceType.omni,
-#         label="Omni_source",
-#     ))
-
-# receiver_list = []
-# receiver_list.append(
-#     treble.Receiver(x=room['mic x'], y=room['mic y'], z=room['mic z'], receiver_type=treble.ReceiverType.mono, label="mono_receiver")
-# )
-
 # You can use the SimulationSettings object to tune parameters of the GA solver
 settings = treble.SimulationSettings(
     ga_settings=treble.GaSolverSettings(
         number_of_rays=5000,  # Number of rays to use in raytracer.
-        ism_order=35,  # Image source method order.
+        ism_order=12,  # Image source method order.
         air_absorption=False,  # Whether to include air absorption in GA simulation.
         ism_ray_count=50000,
     )
 )
 
-"""# Additional IR length settings and GPU settings
-simulation_definition = treble.SimulationDefinition(
-    name="SDN-AES simulation ism order 12",
-    simulation_type=treble.SimulationType.hybrid,
-    model=shoebox_model,
-    crossover_frequency=250,
-    # energy_decay_threshold=20,  # Instead of a constant IR length you can define a energy decay threshold which will stop the simulation automatically.
-    receiver_list=receiver_list,
-    source_list=source_list,
-    material_assignment=material_assignment,
-    simulation_settings=settings,
-    ir_length= 2.0,
-)"""
 # Create a simulation for each source with all receivers
 simulation_definitions = []
 
-# Create a simulation definition for each source (4 sources)
+# MULTI SIM Create a simulation definition for each source (4 sources)
 for idx, source in enumerate(source_list):
     # Use a single source with all receivers for each simulation
     sim_def = treble.SimulationDefinition(
-        name=f"SDN-AES {source.label}",
+        name=f"AES_hybrid_ism12_abs20_multi_1sec_{source.label}",
         simulation_type=treble.SimulationType.hybrid,
         model=shoebox_model,  # Using your existing shoebox model
         crossover_frequency=250,
-        receiver_list=receiver_list,  # All 50 receivers
+        receiver_list=receiver_list,  # All ** receivers
         source_list=[source],         # Just this one source
         material_assignment=material_assignment,  # Your existing material assignment
         simulation_settings=settings,
-        ir_length=2.0,  # 2 second IRs
+        ir_length=1.0,  # 2 second IRs
     )
     
     print(f"Creating simulation for {source.label} with {len(receiver_list)} receivers")
     simulation_definitions.append(sim_def)
 
-
-# Lets plot our simulation definition
-#simulation_definition.plot()
-
-#validation_results = simulation_definition.validate()
-#dd.as_tree(validation_results)
-
-#  Add a SDK simulation based on our simulation definition.
 _ = project.add_simulations(simulation_definitions)
-# eğer tek sim varsa : simulation = project.add_simulation(simulation_definition)
-# Get cost estimate
-print("Estimating simulation cost and time:")
-dd.as_table(project.estimate())
 
-# Get an estimate of simulation runtime and cost.
-# Note: estimate is not available until a mesh has been generated from the model. The wait_for_estimate
-#       methods waits until the mesh is ready before getting the estimate.
-# simulation_estimation = simulation.wait_for_estimate()
-# simulation_estimation.as_tree()
+# Create a simulation for each source with all receivers
+simulation_definitions = []
 
-# Lets start the simulation, the SDK will then allocate cloud GPUs and CPUs resources to your simulation.
-# simulation.start()
+# MULTI SIM Create a simulation definition for each source (4 sources)
+for idx, source in enumerate(source_list):
+    # Use a single source with all receivers for each simulation
+    sim_def = treble.SimulationDefinition(
+        name=f"AES_GA_ism12_abs20_multi_1sec_{source.label}",
+        simulation_type=treble.SimulationType.ga,
+        model=shoebox_model,  # Using your existing shoebox model
+        crossover_frequency=250,
+        receiver_list=receiver_list,  # All ** receivers
+        source_list=[source],  # Just this one source
+        material_assignment=material_assignment,  # Your existing material assignment
+        simulation_settings=settings,
+        ir_length=1.0,  # 2 second IRs
+    )
 
-# It's possible to view the progress of the simulation by calling either .get_progress() or viewing it as a 'live' view
-# using .as_live_progress().
-# simulation.as_live_progress()
+    print(f"Creating simulation for {source.label} with {len(receiver_list)} receivers")
+    simulation_definitions.append(sim_def)
 
-simulations = project.get_simulations()
-dd.as_table(simulations)
+_ = project.add_simulations(simulation_definitions)
 
-res = project.start_simulations()
-dd.as_table(project.get_progress())
+# Create a simulation for each source with all receivers
+simulation_definitions = []
+
+# MULTI SIM Create a simulation definition for each source (4 sources)
+for idx, source in enumerate(source_list):
+    # Use a single source with all receivers for each simulation
+    sim_def = treble.SimulationDefinition(
+        name=f"AES_DG_Reflect_abs20_multi_1sec_{source.label}",
+        simulation_type=treble.SimulationType.dg,
+        model=shoebox_model,  # Using your existing shoebox model
+        crossover_frequency=250,
+        receiver_list=receiver_list,  # All ** receivers
+        source_list=[source],  # Just this one source
+        material_assignment=material_assignment,  # Your existing material assignment
+        simulation_settings=settings,
+        ir_length=1.0,  # 2 second IRs
+    )
+
+    print(f"Creating simulation for {source.label} with {len(receiver_list)} receivers")
+    simulation_definitions.append(sim_def)
+
+
+#  MULTIPLE SIMS: Add a SDK simulation based on our simulation definition.
+for sim in simulation_definitions:
+    simulation = project.add_simulation(sim)
+    simulation.start()
+    simulation.as_live_progress()
+
+# simulations = project.get_simulations()
+# dd.as_table(simulations)
+
+# res = project.start_simulations()
+# dd.as_table(project.get_progress())
 
 Flag_download = False
 
-base_dir = "./results/treble/"
-project_name = "room_aes_abs02"
+base_dir = "./results/treble/aes_multi_dg_ga_hybrid_comparison"
+
 
 if Flag_download:
+
     import os
-    destination_directory = os.join(base_dir, project_name)
+    destination_directory = os.path.join(base_dir, project_name)
     project.download_results(destination_directory, rename_rule=treble.ResultRenameRule.by_label)
 
-project = my_projects[0]
-simulations = project.get_simulations()
-# Get the two different simulations
-simulation_0 = simulations[0]  # First simulation
-print(f"Simulation 0: {simulation_0.name}")
+    # for sim in simu:
+    #     project_name = sim.name
+    #     destination_directory = os.path.join(base_dir, project_name)
+    #     # project.download_results(destination_directory, rename_rule=treble.ResultRenameRule.by_label)
+    #     sim.download_results(destination_directory, rename_rule=treble.ResultRenameRule.by_label)
+
+
 
 
 
