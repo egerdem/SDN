@@ -9,7 +9,7 @@ from scipy import signal
 # import seaborn as sns
 from analysis import calculate_smoothed_energy, calculate_error_metric, plot_smoothing_comparison, compute_RMS, compute_edc
 
-def generate_receiver_grid(room_width: float, room_depth: float, n_points: int = 50) -> List[Tuple[float, float]]:
+def generate_receiver_grid(room_width: float, room_depth: float, margin = 1, n_points: int = 50) -> List[Tuple[float, float]]:
     """Generate a grid of receiver positions within the room.
     
     Args:
@@ -21,7 +21,7 @@ def generate_receiver_grid(room_width: float, room_depth: float, n_points: int =
         List[Tuple[float, float]]: List of (x, y) coordinates for receivers
     """
     # Create a grid of points, avoiding walls (1m margin)
-    margin = 1
+    # margin = 1
     x = np.linspace(margin, room_width - margin, int(np.sqrt(n_points)))
     y = np.linspace(margin, room_depth - margin, int(np.sqrt(n_points)))
     X, Y = np.meshgrid(x, y)

@@ -540,7 +540,7 @@ if __name__ == "__main__":
     import os
     
     # Configuration flags
-    IS_SINGULAR = True  # Set to False for batch processing
+    IS_SINGULAR = False  # Set to False for batch processing
     PREPROCESS_TREBLE_RESULTS = True
 
     # Directory setup
@@ -552,7 +552,8 @@ if __name__ == "__main__":
         TREBLE_BASE_DIR = os.path.join(PROJECT_ROOT, "treble", "single_experiments")  # Direct path
         PROJECT_DIR = TREBLE_BASE_DIR  # Use TREBLE_BASE_DIR directly
     else:
-        PROJECT_NAME = "aes_abs20"  # Original treble batch results folder
+        # PROJECT_NAME = "aes_abs20"  # Original treble batch results folder
+        PROJECT_NAME = "aes_hybrid_ism12_abs20"  # New batch results folder
         OUTPUT_DIR = os.path.join(PROJECT_ROOT, "rooms")
         TREBLE_BASE_DIR = os.path.join(PROJECT_ROOT, "treble", "multi_experiments")
         PROJECT_DIR = os.path.join(TREBLE_BASE_DIR, PROJECT_NAME)
@@ -611,7 +612,7 @@ if __name__ == "__main__":
                 PROJECT_ROOT, 
                 experiments_by_source,
                 PROJECT_NAME,
-                room_name="room_aes"
+                room_name="aes_quartergrid"
             )
 
         print("\nYou can now use sdn_experiment_manager.py to visualize it.")

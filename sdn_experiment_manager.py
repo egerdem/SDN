@@ -491,12 +491,14 @@ class SDNExperimentManager:
         if method == 'SDN':
             # Include key SDN parameters in the name
             flags = config.get('flags', {})
+            #if flags.get('specular_source_injection', False):
+                #param_set += "specular_"
             if 'source_weighting' in flags:
                 param_set += f"sw{flags['source_weighting']}_"
-            #if flags.get('specular_source_injection', False):
-            #    param_set += "si_"
             if 'scattering_matrix_update_coef' in flags:
                 param_set += f"smu{flags['scattering_matrix_update_coef']}_"
+            if 'source_pressure_injection_coeff' in flags:
+                param_set += f"src{flags['source_pressure_injection_coeff']}_"
             
             # Remove trailing underscore
             param_set = param_set.rstrip('_')
@@ -509,6 +511,8 @@ class SDNExperimentManager:
             param_set = f"order{max_order}"
             if config.get('ray_tracing', False):
                 param_set += "_rt"
+            if config.get('use_rand_ism', False):
+                param_set += "_rand"
                 
         elif method == 'TRE' or method == 'treble':
             # Include key Treble parameters in the name
@@ -690,32 +694,16 @@ class SDNExperimentManager:
                       batch_processing=False, source_positions=None, receiver_positions=None):
         """
         Run an acoustic simulation experiment with the given configuration.
-        
-        Args:
-            project_name (str): Name of the project/experiment group (e.g. 'aes_abs20_comparison')
-            config (dict): Configuration for the experiment
-            room_parameters (dict): Room parameters
-            duration (float): Duration of the simulation in seconds
-            fs (int): Sampling frequency
-            force_rerun (bool): If True, rerun the experiment even if it exists
-            method (str): Simulation method ('SDN', 'ISM', 'TRE', etc.)
-            batch_processing (bool): If True, run for multiple source-mic positions
-            source_positions (list): List of source positions [(x,y,z,label), ...] 
-            receiver_positions (list): List of receiver positions [(x,y,z), ...]
-            
-        Returns:
-            SDNExperiment or list: Single experiment or list of experiment IDs
         """
         if project_name is None:
-            # Generate a default project name based on method and parameters
             print("Generating project name based on method and parameters because project_name is None")
             project_name = self._generate_project_name(config, method)
             print("Generated project name:", project_name)
         
-        # Add method to config
+        # Add method to config if not present
         if 'method' not in config:
             config['method'] = method
-        
+
         # Handle batch processing case
         if batch_processing:
             # Check if this manager is set up for batch processing
@@ -736,9 +724,43 @@ class SDNExperimentManager:
                     receiver_positions=receiver_positions
                 )
             
-            # Original batch processing code (unchanged)
+            # Validate batch processing inputs
             if source_positions is None or receiver_positions is None:
                 raise ValueError("Both source_positions and receiver_positions must be provided for batch processing")
+            
+            # Load and validate room info once at the start
+            if 'aes' in project_name.lower():
+                room_info_file = 'room_info_aes.json'
+            elif 'journal' in project_name.lower():
+                room_info_file = 'room_info_journal.json'
+            elif 'waspaa' in project_name.lower():
+                room_info_file = 'room_info_waspaa.json'
+            else:
+                raise ValueError(f"Project name '{project_name}' must contain 'aes', 'journal', or 'waspaa' to determine room type")
+
+            # Load room info from unified location
+            rooms_dir = os.path.join(self.results_dir, 'rooms')
+            room_info_path = os.path.join(rooms_dir, room_info_file)
+            if not os.path.exists(room_info_path):
+                raise FileNotFoundError(f"Room info file not found: {room_info_path}")
+
+            try:
+                with open(room_info_path, 'r') as f:
+                    room_info = json.load(f)
+            except Exception as e:
+                raise Exception(f"Error loading room info from {room_info_path}: {e}")
+
+            # Verify room parameters match
+            for key in ['width', 'depth', 'height', 'absorption']:
+                if abs(room_info['parameters'][key] - room_parameters[key]) > 1e-6:
+                    raise ValueError(f"Room parameter '{key}' mismatch. Expected {room_info['parameters'][key]}, got {room_parameters[key]}")
+
+            # Get or create room once
+            if project_name not in self.rooms:
+                room = Room(project_name, room_parameters)
+                self.rooms[project_name] = room
+            else:
+                room = self.rooms[project_name]
             
             experiment_ids = []
             total_combinations = len(source_positions) * len(receiver_positions)
@@ -785,42 +807,53 @@ class SDNExperimentManager:
                             fs=fs,
                             force_rerun=force_rerun,
                             project_name=project_name,
-                            method=method
+                            method=method,
+                            batch_processing=False  # Important: prevent recursion
                         )
                         
-                        if experiment:
-                            experiment_ids.append(experiment.experiment_id)
+                        experiment_ids.append(experiment.experiment_id)
                     except Exception as e:
                         print(f"    Error: {str(e)}")
             
             print(f"\nCompleted {len(experiment_ids)}/{total_combinations} experiments")
             return experiment_ids
         
-        # Original single-position implementation
         else:
+            # Single experiment case
+            print("single position run")
+            # Determine room type from project name
+            if 'aes' in project_name.lower():
+                room_info_file = 'room_info_aes.json'
+            elif 'journal' in project_name.lower():
+                room_info_file = 'room_info_journal.json'
+            elif 'waspaa' in project_name.lower():
+                room_info_file = 'room_info_waspaa.json'
+            else:
+                raise ValueError(f"Project name '{project_name}' must contain 'aes', 'journal', or 'waspaa' to determine room type")
+
+            # Load room info from unified location
+            rooms_dir = os.path.join(self.results_dir, 'rooms')
+            room_info_path = os.path.join(rooms_dir, room_info_file)
+            if not os.path.exists(room_info_path):
+                raise FileNotFoundError(f"Room info file not found: {room_info_path}")
+
+            try:
+                with open(room_info_path, 'r') as f:
+                    room_info = json.load(f)
+            except Exception as e:
+                raise Exception(f"Error loading room info from {room_info_path}: {e}")
+
+            # Verify room parameters match
+            for key in ['width', 'depth', 'height', 'absorption']:
+                if abs(room_info['parameters'][key] - room_parameters[key]) > 1e-6:
+                    raise ValueError(f"Room parameter '{key}' mismatch. Expected {room_info['parameters'][key]}, got {room_parameters[key]}")
+
             # Get or create room
-            # Check if room exists with same parameters
-            existing_room = None
-            for room in self.rooms.values():
-                if room.matches_parameters(room_parameters):
-                    existing_room = room
-                    break
-                
-            if existing_room is None:
-                # Create new room with the specified name
+            if project_name not in self.rooms:
                 room = Room(project_name, room_parameters)
                 self.rooms[project_name] = room
-                
-                # Save room info to disk
-                room_dir = self._get_room_dir(project_name)
-                os.makedirs(room_dir, exist_ok=True)
-                
-                # Save only room_info.json
-                room_info_path = os.path.join(room_dir, 'room_info.json')
-                with open(room_info_path, 'w') as f:
-                    json.dump(room.to_dict(), f, indent=2)
             else:
-                room = existing_room
+                room = self.rooms[project_name]
             
             # Create a temporary config with all parameters for ID generation
             full_config = {
@@ -963,76 +996,36 @@ class SDNExperimentManager:
             room_dir = self._get_room_dir(project_name)
             os.makedirs(room_dir, exist_ok=True)
             
-            # Get room type from project name and load corresponding room info
-            singulars_dir = os.path.join(self.results_dir, 'room_singulars')
-            if 'aes' in project_name.lower():
-                room_info_file = 'room_info_aes.json'
-            elif 'journal' in project_name.lower():
-                room_info_file = 'room_info_journal.json'
-            elif 'waspaa' in project_name.lower():
-                room_info_file = 'room_info_waspaa.json'
-            else:
-                print(f"Warning: Could not determine room type for {project_name}")
-                room_info_file = None
-            
-            # Get room name from centralized room info
-            room_name = 'custom'  # default if no room info exists
-            if room_info_file:
-                room_info_path = os.path.join(singulars_dir, room_info_file)
-                if os.path.exists(room_info_path):
-                    try:
-                        with open(room_info_path, 'r') as f:
-                            room_info = json.load(f)
-                        room_name = room_info.get('name', 'custom')
-                    except Exception as e:
-                        print(f"Warning: Could not load room info from {room_info_path}: {e}")
-            
             # Generate descriptive filename based on experiment parameters
             method = experiment.config.get('method')
-            if method == 'SDN':
-                flags = experiment.config.get('flags', {})
-                filename_parts = ['sdn', room_name]  # Add room name after method
-                
-                # Add source injection type
-                if flags.get('specular_source_injection', False):
-                    filename_parts.append('specular')
-                
-                # Add source weighting
-                if 'source_weighting' in flags:
-                    filename_parts.append(f"sw{flags['source_weighting']}")
-                
-                # Add scattering matrix update coefficient
-                if 'scattering_matrix_update_coef' in flags:
-                    filename_parts.append(f"scat{flags['scattering_matrix_update_coef']}")
-                
-                # Add source pressure injection coefficient
-                if 'source_pressure_injection_coeff' in flags:
-                    filename_parts.append(f"src{flags['source_pressure_injection_coeff']}")
-                
-                # Create base filename
-                filename = '_'.join(filename_parts) if filename_parts else 'sdn_original'
-            else:
-                # For non-SDN methods, use method name and parameters
-                filename_parts = [method.lower(), room_name]  # Add room name after method
-                
-                # Add ISM-specific parameters
-                if method == 'ISM':
-                    if 'max_order' in experiment.config:
-                        filename_parts.append(f"order{experiment.config['max_order']}")
-                    if experiment.config.get('ray_tracing', False):
-                        filename_parts.append('rt')
-                
-                filename = '_'.join(filename_parts)
+            filename = self._generate_param_set_name(experiment.config)
             
-            # Save experiment metadata and RIR
+            # Add method prefix for singular case
+            if method == 'SDN':
+                filename = f"sdn_{filename}"
+            else:
+                # For other methods (ISM, TREBLE), use simpler naming
+                filename = f"{method.lower()}"
+                
+                # Add order for ISM if specified
+                if method == 'ISM' and 'max_order' in experiment.config:
+                    filename += f"_order{experiment.config['max_order']}"
+                    if experiment.config.get('use_rt'):
+                        filename += '_rt'
+                
+                # Add order for TREBLE if specified
+                elif method == 'TREBLE' and 'max_order' in experiment.config:
+                    filename += f"_order{experiment.config['max_order']}"
+            
+            # Save metadata with descriptive filename
             metadata_path = os.path.join(room_dir, f"{filename}.json")
             with open(metadata_path, 'w') as f:
                 json.dump(experiment.to_dict(), f, indent=2)
             
+            # Save RIR
             rir_path = os.path.join(room_dir, f"{filename}.npy")
             np.save(rir_path, experiment.rir)
         else:
-            # Original batch processing code remains unchanged
             # Get source and mic positions from config
             room_params = experiment.config.get('room_parameters', {})
             source_pos = [
@@ -1062,50 +1055,30 @@ class SDNExperimentManager:
             # Ensure directories exist
             os.makedirs(simulation_dir, exist_ok=True)
             
-            # Save room info
-            room_info = {
-                'name': project_name,  # Use project name as identifier
-                'display_name': project_name,  # Can be customized if needed
-                'parameters': room_params  # Use actual room parameters
-            }
-            room_info_path = os.path.join(room_dir, 'room_info.json')
-            with open(room_info_path, 'w') as f:
-                json.dump(room_info, f, indent=2)
-            
-            # Check if we already have config.json and rirs.npy
+            # Get paths for config and RIRs
             config_path = os.path.join(simulation_dir, 'config.json')
             rirs_path = os.path.join(simulation_dir, 'rirs.npy')
             
-            config_data = {}
+            # Load existing config and RIRs if they exist
             receivers = []
-            rirs = []
-            
-            # Load existing data if available
-            if os.path.exists(config_path) and os.path.exists(rirs_path):
-                try:
-                    with open(config_path, 'r') as f:
-                        config_data = json.load(f)
-                    receivers = config_data.get('receivers', [])
+            rirs = np.array([])
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    existing_config = json.load(f)
+                    receivers = existing_config.get('receivers', [])
+                if os.path.exists(rirs_path):
                     rirs = np.load(rirs_path)
-                except Exception as e:
-                    print(f"Error loading existing data, starting fresh: {e}")
-                    config_data = {}
-                    receivers = []
-                    rirs = np.array([])
             
             # Create receiver info
             receiver_info = {
-                'experiment_id': experiment.experiment_id,
                 'position': mic_pos,
-                'label': self._get_mic_label_from_pos(mic_pos),
-                'position_id': position_id,
-                'timestamp': experiment.timestamp
+                'experiment_id': experiment.experiment_id
             }
             
             # Check if this receiver already exists
             existing_idx = -1
             for idx, rec in enumerate(receivers):
-                if rec.get('experiment_id') == experiment.experiment_id:
+                if rec['experiment_id'] == experiment.experiment_id:
                     existing_idx = idx
                     break
             
@@ -1302,39 +1275,38 @@ if __name__ == "__main__":
                     'absorption': 0.1,
                     }
 
-    room = room_waspaa
+    room = room_journal
     # room_name = "room_aes"
-    project_name = "waspaa_absorptioncoeffs"
+    project_name = "journal_absorptioncoeffs"
 
     # Generate source & receiver positions
-    receiver_positions = sa.generate_receiver_grid(room['width'], room['depth'], 50)
-    source_positions = sa.generate_source_positions(room)
+    # receiver_positions = sa.generate_receiver_grid(room['width'], room['depth'], 50)
+
+    # receiver_positions = sa.generate_receiver_grid(room['width'] / 2, room['depth'] / 2, n_points=16, margin=0.5)  # room aes
+    # source_positions = sa.generate_source_positions(room)
 
     run_single_experiments = True
     run_batch_experiments = False
-
 
     if run_batch_experiments:
 
         # Run batch experiments
         # Use custom results directory for batch experiments (optional)
-        # batch_manager = get_batch_manager("batch_results")  # Will use batch_results/rooms/
         batch_manager = get_batch_manager(results_dir, dont_check_duplicates=True)  # Default: uses results/rooms/
-        # batch_manager = get_cached_batch_manager(results_dir=results_dir, cache_file='experiment_cache.pkl')
 
         print(f"Batch experiments saved in: {batch_manager._get_room_dir(project_name)}")
-        
+
         batch_manager.run_experiment(
             config={
-                'label': 'original',
+                'label': 'weighted psk',
                 'info': '',
                 'method': 'SDN',
                 'flags': {
-                    # 'specular_source_injection': True,
-                    # 'source_weighting': 5,
+                    'specular_source_injection': True,
+                    'source_weighting': 2,
                 }
             },
-            room_parameters=room_aes,
+            room_parameters=room,
             duration=duration,
             fs=44100,
             project_name=project_name,
@@ -1343,13 +1315,51 @@ if __name__ == "__main__":
             receiver_positions=receiver_positions  # Provide receiver positions
         )
 
+        # batch_manager.run_experiment(
+        #     config={
+        #         'label': 'weighted psk',
+        #         'info': '',
+        #         'method': 'SDN',
+        #         'flags': {
+        #             'specular_source_injection': True,
+        #             'source_weighting': 4,
+        #         }
+        #     },
+        #     room_parameters=room,
+        #     duration=duration,
+        #     fs=44100,
+        #     project_name=project_name,
+        #     batch_processing=True,  # Enable batch processing
+        #     source_positions=source_positions,  # Provide source positions
+        #     receiver_positions=receiver_positions  # Provide receiver positions
+        # )
+
+        # batch_manager.run_experiment(
+        #     config={
+        #         'label': 'weighted psk',
+        #         'info': '',
+        #         'method': 'SDN',
+        #         'flags': {
+        #             'specular_source_injection': True,
+        #             'source_weighting': 5,
+        #         }
+        #     },
+        #     room_parameters=room,
+        #     duration=duration,
+        #     fs=44100,
+        #     project_name=project_name,
+        #     batch_processing=True,  # Enable batch processing
+        #     source_positions=source_positions,  # Provide source positions
+        #     receiver_positions=receiver_positions  # Provide receiver positions
+        # )
+
         # batch_manager.run_ism_experiment(
-        #     room_parameters=room_aes,
-        #     duration=0.5,  # Shorter duration for batch processing
+        #     room_parameters=room,
+        #     duration=duration,  # Shorter duration for batch processing
         #     fs=44100,
         #     max_order=12,
         #     ray_tracing=False,
-        #     room_name="room_aes",
+        #     project_name=project_name,
         #     batch_processing=True,  # Enable batch processing
         #     source_positions=source_positions,  # Provide source positions
         #     receiver_positions=receiver_positions,  # Provide receiver positions
@@ -1368,28 +1378,12 @@ if __name__ == "__main__":
 
         single_manager.run_experiment(
             config={
-                'label': 'weighted psk',
+                'label': 'original',
                 'info': '',
                 'method': 'SDN',
                 'flags': {
-                    'specular_source_injection': True,
-                    'source_weighting': 3,
-                }
-            },
-            room_parameters=room,
-            duration=duration,
-            fs=44100,
-            project_name = project_name
-        )
-
-        single_manager.run_experiment(
-            config={
-                'label': 'weighted psk',
-                'info': '',
-                'method': 'SDN',
-                'flags': {
-                    'specular_source_injection': True,
-                    'source_weighting': 4,
+                    # 'specular_source_injection': True,
+                    # 'source_weighting': 2,
                 }
             },
             room_parameters=room,
@@ -1398,32 +1392,64 @@ if __name__ == "__main__":
             project_name=project_name
         )
 
-        single_manager.run_experiment(
-            config={
-                'label': 'weighted psk',
-                'info': '',
-                'method': 'SDN',
-                'flags': {
-                    'specular_source_injection': True,
-                    'source_weighting': 5,
-                }
-            },
-            room_parameters=room,
-            duration=duration,
-            fs=44100,
-            project_name=project_name
-        )
-
-        # Run an ISM experiment
-        single_manager.run_ism_experiment(
-            room_parameters=room,
-            max_order=12,
-            ray_tracing=False,
-            duration=duration,
-            fs=44100,
-            project_name= project_name,
-            label="",
-        )
+        # single_manager.run_experiment(
+        #     config={
+        #         'label': 'weighted psk',
+        #         'info': '',
+        #         'method': 'SDN',
+        #         'flags': {
+        #             'specular_source_injection': True,
+        #             'source_weighting': 3,
+        #         }
+        #     },
+        #     room_parameters=room,
+        #     duration=duration,
+        #     fs=44100,
+        #     project_name = project_name
+        # )
+        #
+        # single_manager.run_experiment(
+        #     config={
+        #         'label': 'weighted psk',
+        #         'info': '',
+        #         'method': 'SDN',
+        #         'flags': {
+        #             'specular_source_injection': True,
+        #             'source_weighting': 4,
+        #         }
+        #     },
+        #     room_parameters=room,
+        #     duration=duration,
+        #     fs=44100,
+        #     project_name=project_name
+        # )
+        #
+        # single_manager.run_experiment(
+        #     config={
+        #         'label': 'weighted psk',
+        #         'info': '',
+        #         'method': 'SDN',
+        #         'flags': {
+        #             'specular_source_injection': True,
+        #             'source_weighting': 5,
+        #         }
+        #     },
+        #     room_parameters=room,
+        #     duration=duration,
+        #     fs=44100,
+        #     project_name=project_name
+        # )
+        #
+        # # Run an ISM experiment
+        # single_manager.run_ism_experiment(
+        #     room_parameters=room,
+        #     max_order=12,
+        #     ray_tracing=False,
+        #     duration=duration,
+        #     fs=44100,
+        #     project_name= project_name,
+        #     label="",
+        # )
 
     #dump batch_manager to pickle
     # import pickle

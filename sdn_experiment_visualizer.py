@@ -228,40 +228,63 @@ class SDNExperimentVisualizer:
             # Room navigation header
             html.Div([
                 html.Div([
-                    html.H2(
-                        id='room-header',
-                        style={'margin': '0 20px', 'color': dark_theme['text']}
-                    ),
+                    # Container for room title and buttons with fixed positioning
+                    html.Div([
+                        html.H2(
+                            id='room-header',
+                            style={
+                                'margin': '0',
+                                'color': dark_theme['text'],
+                                'display': 'inline-block',
+                                'marginRight': '20px'
+                            }
+                        ),
+                        # Navigation buttons in a fixed-position container
+                        html.Div([
+                            html.Button('←', id='prev-room', style={
+                                'fontSize': 24, 
+                                'marginRight': '10px',
+                                'backgroundColor': dark_theme['button_bg'],
+                                'color': dark_theme['button_text'],
+                                'border': 'none',
+                                'borderRadius': '4px',
+                                'padding': '0px 15px',
+                                'cursor': 'pointer'
+                            }),
+                            html.Button('→', id='next-room', style={
+                                'fontSize': 24,
+                                'backgroundColor': dark_theme['button_bg'],
+                                'color': dark_theme['button_text'],
+                                'border': 'none',
+                                'borderRadius': '4px',
+                                'padding': '0px 15px',
+                                'cursor': 'pointer'
+                            })
+                        ], style={
+                            'display': 'inline-block',
+                            'position': 'absolute',
+                            'left': '70%',  # Slightly right of center
+                            'transform': 'translateX(-50%)',
+                            'top': '50%',
+                            'marginTop': '-15px'  # Half of button height to center vertically
+                        })
+                    ], style={
+                        'position': 'relative',
+                        'display': 'block',
+                        'textAlign': 'center',
+                        'marginBottom': '10px'
+                    }),
                     html.H3(
                         id='rt-header',
-                        style={'margin': '10px 20px', 'color': dark_theme['accent']}
+                        style={'margin': '3px 5px', 'color': dark_theme['accent']}
                     )
-                ], style={'display': 'inline-block', 'position': 'relative'}),
-                html.Div([
-                    html.Button('←', id='prev-room', style={
-                        'fontSize': 24, 
-                        'marginRight': '10px',
-                        'backgroundColor': dark_theme['button_bg'],
-                        'color': dark_theme['button_text'],
-                        'border': 'none',
-                        'borderRadius': '4px',
-                        'padding': '0px 15px'
-                    }),
-                    html.Button('→', id='next-room', style={
-                        'fontSize': 24,
-                        'backgroundColor': dark_theme['button_bg'],
-                        'color': dark_theme['button_text'],
-                        'border': 'none',
-                        'borderRadius': '4px',
-                        'padding': '0px 15px'
-                    }),
-                ], style={'position': 'absolute', 'left': '50%', 'top': '%50', 'transform': 'translateX(-50%)'}),
+                ], style={'display': 'block'}),
                 dcc.Store(id='current-room-idx', data=current_room_idx)
-            ], style={'textAlign': 'center', 'margin': '20px', 'position': 'relative'}),
+            ], style={'textAlign': 'center', 'margin': '5px', 'position': 'relative'}),
 
             # Main content area
             html.Div([
-                # Left side - plots
+                # Left side - plots and table
                 html.Div([
                     # Time range selector
                     html.Div([
@@ -281,26 +304,90 @@ class SDNExperimentVisualizer:
                     ], style={'margin': '10px 0 0 20px', 'display': 'flex', 'alignItems': 'center'}),
 
                     # Plots
-                    dcc.Tabs([
-                        dcc.Tab(label="Room Impulse Responses", children=[
-                            dcc.Graph(id='rir-plot', style={'height': '50vh'})
-                        ],
-                        style={'backgroundColor': dark_theme['paper_bg'], 'color': dark_theme['text']},
-                        selected_style={'backgroundColor': dark_theme['header_bg'], 'color': dark_theme['accent']}),
-                        dcc.Tab(label="Energy Decay Curves", children=[
-                            dcc.Graph(id='edc-plot', style={'height': '50vh'})
-                        ],
-                        style={'backgroundColor': dark_theme['paper_bg'], 'color': dark_theme['text']},
-                        selected_style={'backgroundColor': dark_theme['header_bg'], 'color': dark_theme['accent']}),
-                        dcc.Tab(label="Normalized Echo Density", children=[
-                            dcc.Graph(id='ned-plot', style={'height': '50vh'})
-                        ],
-                        style={'backgroundColor': dark_theme['paper_bg'], 'color': dark_theme['text']},
-                        selected_style={'backgroundColor': dark_theme['header_bg'], 'color': dark_theme['accent']})
-                    ], style={'backgroundColor': dark_theme['paper_bg'], 'margin': '10px 0'})
-                ], style={'width': '50%', 'display': 'inline-block', 'verticalAlign': 'top'}),
+                    html.Div([
+                        dcc.Tabs([
+                            dcc.Tab(label="Room Impulse Responses", children=[
+                                dcc.Graph(id='rir-plot', style={'height': '50vh'})
+                            ],
+                            style={
+                                'backgroundColor': dark_theme['paper_bg'],
+                                'color': dark_theme['text'],
+                                'height': '40px',
+                                'padding': '6px',
+                                'display': 'flex',
+                                'alignItems': 'center'
+                            },
+                            selected_style={
+                                'backgroundColor': dark_theme['header_bg'],
+                                'color': dark_theme['accent'],
+                                'height': '40px',
+                                'padding': '6px',
+                                'display': 'flex',
+                                'alignItems': 'center'
+                            }),
+                            dcc.Tab(label="Energy Decay Curves", children=[
+                                dcc.Graph(id='edc-plot', style={'height': '50vh'})
+                            ],
+                            style={
+                                'backgroundColor': dark_theme['paper_bg'],
+                                'color': dark_theme['text'],
+                                'height': '40px',
+                                'padding': '6px',
+                                'display': 'flex',
+                                'alignItems': 'center'
+                            },
+                            selected_style={
+                                'backgroundColor': dark_theme['header_bg'],
+                                'color': dark_theme['accent'],
+                                'height': '40px',
+                                'padding': '6px',
+                                'display': 'flex',
+                                'alignItems': 'center'
+                            }),
+                            dcc.Tab(label="Normalized Echo Density", children=[
+                                dcc.Graph(id='ned-plot', style={'height': '50vh'})
+                            ],
+                            style={
+                                'backgroundColor': dark_theme['paper_bg'],
+                                'color': dark_theme['text'],
+                                'height': '40px',
+                                'padding': '6px',
+                                'display': 'flex',
+                                'alignItems': 'center'
+                            },
+                            selected_style={
+                                'backgroundColor': dark_theme['header_bg'],
+                                'color': dark_theme['accent'],
+                                'height': '40px',
+                                'padding': '6px',
+                                'display': 'flex',
+                                'alignItems': 'center'
+                            })
+                        ], style={'backgroundColor': dark_theme['paper_bg'], 'margin': '0px 0'})
+                    ], style={'width': '100%'}),  # Full width for plots container
 
-                # Middle - room visualization
+                    # Experiment table in a centered container
+                    html.Div([
+                        html.H3("Active Experiments", 
+                               style={'textAlign': 'center', 'marginTop': '20px', 'marginBottom': '10px', 'color': dark_theme['text']}),
+                        dash_table.DataTable(
+                            id='experiment-table',
+                            style_table={'height': '25vh', 'overflowY': 'auto'},
+                            style_cell={
+                                'backgroundColor': dark_theme['paper_bg'],
+                                'color': dark_theme['text'],
+                                'textAlign': 'left',
+                                'padding': '5px'
+                            },
+                            style_header={
+                                'backgroundColor': dark_theme['header_bg'],
+                                'fontWeight': 'bold'
+                            }
+                        )
+                    ], style={'width': '71.4%', 'margin': '0 auto'})  # 50/70 ≈ 0.714 to maintain 50% of total width
+                ], style={'width': '70%', 'display': 'inline-block', 'verticalAlign': 'top'}),
+
+                # Right side - room visualization
                 html.Div([
                     html.H3("Room Layout (Top View)",
                            style={'textAlign': 'center', 'marginBottom': '5px', 'marginTop': '65px', 'color': dark_theme['text']}),
@@ -367,27 +454,7 @@ class SDNExperimentVisualizer:
                         })
                     ], style={'textAlign': 'center', 'marginTop': '10px'}),
 
-                ], style={'width': '25%', 'display': 'inline-block', 'verticalAlign': 'top'}),
-
-                # Right side - experiment table
-                html.Div([
-                    html.H3("Active Experiments", 
-                           style={'textAlign': 'center', 'marginBottom': '5px', 'marginTop': '65px', 'color': dark_theme['text']}),
-                    dash_table.DataTable(
-                        id='experiment-table',
-                        style_table={'height': '60vh', 'overflowY': 'auto'},
-                        style_cell={
-                            'backgroundColor': dark_theme['paper_bg'],
-                            'color': dark_theme['text'],
-                            'textAlign': 'left',
-                            'padding': '5px'
-                        },
-                        style_header={
-                            'backgroundColor': dark_theme['header_bg'],
-                            'fontWeight': 'bold'
-                        }
-                    )
-                ], style={'width': '25%', 'display': 'inline-block', 'verticalAlign': 'top'})
+                ], style={'width': '30%', 'display': 'inline-block', 'verticalAlign': 'top'})
             ], style={'display': 'flex', 'alignItems': 'flex-start'})
         ], style={
             'backgroundColor': dark_theme['background'],
@@ -432,6 +499,18 @@ class SDNExperimentVisualizer:
                     /* Dropdown arrow color */
                     .Select-arrow {
                         border-color: #e0e0e0 transparent transparent !important;
+                    }
+                    /* Button hover effects */
+                    button {
+                        transition: all 0.2s ease-in-out !important;
+                    }
+                    button:hover {
+                        background-color: #505050 !important;
+                        transform: scale(1.05) !important;
+                        box-shadow: 0 2px 4px rgba(0,0,0,0.2) !important;
+                    }
+                    button:active {
+                        transform: scale(0.95) !important;
                     }
                 </style>
             </head>
@@ -663,18 +742,21 @@ class SDNExperimentVisualizer:
                              (edc_fig, "Energy Decay Curves"),
                              (ned_fig, "Normalized Echo Density")]:
                 fig.update_layout(
-                    title=title,
                     template="plotly_dark",
                     paper_bgcolor="#1e2129",
                     plot_bgcolor="#1e2129",
-                    font={"color": "#e0e0e0"}
+                    font={"color": "#e0e0e0"},
+                    margin=dict(t=30, b=20, l=50, r=20)  # Reduced margins (top=30px, bottom=20px, left=50px, right=20px)
                 )
                 if time_range != 'full':
                     fig.update_xaxes(range=[0, float(time_range)])
 
-                # Set y-axis range for RIR plot when early part (50ms) is selected
-                if time_range == 0.05 or time_range == '0.05':
-                    edc_fig.update_yaxes(range=[-10, 2])
+                # Set y-axis range for RIR plot
+                if fig == rir_fig:
+                    fig.update_yaxes(range=[-0.5, 1.0])
+                # Set y-axis range for EDC plot when early part (50ms) is selected
+                elif fig == edc_fig and (time_range == 0.05 or time_range == '0.05'):
+                    fig.update_yaxes(range=[-10, 2])
 
             return rir_fig, edc_fig, ned_fig, table_data, columns
 
