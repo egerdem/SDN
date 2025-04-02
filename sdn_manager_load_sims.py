@@ -824,11 +824,11 @@ if __name__ == "__main__":
         single_visualizer = SDNExperimentVisualizer(singular_manager)
         single_visualizer.show(port=1993)
 
-        # import sdn_experiment_visualizer as sev
-        # import importlib
-        # importlib.reload(sev)
-        # single_visualizer = sev.SDNExperimentVisualizer(singular_manager)
-        # single_visualizer.show(port=1983)
+        import sdn_experiment_visualizer as sev
+        import importlib
+        importlib.reload(sev)
+        single_visualizer = sev.SDNExperimentVisualizer(singular_manager)
+        single_visualizer.show(port=1983)
 
     else: # Batch processing
 

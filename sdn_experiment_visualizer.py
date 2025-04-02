@@ -219,7 +219,7 @@ class SDNExperimentVisualizer:
             'accent': '#61dafb'
         }
 
-        # Get list of rooms
+        # Get list of rooms and create room objects list
         room_names = list(self.manager.rooms.keys())
         current_room_idx = 0
 
@@ -227,60 +227,93 @@ class SDNExperimentVisualizer:
         app.layout = html.Div([
             # Room navigation header
             html.Div([
+                # First row: Room selector and heading
                 html.Div([
-                    # Container for room title and buttons with fixed positioning
+                    # Container with fixed width and positioning
                     html.Div([
-                        html.H2(
-                            id='room-header',
+                        # Dropdown for room selection
+                        dcc.Dropdown(
+                            id='room-selector',
+                            options=[{'label': self.manager.rooms[name].display_name, 'value': i} 
+                                   for i, name in enumerate(room_names)],
+                            value=current_room_idx,
                             style={
-                                'margin': '0',
-                                'color': dark_theme['text'],
-                                'display': 'inline-block',
-                                'marginRight': '20px'
+                                'width': '240px',
+                                'backgroundColor': dark_theme['paper_bg'],
+                                'color': dark_theme['text']
                             }
                         ),
-                        # Navigation buttons in a fixed-position container
-                        html.Div([
-                            html.Button('←', id='prev-room', style={
-                                'fontSize': 24, 
-                                'marginRight': '10px',
-                                'backgroundColor': dark_theme['button_bg'],
-                                'color': dark_theme['button_text'],
-                                'border': 'none',
-                                'borderRadius': '4px',
-                                'padding': '0px 15px',
-                                'cursor': 'pointer'
-                            }),
-                            html.Button('→', id='next-room', style={
-                                'fontSize': 24,
-                                'backgroundColor': dark_theme['button_bg'],
-                                'color': dark_theme['button_text'],
-                                'border': 'none',
-                                'borderRadius': '4px',
-                                'padding': '0px 15px',
-                                'cursor': 'pointer'
-                            })
-                        ], style={
-                            'display': 'inline-block',
-                            'position': 'absolute',
-                            'left': '70%',  # Slightly right of center
-                            'transform': 'translateX(-50%)',
-                            'top': '50%',
-                            'marginTop': '-15px'  # Half of button height to center vertically
-                        })
                     ], style={
-                        'position': 'relative',
-                        'display': 'block',
-                        'textAlign': 'center',
-                        'marginBottom': '10px'
+                        'position': 'absolute',
+                        'left': '40%',
+                        'transform': 'translateX(-50%)',
+                        'zIndex': 1
+                    }),
+                    
+                    # Room header with fixed position
+                    html.H2(
+                        id='room-header',
+                        style={
+                            'margin': '0',
+                            'color': dark_theme['text'],
+                            'position': 'absolute',
+                            'left': 'calc(40% + 140px)',  # 25% (dropdown center) + half dropdown width + some spacing
+                            'whiteSpace': 'nowrap'
+                        }
+                    ),
+                ], style={
+                    'position': 'relative',
+                    'height': '40px',  # Fixed height for the container
+                    'marginBottom': '10px'
+                }),
+
+                # Second row: Navigation buttons and RT info
+                html.Div([
+                    # Navigation buttons
+                    html.Button('←', id='prev-room', style={
+                        'fontSize': 24, 
+                        'marginRight': '10px',
+                        'backgroundColor': dark_theme['button_bg'],
+                        'color': dark_theme['button_text'],
+                        'border': 'none',
+                        'borderRadius': '4px',
+                        'padding': '0px 15px',
+                        'cursor': 'pointer',
+                        'display': 'inline-block',
+                        'verticalAlign': 'middle'
+                    }),
+                    html.Button('→', id='next-room', style={
+                        'fontSize': 24,
+                        'marginRight': '20px',
+                        'backgroundColor': dark_theme['button_bg'],
+                        'color': dark_theme['button_text'],
+                        'border': 'none',
+                        'borderRadius': '4px',
+                        'padding': '0px 15px',
+                        'cursor': 'pointer',
+                        'display': 'inline-block',
+                        'verticalAlign': 'middle'
                     }),
                     html.H3(
                         id='rt-header',
-                        style={'margin': '3px 5px', 'color': dark_theme['accent']}
+                        style={
+                            'margin': '0',
+                            'color': dark_theme['accent'],
+                            'display': 'inline-block',
+                            'verticalAlign': 'middle'
+                        }
                     )
-                ], style={'display': 'block'}),
+                ], style={
+                    'display': 'flex',
+                    'alignItems': 'center',
+                    'justifyContent': 'center'
+                }),
                 dcc.Store(id='current-room-idx', data=current_room_idx)
-            ], style={'textAlign': 'center', 'margin': '5px', 'position': 'relative'}),
+            ], style={
+                'textAlign': 'center',
+                'margin': '5px',
+                'marginBottom': '10px'
+            }),
 
             # Main content area
             html.Div([
@@ -535,19 +568,22 @@ class SDNExperimentVisualizer:
              Output('source-selector', 'options'),
              Output('receiver-selector', 'options'),
              Output('source-selector', 'value'),
-             Output('receiver-selector', 'value')],
+             Output('receiver-selector', 'value'),
+             Output('room-selector', 'value')],
             [Input('prev-room', 'n_clicks'),
              Input('next-room', 'n_clicks'),
              Input('prev-pos', 'n_clicks'),
              Input('next-pos', 'n_clicks'),
              Input('source-selector', 'value'),
              Input('receiver-selector', 'value'),
+             Input('room-selector', 'value'),
              Input('room-plot', 'clickData')],
             [State('current-room-idx', 'data'),
              State('current-pos-idx', 'data')]
         )
         def update_room_and_position(prev_room, next_room, prev_pos, next_pos, 
-                                   source_value, receiver_value, click_data, room_idx, pos_idx):
+                                   source_value, receiver_value, room_selector_value, 
+                                   click_data, room_idx, pos_idx):
             ctx = dash.callback_context
             if not ctx.triggered:
                 button_id = 'no-click'
@@ -560,6 +596,9 @@ class SDNExperimentVisualizer:
                 pos_idx = 0
             elif button_id == 'next-room':
                 room_idx = (room_idx + 1) % len(room_names)
+                pos_idx = 0
+            elif button_id == 'room-selector':
+                room_idx = room_selector_value
                 pos_idx = 0
             elif button_id == 'prev-pos':
                 room = self.manager.rooms[room_names[room_idx]]
@@ -676,7 +715,8 @@ class SDNExperimentVisualizer:
             rt_header = f"Dimensions: {room.dimensions_str}, abs={room.absorption_str}, {room.theoretical_rt_str}"
 
             return (room_idx, pos_idx, room_plot, room_header, rt_header, 
-                   source_options, receiver_options, current_source, current_receiver)
+                   source_options, receiver_options, current_source, current_receiver,
+                   room_idx)
 
         @app.callback(
             [Output('rir-plot', 'figure'),
