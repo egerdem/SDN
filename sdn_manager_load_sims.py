@@ -815,7 +815,7 @@ batch_visualizer.show(port=9025)
 if __name__ == "__main__":
 
     results_dir = 'results'
-    IS_SINGULAR = False  # Set to False for batch processing
+    IS_SINGULAR = True  # Set to False for batch processing
 
     if IS_SINGULAR:
 
@@ -828,7 +828,7 @@ if __name__ == "__main__":
         # import importlib
         # importlib.reload(sev)
         # single_visualizer = sev.SDNExperimentVisualizer(singular_manager)
-        # single_visualizer.show(port=1993)
+        # single_visualizer.show(port=1983)
 
     else: # Batch processing
 
@@ -845,7 +845,7 @@ if __name__ == "__main__":
 
         # Example 2: Load single project
         batch_manager = get_batch_manager(results_dir=results_dir,
-                                         project_names="journal_absorptioncoeffs")
+                                         project_names="aes_quartergrid")
 
         # Example 3: Load multiple specific projects
         # aes_projects = available_projects.get('aes', [])
@@ -853,8 +853,11 @@ if __name__ == "__main__":
         #     batch_manager = get_batch_manager(results_dir=results_dir,
         #                                      project_names=aes_projects[:2])
         #
-        batch_visualizer = SDNExperimentVisualizer(batch_manager)
-        batch_visualizer.show(port=2027)
+        # batch_visualizer = SDNExperimentVisualizer(batch_manager)
+        # batch_visualizer.show(port=2027)
 
+        # import sdn_experiment_visualizer as sev
+        # import importlib
+        # importlib.reload(sev)
         # batch_visualizer = sev.SDNExperimentVisualizer(batch_manager)
-        # batch_visualizer.show(port=2026)
+        # batch_visualizer.show(port=2046)

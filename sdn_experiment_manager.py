@@ -424,7 +424,7 @@ class SDNExperimentManager:
     def _get_results_dir(self):
         """Get the base results directory."""
         return self.results_dir
-        
+    
     def ensure_dir_exists(self):
         """Ensure the results directory exists."""
         os.makedirs(self.results_dir, exist_ok=True)
@@ -530,7 +530,7 @@ class SDNExperimentManager:
         self.rooms = {}
         
         if not self.is_batch_manager:
-            # Load singular experiments from room_singulars folder
+            # Singular case: Load from room_singulars folder
             singulars_dir = os.path.join(self.results_dir, 'room_singulars')
             if os.path.exists(singulars_dir):
                 for project_name in os.listdir(singulars_dir):
@@ -538,19 +538,19 @@ class SDNExperimentManager:
                     if not os.path.isdir(room_path):
                         continue
                         
-                    # Check for room info first (preferred method)
-                    room_info_path = os.path.join(room_path, 'room_info.json')
-                    if os.path.exists(room_info_path):
-                        try:
+                    try:
+                        # Load room info
+                        room_info_path = os.path.join(room_path, 'room_info.json')
+                        if os.path.exists(room_info_path):
                             with open(room_info_path, 'r') as f:
                                 room_info = json.load(f)
                             
-                            # Create room with saved display name
+                            # Create room with saved parameters
                             room_parameters = room_info.get('parameters', {})
                             room = Room(room_info.get('name', project_name), room_parameters)
                             if 'display_name' in room_info:
                                 room.display_name = room_info['display_name']
-                                
+                            
                             # Load experiments for this room
                             for filename in os.listdir(room_path):
                                 if filename.endswith('.json') and filename not in ['room_parameters.json', 'room_info.json']:
@@ -582,9 +582,9 @@ class SDNExperimentManager:
                             if room.experiments:
                                 self.rooms[room.name] = room
                             
-                        except Exception as e:
-                            print(f"Error loading room {project_name}: {e}")
-                            continue  # Skip this room and continue with the next
+                    except Exception as e:
+                        print(f"Error loading room {project_name}: {e}")
+                        continue  # Skip this room and continue with the next
         else:
             # Load batch experiments from the structured directory
             rooms_dir = os.path.join(self.results_dir, 'rooms')
@@ -703,7 +703,7 @@ class SDNExperimentManager:
         # Add method to config if not present
         if 'method' not in config:
             config['method'] = method
-
+        
         # Handle batch processing case
         if batch_processing:
             # Check if this manager is set up for batch processing
@@ -992,7 +992,7 @@ class SDNExperimentManager:
             project_name (str): Name of the project/experiment group (e.g. 'aes_abs20_comparison')
         """
         if not self.is_batch_manager:
-            # Save using the old singular format - flat structure in room_singulars
+            # Save using the old singular format
             room_dir = self._get_room_dir(project_name)
             os.makedirs(room_dir, exist_ok=True)
             
@@ -1004,19 +1004,8 @@ class SDNExperimentManager:
             if method == 'SDN':
                 filename = f"sdn_{filename}"
             else:
-                # For other methods (ISM, TREBLE), use simpler naming
                 filename = f"{method.lower()}"
                 
-                # Add order for ISM if specified
-                if method == 'ISM' and 'max_order' in experiment.config:
-                    filename += f"_order{experiment.config['max_order']}"
-                    if experiment.config.get('use_rt'):
-                        filename += '_rt'
-                
-                # Add order for TREBLE if specified
-                elif method == 'TREBLE' and 'max_order' in experiment.config:
-                    filename += f"_order{experiment.config['max_order']}"
-            
             # Save metadata with descriptive filename
             metadata_path = os.path.join(room_dir, f"{filename}.json")
             with open(metadata_path, 'w') as f:
@@ -1026,36 +1015,14 @@ class SDNExperimentManager:
             rir_path = os.path.join(room_dir, f"{filename}.npy")
             np.save(rir_path, experiment.rir)
         else:
-            # Get source and mic positions from config
-            room_params = experiment.config.get('room_parameters', {})
-            source_pos = [
-                room_params.get('source x'),
-                room_params.get('source y'),
-                room_params.get('source z')
-            ]
-            mic_pos = [
-                room_params.get('mic x'),
-                room_params.get('mic y'),
-                room_params.get('mic z')
-            ]
-            
-            # Get the source label or use position-based label
-            position_id = experiment.config.get('position_id')
-            source_label = position_id.split('_to_mic_')[0] if position_id else self._get_source_label_from_pos(source_pos)
-            
-            # Get method and parameter set name
+            # Batch case: Save in structured directory
+            source_label = experiment.config.get('position_id', '').split('_to_mic_')[0]
             method = experiment.config.get('method', 'SDN')
             param_set = self._generate_param_set_name(experiment.config)
             
-            # Determine directories
-            room_dir = self._get_room_dir(project_name)
-            source_dir = self._get_source_dir(project_name, source_label)
             simulation_dir = self._get_simulation_dir(project_name, source_label, method, param_set)
-            
-            # Ensure directories exist
             os.makedirs(simulation_dir, exist_ok=True)
             
-            # Get paths for config and RIRs
             config_path = os.path.join(simulation_dir, 'config.json')
             rirs_path = os.path.join(simulation_dir, 'rirs.npy')
             
@@ -1069,45 +1036,10 @@ class SDNExperimentManager:
                 if os.path.exists(rirs_path):
                     rirs = np.load(rirs_path)
             
-            # Create receiver info
-            receiver_info = {
-                'position': mic_pos,
-                'experiment_id': experiment.experiment_id
-            }
-            
-            # Check if this receiver already exists
-            existing_idx = -1
-            for idx, rec in enumerate(receivers):
-                if rec['experiment_id'] == experiment.experiment_id:
-                    existing_idx = idx
-                    break
-            
-            if existing_idx >= 0:
-                # Update existing receiver data
-                receivers[existing_idx] = receiver_info
-                if len(rirs) > existing_idx:
-                    rirs[existing_idx] = experiment.rir
-            else:
-                # Add new receiver data
-                receivers.append(receiver_info)
-                if len(rirs) == 0:
-                    rirs = np.array([experiment.rir])
-                else:
-                    rirs = np.append(rirs, [experiment.rir], axis=0)
-            
-            # Update the config with source info and receivers
+            # Update config and save
             config_data = experiment.config.copy()
-            config_data['source'] = {
-                'position': source_pos,
-                'label': source_label
-            }
-            config_data['fs'] = experiment.fs
-            config_data['duration'] = experiment.duration
-            
-            # Store all receivers in the config.json
             config_data['receivers'] = receivers
             
-            # Save config
             with open(config_path, 'w') as f:
                 json.dump(config_data, f, indent=2)
             
@@ -1117,10 +1049,10 @@ class SDNExperimentManager:
     def get_experiment(self, experiment_id):
         """
         Get an experiment by ID.
-        
+
         Args:
             experiment_id (str): The ID of the experiment
-            
+
         Returns:
             SDNExperiment: The experiment object
         """
@@ -1128,14 +1060,14 @@ class SDNExperimentManager:
             if experiment_id in room.experiments:
                 return room.experiments[experiment_id]
         return None
-    
+
     def get_experiments_by_label(self, label):
         """
         Get experiments by label.
-        
+
         Args:
             label (str): The label to search for
-            
+
         Returns:
             list: List of matching experiments
         """
@@ -1143,11 +1075,11 @@ class SDNExperimentManager:
         for room in self.rooms.values():
             experiments.extend([exp for exp in room.experiments.values() if label in exp.get_label()])
         return experiments
-    
+
     def get_all_experiments(self):
         """
         Get all experiments.
-        
+
         Returns:
             list: List of all experiments
         """
@@ -1213,8 +1145,8 @@ def get_batch_manager(results_dir='results', dont_check_duplicates=False):
         dont_check_duplicates (bool): If True, skip loading existing experiments.
                                     This significantly speeds up initialization
                                     when you don't need to check for duplicates.
-    
-    Returns:
+        
+        Returns:
         SDNExperimentManager: The batch experiment manager instance
     """
     _batch_manager = SDNExperimentManager(
@@ -1227,15 +1159,15 @@ def get_batch_manager(results_dir='results', dont_check_duplicates=False):
 def get_singular_manager(results_dir='results', dont_check_duplicates=False):
     """
     Get or create the singular experiment manager singleton.
-    
-    Args:
+        
+        Args:
         results_dir (str): Custom directory to store singular experiment results
                           Default is 'results' with data in 'results/room_singulars/'
         dont_check_duplicates (bool): If True, skip loading existing experiments.
                                     This significantly speeds up initialization
                                     when you don't need to check for duplicates.
-    
-    Returns:
+            
+        Returns:
         SDNExperimentManager: The singular experiment manager instance  
     """
     global _singular_manager
@@ -1277,7 +1209,7 @@ if __name__ == "__main__":
 
     room = room_journal
     # room_name = "room_aes"
-    project_name = "journal_absorptioncoeffs"
+    project_name = "ZZZZZjournal_absorptioncoeffs"
 
     # Generate source & receiver positions
     # receiver_positions = sa.generate_receiver_grid(room['width'], room['depth'], 50)

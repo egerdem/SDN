@@ -24,8 +24,9 @@ def generate_receiver_grid(room_width: float, room_depth: float, margin = 1, n_p
     """
     # Create a grid of points, avoiding walls (1m margin)
     # margin = 1
-    x = np.linspace(margin, room_width - margin, int(np.sqrt(n_points)))
-    y = np.linspace(margin, room_depth - margin, int(np.sqrt(n_points)))
+    margin_from_center = margin - 0.2
+    x = np.linspace(margin, room_width - margin_from_center, int(np.sqrt(n_points)))
+    y = np.linspace(margin, room_depth - margin_from_center, int(np.sqrt(n_points)))
     X, Y = np.meshgrid(x, y)
 
     # Create a list of Receiver objects
@@ -92,7 +93,7 @@ def create_sources(room: dict) -> list:
     
     return sources
 
-project_name = f"AES_single_ga-dg-hybrid"
+project_name = f"FINAL set_quartergridMargined_SCAT06"
 project = tsdk.get_or_create_project(name=project_name, description="original location, single")
 
 # tsdk.delete_project("dcdc0b0b-3c2e-4441-8c9b-3888de56279c")
@@ -118,7 +119,7 @@ room_waspaa = {
         'absorption': 0.1,
     }
 
-room = room_aes
+room = room_journal
 
 # Multiple Sources and Receivers
 source_list = create_sources(room)
@@ -127,8 +128,8 @@ source_list = create_sources(room)
 # retrieve only the left bottom quarter of the room
 receiver_list = generate_receiver_grid(room['width']/2, room['depth']/2, n_points=16, margin=0.5) #room aes
 
-"""# plot the receivers in 2d using matplotlib
-import matplotlib
+# plot the receivers in 2d using matplotlib
+"""import matplotlib
 matplotlib.use('MacOSX')
 import matplotlib.pyplot as plt
 receiver_positions = [(r.x, r.y) for r in receiver_list]
@@ -143,7 +144,7 @@ plt.show()"""
 
 shoebox_model = GeometryGenerator.create_shoebox_room(
     project=project,
-    model_name="AES 9x7x4m shoebox join wall layers",
+    model_name="shoebox join wall layers",
     width_x=room['width'],
     depth_y=room['depth'],
     height_z=room['height'],
@@ -153,17 +154,19 @@ shoebox_model = GeometryGenerator.create_shoebox_room(
 shoebox_model.plot()
 
 # absorption_coefficients = [0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2]
-a = 0.2
-r = (1-a)**0.5
+# a = 0.3
+# r = (1-a)**0.5
 
-absorption_coefficients = [a]*24
-reflection_coefficients = [r]*24
+# absorption_coefficients = [a]*8
+# reflection_coefficients = [r]*24
 
 # name = "SDN-AES-0.89-r_for_abs_0.2"
-name = '20% Absorption'
+# name = '20% Absorption'
+# name = '20% Absorption with 1 Scattering'
+name = '20% Absorption with 1 Scattering'
 # name = "Reflection of 10% Absorption"
 material = tsdk.material_library.get_by_name(name)
-# z = tsdk.material_library.get() # get all materials
+z = tsdk.material_library.get() # get all materials
 
 """if material is None:
     print("Material not found, creating new material")
@@ -172,17 +175,17 @@ material = tsdk.material_library.get_by_name(name)
         name= name,
         description="Imported material",
         category=treble.MaterialCategory.other,
-        #default_scattering=0.25,
+        default_scattering=1,
         # material_type=treble.MaterialRequestType.third_octave_absorption,
-        material_type=treble.MaterialRequestType.reflection_coefficient,
-        coefficients=reflection_coefficients,
+        material_type=treble.MaterialRequestType.full_octave_absorption,
+        coefficients=absorption_coefficients,
     )
-
-    # Material fitting outputs fitted material information, nothing is saved in this step
+#
+#     # Material fitting outputs fitted material information, nothing is saved in this step
     fitted_material = tsdk.material_library.perform_material_fitting(material_definition)
-    # We can plot the material information for verification
-    fitted_material.plot()
-
+#     # We can plot the material information for verification
+#     fitted_material.plot()
+#
     material = tsdk.material_library.create(fitted_material)
     dd.as_tree(material)
 
@@ -218,10 +221,10 @@ simulation_definitions = []
 for idx, source in enumerate(source_list):
     # Use a single source with all receivers for each simulation
     sim_def = treble.SimulationDefinition(
-        name=f"AES_hybrid_ism12_abs20_multi_1sec_{source.label}",
-        simulation_type=treble.SimulationType.hybrid,
+        name=f"JOURNAL_GA_ism12_abs20_scat1_quarterM_1s_{source.label}",
+        simulation_type=treble.SimulationType.ga,
         model=shoebox_model,  # Using your existing shoebox model
-        crossover_frequency=250,
+        # crossover_frequency=250,
         receiver_list=receiver_list,  # All ** receivers
         source_list=[source],         # Just this one source
         material_assignment=material_assignment,  # Your existing material assignment
@@ -233,15 +236,17 @@ for idx, source in enumerate(source_list):
     simulation_definitions.append(sim_def)
 
 _ = project.add_simulations(simulation_definitions)
+simulations = project.get_simulations()
+dd.as_table(simulations)
 
-# Create a simulation for each source with all receivers
+"""# Create a simulation for each source with all receivers
 simulation_definitions = []
 
 # MULTI SIM Create a simulation definition for each source (4 sources)
 for idx, source in enumerate(source_list):
     # Use a single source with all receivers for each simulation
     sim_def = treble.SimulationDefinition(
-        name=f"AES_GA_ism12_abs20_multi_1sec_{source.label}",
+        name=f"AES_GA_ism12_abs20_quarterM_1s_{source.label}",
         simulation_type=treble.SimulationType.ga,
         model=shoebox_model,  # Using your existing shoebox model
         crossover_frequency=250,
@@ -276,30 +281,37 @@ for idx, source in enumerate(source_list):
     )
 
     print(f"Creating simulation for {source.label} with {len(receiver_list)} receivers")
-    simulation_definitions.append(sim_def)
+    simulation_definitions.append(sim_def)"""
 
 
 #  MULTIPLE SIMS: Add a SDK simulation based on our simulation definition.
-for sim in simulation_definitions:
-    simulation = project.add_simulation(sim)
-    simulation.start()
-    simulation.as_live_progress()
+# for sim in simulation_definitions:
+#     simulation = project.add_simulation(sim)
+    # simulation.start()
+    # simulation.as_live_progress()
 
 # simulations = project.get_simulations()
 # dd.as_table(simulations)
 
-# res = project.start_simulations()
+res = project.start_simulations()
 # dd.as_table(project.get_progress())
+dd.as_table(project.as_live_progress())
 
-Flag_download = False
+Flag_download = True
 
-base_dir = "./results/treble/aes_multi_dg_ga_hybrid_comparison"
+base_dir = "./results/treble/multi_experiments/"
+# base_dir = "./results/treble/final_set_qM_scat06_1s/"
+# base_dir = "./results/treble/final_set_qM_scat1_1s/"
 
+my_projects = tsdk.list_my_projects()
+project = my_projects[0]
 
 if Flag_download:
 
     import os
     destination_directory = os.path.join(base_dir, project_name)
+    if not os.path.exists(destination_directory):
+        os.makedirs(destination_directory)
     project.download_results(destination_directory, rename_rule=treble.ResultRenameRule.by_label)
 
     # for sim in simu:
