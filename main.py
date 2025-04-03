@@ -16,19 +16,19 @@ from collections import defaultdict
 import pickle  # Added for loading pickled Treble RI
 
 """ Method flags """
-PLOT_SDN_BASE = False
-PLOT_SDN_Test1 = True
-PLOT_SDN_Test2 = True
+PLOT_SDN_BASE = True
+PLOT_SDN_Test1 = False
+PLOT_SDN_Test2 = False
 PLOT_SDN_Test3 = False
 PLOT_SDN_Test4 = False
 PLOT_SDN_Test5 = False
 PLOT_SDN_Test6 = False
-PLOT_TREBLE = True
+PLOT_TREBLE = False
 
 PLOT_ISM = False # manual ISM
-PLOT_ISM_with_pra = False
+PLOT_ISM_with_pra = True
 PLOT_ISM_TEST = False
-pra_order = 35
+pra_order = 100
 
 """ Visualization flags """
 PLOT_ROOM = False        # 3D Room Visualisation
@@ -72,6 +72,9 @@ room_aes = {'width': 9, 'depth': 7, 'height': 4,
                    'source x': 4.5, 'source y': 3.5, 'source z': 2,
                    'mic x': 2, 'mic y': 2, 'mic z': 1.5,
                    'absorption': 0.2,
+                    'air': {'humidity': 50,
+                           'temperature': 20,
+                           'pressure': 100},
                    }
 
 room_journal = {'width': 3.2, 'depth': 4, 'height': 2.7,
@@ -288,10 +291,21 @@ if __name__ == '__main__':
 
         # if room_parameters == room_journal:
 
-        pra_room = pra.ShoeBox(room_dim, fs=Fs,
-                               materials=pra.Material(energy_absorption = room_parameters['absorption']),
-                               max_order=pra_order,
-                               air_absorption=False, ray_tracing=ray_tracing_flag, use_rand_ism=False)
+        if room_parameters.get('air') is None:
+
+            pra_room = pra.ShoeBox(room_dim, fs=Fs,
+                                   materials=pra.Material(energy_absorption = room_parameters['absorption']),
+                                   max_order=pra_order,
+                                   air_absorption=False, ray_tracing=ray_tracing_flag, use_rand_ism=False)
+        else:
+            print("air absorption True")
+            pra_room = pra.ShoeBox(room_dim, fs=Fs,
+                                   materials=pra.Material(energy_absorption=room_parameters['absorption']),
+                                   max_order=pra_order,
+                                   temperature=room_parameters['air']['temperature'],
+                                   humidity=room_parameters['air']['humidity'], air_absorption=True)
+
+
         pra_room.set_sound_speed(343)
         pra_room.add_source(source_loc).add_microphone(mic_loc)
 

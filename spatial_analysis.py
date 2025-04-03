@@ -102,7 +102,7 @@ def plot_rirs(rir_methods: Dict, receiver_positions: List[Tuple[float, float]],
     plt.tight_layout()
     plt.show()
 
-def spatial_error_analysis(room_params: dict, source_pos: Tuple[float, float, float],
+def spatial_error_analysis(room_params: dict, source_pos: Tuple[float, float, float], receiver_positions: List[Tuple[float, float]],
                          duration: float, Fs: int, methods: List[str], 
                          method_configs: Dict,
                          comparison_type: str = "smoothed_energy",
@@ -129,12 +129,13 @@ def spatial_error_analysis(room_params: dict, source_pos: Tuple[float, float, fl
     Returns:
         Dict: Dictionary containing error maps for each method comparison
     """
-    # Generate receiver positions
-    receiver_positions = generate_receiver_grid(room_params['width'], room_params['depth'])
+    # Generate receiver positions -- first version no margin
+    # receiver_positions = generate_receiver_grid(room_params['width'], room_params['depth'])
 
     # Initialize room and the source signal
     room = geometry.Room(room_params['width'], room_params['depth'], room_params['height'])
     num_samples = int(Fs * duration)
+    duration_in_ms = duration * 1000
     impulse = geometry.Source.generate_signal('dirac', num_samples)
     room.set_source(*source_pos, signal=impulse['signal'], Fs=Fs)
 
@@ -165,7 +166,7 @@ def spatial_error_analysis(room_params: dict, source_pos: Tuple[float, float, fl
                 # Setup PRA room
                 pra_room = pra.ShoeBox(room_dim, fs=Fs,
                                      materials=pra.Material(room_params['absorption']),
-                                     max_order=config.get('max_order', 12),
+                                     max_order=config.get('max_order'),
                                      air_absorption=False,
                                      ray_tracing=config.get('ray_tracing', False),
                                      use_rand_ism=config.get('use_rand_ism', False))
@@ -179,16 +180,21 @@ def spatial_error_analysis(room_params: dict, source_pos: Tuple[float, float, fl
 
                 # Compute RIR
                 pra_room.compute_rir()
-                rir = pra_room.rir[0][0]
+                pra_rir = pra_room.rir[0][0]
+
+                # Process the RIR
+                global_delay = pra.constants.get("frac_delay_length") // 2
+                pra_rir = pra_rir[global_delay:]  # Shift left by removing the initial delay
+                pra_rir = np.pad(pra_rir, (0, global_delay))  # Pad with zeros at the end to maintain length
+                if len(pra_rir) < num_samples:
+                    # Pad with zeros to reach num_samples
+                    rir = np.pad(pra_rir, (0, num_samples - len(pra_rir)))
+                else:
+                    # Truncate if longer
+                    rir = pra_rir[:num_samples]
 
                 # Normalize
                 rir = rir / np.max(np.abs(rir))
-
-                # Handle global delay
-                global_delay = pra.constants.get("frac_delay_length") // 2
-                rir = rir[global_delay:]  # Shift left by removing the initial delay
-                rir = np.pad(rir, (0, global_delay))  # Pad with zeros at the end to maintain length
-                rir = rir[:num_samples]  # Trim to desired length
 
             elif method == 'SDN-Base':
                 # Create a copy of room parameters with current mic position
@@ -212,7 +218,8 @@ def spatial_error_analysis(room_params: dict, source_pos: Tuple[float, float, fl
     # Assuming 'ISM' is one of the methods
     if 'ISM' not in methods:
         raise ValueError("ISM must be one of the methods for comparison")
-        
+    print("error for duration: {} ms".format(duration_in_ms))
+
     # Only compare other methods with ISM
     for method in methods:
         if method != 'ISM':
@@ -220,19 +227,19 @@ def spatial_error_analysis(room_params: dict, source_pos: Tuple[float, float, fl
             for rir1, rir2 in zip(rir_methods['ISM'], rir_methods[method]):
                 # Process signals based on comparison type
                 if comparison_type == "smoothed_energy":
-                    _, sig1 = calculate_smoothed_energy(rir1, window_length=30, range=50, Fs=Fs)
-                    _, sig2 = calculate_smoothed_energy(rir2, window_length=30, range=50, Fs=Fs)
+                    _, sig1 = calculate_smoothed_energy(rir1, window_length=30, range=duration_in_ms, Fs=Fs)
+                    _, sig2 = calculate_smoothed_energy(rir2, window_length=30, range=duration_in_ms, Fs=Fs)
                 elif comparison_type == "energy":
-                    sig1, _ = calculate_smoothed_energy(rir1, window_length=30, range=50, Fs=Fs)
-                    sig2, _ = calculate_smoothed_energy(rir2, window_length=30, range=50, Fs=Fs)
+                    sig1, _ = calculate_smoothed_energy(rir1, window_length=30, range=duration_in_ms, Fs=Fs)
+                    sig2, _ = calculate_smoothed_energy(rir2, window_length=30, range=duration_in_ms, Fs=Fs)
                 elif comparison_type == "edc":
                     sig1 = compute_edc(rir1, Fs, plot=False)
                     sig2 = compute_edc(rir2, Fs, plot=False)
                 else:
                     raise ValueError(f"Unknown comparison type: {comparison_type}")
-
+                # print("length of ", len(sig1), len(sig2))
                 # Compute error using specified metric
-                error = compute_RMS(sig1, sig2, range=50, Fs=Fs, method=error_metric)
+                error = compute_RMS(sig1, sig2, range=500, Fs=Fs, method=error_metric)
                 errors.append(error)
             
             error_map = np.array(errors).reshape(grid_size, grid_size)
@@ -262,7 +269,7 @@ def spatial_error_analysis(room_params: dict, source_pos: Tuple[float, float, fl
         print(f"{comparison:<30} {mean_error:>15.6f}     {combined_info:>20}")
     print("-" * 80)
     
-    return error_maps, rir_methods, receiver_positions
+    return error_maps, rir_methods
 
 def plot_error_maps(error_maps: Dict, room_params: dict, source_pos: Tuple[float, float, float], 
                    interpolated: bool = True, comparison_type: str = "smoothed_energy", error_metric: str = "rmse"):
@@ -340,12 +347,14 @@ if __name__ == "__main__":
         'absorption': 0.2,
     }
 
+    room = room_sdn_original
+
     # Method configurations
     method_configs = {
         'ISM': {
             'enabled': True,
             'params': {
-                'max_order': 12,
+                'max_order': 100,
                 'ray_tracing': False,
                 'use_rand_ism': False
             },
@@ -372,14 +381,14 @@ if __name__ == "__main__":
             },
             'info': 'source weight 4'
         },
-        # 'SDN-Test3': {
-        #     'enabled': True,
-        #     'params': {
-        #         'specular_source_injection': True,
-        #         'source_weighting': 5
-        #     },
-        #     'info': 'source weight 5'
-        # }
+        'SDN-Test3': {
+            'enabled': True,
+            'params': {
+                'specular_source_injection': True,
+                'source_weighting': 5
+            },
+            'info': 'source weight 5'
+        }
     }
 
     # Get list of enabled methods
@@ -401,13 +410,18 @@ if __name__ == "__main__":
         {"type": "edc", "metric": "rmse"},
         # {"type": "edc", "metric": "sum"}
     ]
-    
+
+    receiver_positions = generate_receiver_grid(room['width'] / 2, room['depth'] / 2, n_points=16,
+                                                   margin=0.5)  # room aes
+    # source_positions = generate_source_positions(room)
+
     # Run analysis for each configuration
     for config in comparison_configs:
         print(f"\nRunning analysis with {config['type']} comparison and {config['metric']} metric...")
-        error_maps, rir_methods, receiver_positions = spatial_error_analysis(
+        error_maps, rir_methods = spatial_error_analysis(
             room_parameters,
             source_position,
+            receiver_positions,
             duration=0.05,
             Fs=44100,
             methods=enabled_methods,
