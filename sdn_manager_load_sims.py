@@ -335,7 +335,7 @@ class SDNExperimentManager:
         """
         self.results_dir = results_dir
         self.is_batch_manager = is_batch_manager
-        self.rooms = {}  # name -> Room
+        self.projects = {}  # name -> Room
         self.skip_metrics = skip_metrics
         self.project_names = project_names
         self.ensure_dir_exists()
@@ -413,7 +413,7 @@ class SDNExperimentManager:
 
     def load_experiments(self):
         """Load all experiments from the results directory."""
-        self.rooms = {}
+        self.projects = {}
 
         # SINGULAR EXPERIMENTS
         if not self.is_batch_manager:
@@ -453,7 +453,7 @@ class SDNExperimentManager:
                         # Create individual room with formatted display name
                         individual_room = Room(folder_name, room_info['parameters'])
                         individual_room.display_name = self.get_display_name_from_folder(folder_name)
-                        self.rooms[folder_name] = individual_room
+                        self.projects[folder_name] = individual_room
 
                         # Get room type for unified room
                         room_type = folder_name.split('_')[0].lower()
@@ -533,9 +533,9 @@ class SDNExperimentManager:
                     except Exception as e:
                         print(f"Error processing folder {folder_name}: {str(e)}")
 
-                # Add unified rooms to self.rooms
+                # Add unified rooms to self.projects
                 for unified_room in unified_rooms.values():
-                    self.rooms[unified_room.name] = unified_room
+                    self.projects[unified_room.name] = unified_room
                     print(f"Created unified room {unified_room.display_name} with {len(unified_room.experiments)} total experiments")
 
         # BATCH EXPERIMENTS
@@ -637,8 +637,7 @@ class SDNExperimentManager:
                                         # Get receivers from config.json
                                         receivers_list_of_dicts = config_data.get('receivers', [])
                                         total_receivers = len(receivers_list_of_dicts)
-                                        print(f"               {total_receivers} receivers")
-                                        
+
                                         # Create experiment objects for each source-receiver pair
                                         for rec_idx, receiver_single in enumerate(receivers_list_of_dicts, 1):
 
@@ -665,14 +664,14 @@ class SDNExperimentManager:
                                             # Add experiment to room
                                             room.add_experiment(experiment)
                                         
-                                        print(f"\n        Successfully loaded {total_receivers} receivers")
+                                        print(f"        Successfully loaded {total_receivers} receivers")
                                         
                                     except Exception as e:
                                         print(f"        Error loading experiments from {sim_path}: {e}")
                     
                     # Only add room if it has valid experiments
                     if room.experiments:
-                        self.rooms[room.name] = room
+                        self.projects[room.name] = room
                         print(f"\n  Completed room {room.name}: {len(room.experiments)} total experiments loaded")
                     else:
                         print(f"\n  No valid experiments found in {project_name}")
@@ -680,7 +679,7 @@ class SDNExperimentManager:
                 except Exception as e:
                     print(f"Error loading project {project_name}: {e}")
             
-            print(f"\nLoading complete! Total projects loaded: {len(self.rooms)}")
+            print(f"\nLoading complete! Total projects loaded: {len(self.projects)}")
 
     def get_experiment(self, experiment_id):
         """
@@ -692,9 +691,9 @@ class SDNExperimentManager:
         Returns:
             SDNExperiment: The experiment object
         """
-        for room in self.rooms.values():
-            if experiment_id in room.experiments:
-                return room.experiments[experiment_id]
+        for project in self.projects.values():
+            if experiment_id in project.experiments:
+                return project.experiments[experiment_id]
         return None
     
     def get_experiments_by_label(self, label):
@@ -708,7 +707,7 @@ class SDNExperimentManager:
             list: List of matching experiments
         """
         experiments = []
-        for room in self.rooms.values():
+        for room in self.projects.values():
             experiments.extend([exp for exp in room.experiments.values() if label in exp.get_label()])
         return experiments
     
@@ -720,8 +719,8 @@ class SDNExperimentManager:
             list: List of all experiments
         """
         experiments = []
-        for room in self.rooms.values():
-            experiments.extend(list(room.experiments.values()))
+        for project in self.projects.values():
+            experiments.extend(list(project.experiments.values()))
         return experiments
 
 def get_batch_manager(results_dir='results', skip_metrics=False, project_names=None):
@@ -809,20 +808,20 @@ from sdn_experiment_visualizer import SDNExperimentVisualizer
 if __name__ == "__main__":
 
     results_dir = 'results'
-    IS_SINGULAR = False  # Set to False for batch processing
+    IS_SINGULAR = True  # Set to False for batch processing
 
     if IS_SINGULAR:
 
         # for singular experiments
         singular_manager = get_singular_manager(results_dir=results_dir)
         single_visualizer = SDNExperimentVisualizer(singular_manager)
-        single_visualizer.show(port=1993)
+        single_visualizer.show(port=1997)
 
-        import sdn_experiment_visualizer as sev
-        import importlib
-        importlib.reload(sev)
-        single_visualizer = sev.SDNExperimentVisualizer(singular_manager)
-        single_visualizer.show(port=1983)
+        # import sdn_experiment_visualizer as sev
+        # import importlib
+        # importlib.reload(sev)
+        # single_visualizer = sev.SDNExperimentVisualizer(singular_manager)
+        # single_visualizer.show(port=1983)
 
     else: # Batch processing
 
@@ -848,7 +847,7 @@ if __name__ == "__main__":
         #                                      project_names=aes_projects[:2])
         #
         batch_visualizer = SDNExperimentVisualizer(batch_manager)
-        # batch_visualizer.show(port=2028)
+        batch_visualizer.show(port=2029)
 
         # import sdn_experiment_visualizer as sev
         # import importlib

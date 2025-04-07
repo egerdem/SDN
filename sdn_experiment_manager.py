@@ -1088,7 +1088,21 @@ _singular_manager = None
 
 if __name__ == "__main__":
 
-    duration = 0.1
+    run_single_experiments = False
+    run_batch_experiments = False
+    only_show_experiments = True
+
+    if only_show_experiments:
+        from sdn_experiment_visualizer import SDNExperimentVisualizer
+
+        singular_manager = get_singular_manager(results_dir='results')
+        print(singular_manager.get_experiments_by_label("weighted psk"))
+        print(singular_manager.get_experiments_by_label("original"))
+        print(singular_manager.get_experiments_by_label("pra"))
+        single_visualizer = SDNExperimentVisualizer(singular_manager)
+        single_visualizer.show(port=1990) 
+    
+    duration = 1
 
     # Use this as a parent directory for the results (optional)
     results_dir = 'results'  # Default: uses results/rooms/
@@ -1114,10 +1128,10 @@ if __name__ == "__main__":
 
     room = room_aes
     # room_name = "room_aes"
-    project_name = "aes_ZZZZ"
 
-    run_single_experiments = False
-    run_batch_experiments = True
+    # batch experiments
+    project_name = "aes_absorptioncoeffs"
+
 
     if run_batch_experiments:
 
@@ -1206,76 +1220,109 @@ if __name__ == "__main__":
     if run_single_experiments:
         # Method 1: Run experiments directly
         # Use custom results directory for singular experiments (optional)
-        # single_manager = get_singular_manager("results_custom")  # Will use results_custom/room_singulars/
-        single_manager = get_singular_manager(results_dir)  # Default: uses results/room_singulars/
 
-        print(f"Singular experiments saved in: {single_manager._get_room_dir(project_name)}")
+        single_manager = get_singular_manager()  # Will use results_custom/room_singulars/
+        # single_manager = get_singular_manager(results_dir)  # Default: uses results/room_singulars/
+
+        # print(f"Singular experiments saved in: {single_manager._get_room_dir(project_name)}")
 
         # Run an SDN experiment - single source and receiver (uses singular manager)
 
-        # single_manager.run_experiment(
-        #     config={
-        #         'label': 'original',
-        #         'info': '',
-        #         'method': 'SDN',
-        #         'flags': {
-        #             # 'specular_source_injection': True,
-        #             # 'source_weighting': 2,
-        #         }
-        #     },
-        #     room_parameters=room,
-        #     duration=duration,
-        #     fs=44100,
-        #     project_name=project_name
-        # )
+        single_manager.run_experiment(
+            config={
+                'label': 'original',
+                'info': '',
+                'method': 'SDN',
+                'flags': {
+                    # 'specular_source_injection': True,
+                    # 'source_weighting': 2,
+                }
+            },
+            room_parameters=room,
+            duration=duration,
+            fs=44100,
+            project_name=project_name
+        )
 
-        # single_manager.run_experiment(
-        #     config={
-        #         'label': 'weighted psk',
-        #         'info': '',
-        #         'method': 'SDN',
-        #         'flags': {
-        #             'specular_source_injection': True,
-        #             'source_weighting': 3,
-        #         }
-        #     },
-        #     room_parameters=room,
-        #     duration=duration,
-        #     fs=44100,
-        #     project_name = project_name
-        # )
+        single_manager.run_experiment(
+            config={
+                'label': 'weighted psk',
+                'info': '',
+                'method': 'SDN',
+                'flags': {
+                    'specular_source_injection': True,
+                    'source_weighting': 3,
+                }
+            },
+            room_parameters=room,
+            duration=duration,
+            fs=44100,
+            project_name = project_name
+        )
         #
-        # single_manager.run_experiment(
-        #     config={
-        #         'label': 'weighted psk',
-        #         'info': '',
-        #         'method': 'SDN',
-        #         'flags': {
-        #             'specular_source_injection': True,
-        #             'source_weighting': 4,
-        #         }
-        #     },
-        #     room_parameters=room,
-        #     duration=duration,
-        #     fs=44100,
-        #     project_name=project_name
-        # )
+        single_manager.run_experiment(
+            config={
+                'label': 'weighted psk',
+                'info': '',
+                'method': 'SDN',
+                'flags': {
+                    'specular_source_injection': True,
+                    'source_weighting': 5,
+                }
+            },
+            room_parameters=room,
+            duration=duration,
+            fs=44100,
+            project_name=project_name
+        )
         #
-        # single_manager.run_experiment(
-        #     config={
-        #         'label': 'weighted psk',
-        #         'info': '',
-        #         'method': 'SDN',
-        #         'flags': {
-        #             'specular_source_injection': True,
-        #             'source_weighting': 5,
-        #         }
-        #     },
-        #     room_parameters=room,
-        #     duration=duration,
-        #     fs=44100,
-        #     project_name=project_name
-        # )
+        single_manager.run_experiment(
+            config={
+                'label': 'weighted psk',
+                'info': '',
+                'method': 'SDN',
+                'flags': {
+                    'specular_source_injection': True,
+                    'source_weighting': 6,
+                }
+            },
+            room_parameters=room,
+            duration=duration,
+            fs=44100,
+            project_name=project_name
+        )
+
+        single_manager.run_experiment(
+            config={
+                'label': 'weighted psk',
+                'info': '',
+                'method': 'SDN',
+                'flags': {
+                    'specular_source_injection': True,
+                    'source_weighting': 10,
+                }
+            },
+            room_parameters=room,
+            duration=duration,
+            fs=44100,
+            project_name=project_name
+        )
+
+        single_manager.run_experiment(
+            config={
+                'label': 'weighted psk',
+                'info': '',
+                'method': 'SDN',
+                'flags': {
+                    'specular_source_injection': True,
+                    'source_weighting': 50,
+                }
+            },
+            room_parameters=room,
+            duration=duration,
+            fs=44100,
+            project_name=project_name
+        )
         #
         # # Run an ISM experiment
         single_manager.run_ism_experiment(
@@ -1285,7 +1332,7 @@ if __name__ == "__main__":
             duration=duration,
             fs=44100,
             project_name= project_name,
-            label="pra",
+            label="",
         )
 
     #dump batch_manager to pickle

@@ -296,7 +296,7 @@ class SDNExperimentVisualizer:
         if self.manager is None:
             self.manager = get_batch_manager() if is_batch else get_singular_manager()
 
-        if not self.manager.rooms:
+        if not self.manager.projects:
             print("No rooms with experiments to visualize.")
             return
 
@@ -318,7 +318,7 @@ class SDNExperimentVisualizer:
         }
 
         # Get list of rooms and create room objects list
-        room_names = list(self.manager.rooms.keys())
+        room_names = list(self.manager.projects.keys())
         current_room_idx = 0
 
         # Create app layout (same as in SDNExperimentManager)
@@ -332,7 +332,7 @@ class SDNExperimentVisualizer:
                         # Dropdown for room selection
                         dcc.Dropdown(
                             id='room-selector',
-                            options=[{'label': self.manager.rooms[name].display_name, 'value': i} 
+                            options=[{'label': self.manager.projects[name].display_name, 'value': i}
                                    for i, name in enumerate(room_names)],
                             value=current_room_idx,
                             style={
@@ -793,13 +793,13 @@ class SDNExperimentVisualizer:
                 room_idx = room_selector_value
                 pos_idx = 0
             elif button_id == 'prev-pos':
-                room = self.manager.rooms[room_names[room_idx]]
+                room = self.manager.projects[room_names[room_idx]]
                 pos_idx = (pos_idx - 1) % len(room.source_mic_pairs)
             elif button_id == 'next-pos':
-                room = self.manager.rooms[room_names[room_idx]]
+                room = self.manager.projects[room_names[room_idx]]
                 pos_idx = (pos_idx + 1) % len(room.source_mic_pairs)
 
-            room = self.manager.rooms[room_names[room_idx]]
+            room = self.manager.projects[room_names[room_idx]]
             experiments = room.get_experiments_for_position(pos_idx)
             
             # Get unique sources and receivers for dropdown menus
