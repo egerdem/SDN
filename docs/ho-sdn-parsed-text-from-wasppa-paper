@@ -1,0 +1,551 @@
+ABSTRACT
+Room acoustic models are used in immersive applications to create
+convincing virtual environments.   The computational cost of full-
+scale physical models remains prohibitive for most real-time aural-
+isation systems. Scattering delay network (SDN) is a perceptually-
+motivated and computationally efficient modelling concept that ren-
+ders the line of sight and first-order reflections accurately,  whilst
+approximating higher order reflections with progressively coarser
+spatio-temporal resolution. This paper develops a generalised SDN
+framework capable of rendering reflections up to a selected order
+accurately. The generalisation requires two issues to be considered:
+i) spherical spreading attenuation,  and ii) placement of scattering
+nodes, both of which are addressed here.  Simulations demonstrate
+that the proposed model has a similar energy behaviour to that of
+the image source method (ISM) and improves over standard SDN in
+terms of normalised echo density and in terms of accuracy of delay,
+attenuation and direction of early reflections, whilst maintaining the
+same complexity as standard SDN.
+Index Terms—Acoustic simulation, room acoustics, reverber-
+ator, scattering delay network, image source method
+1. INTRODUCTION
+Room acoustic models are used to provide users with more convinc-
+ing  virtual  environments  in  an  increasing  number  of  applications
+[1].  These applications include cinema, video games, object-based
+audio (OBA) applications, as well as extended reality (XR), where
+artificial reverberation is matched to a virtual room setup to enhance
+the realism and the sense of immersion in the reproduced scenes.
+Room acoustic models can be categorized into three main groups:
+delay networks, physical room models, and convolution-based al-
+gorithms [2].
+Physical models have the ability to render desired sound fields
+accurately,  however  their  high  computational  cost  makes  them
+largely  impractical  for  real-time  applications.   Convolution-based
+algorithms  require  the  measurement  or  simulation  of  numerous
+room impulse responses (RIRs) covering the entire scene.   Addi-
+tionally,  the measured RIRs must be interpolated to enable inter-
+activity.   Delay  network-based  models  provide  a  computationally
+efficient solution, but their control parameters do not correspond to
+physical or geometrical features of enclosures, necessitating ad hoc
+tuning of the acoustic (instead of geometric) parameters.
+Scattering delay networks (SDNs)   [3, 4, 5, 6] are models in-
+spired  by  the  concept  of  digital  waveguide  meshes  (DWM)  [7]
+This  work  was  supported  by  the  Engineering  and  Physical  Sciences
+Research Council (EPSRC) under grant EP/V002554/1,  and by the Turk-
+ish Scientific and Technological Research Council (T
+̈
+UB
+́
+ITAK) under grant
+119E254 (2019-2023). Corresponding author: leny.vinceslas@gmail.com.
+that  aim  to  reduce  the  number  of  nodes  in  the  mesh  to  the  min-
+imum needed to reproduce first-order reflections accurately.  This
+results in a network of scattering nodes,  each approximating one
+wall.  Normalised echo build up density profiles and reverberation
+times  of  SDN  room  simulators  approximate  closely  those  of  the
+image source method (ISM) [8, 9] whilst achieving orders of mag-
+nitude reduction in computational complexity [4]. In listening tests,
+SDN-generated reverberation achieved a higher perceived natural-
+ness than feedback delay networks (FDNs) [10, 11, 12], convolution
+methods and ray-tracing [13] and a greater sense of externalisation
+than higher-order ambisonics measurements [14].
+SDNs were successfully incorporated in various applications,
+including real-time binaural rendering [14, 15] and AR audio ap-
+plications [16].  However, the existing SDN approach cannot accu-
+rately model higher-order reflections, while there is an increasing
+demand for more accurate and flexible artificial reverberators. A re-
+cent perceptual study comparing a standard SDN model to modified
+higher-order SDNs suggested that increasing the number of accu-
+rately modelled reflections can improve the perceived naturalness of
+the generated reverberation [17], but since it was done by increasing
+the number of nodes, this resulted in a significant additional com-
+putational  cost.   Another  perceptual  study  showed  that  rendering
+changes in source directivity satisfactorily requires accurate mod-
+elling of early reflections up to at least the second order [18].
+In this paper we extend the SDN concept to enable a flexible se-
+lection of the desired highest-order reflection to be reproduced ex-
+actly while keeping the low computational complexity of the stan-
+dard SDN. The method is based on an alternative formulation for
+calculating  the  attenuation  in  the  model’s  delay  lines.   Addition-
+ally, we explore different approaches for setting the positions of the
+scattering nodes. These different variations of the proposed higher-
+order SDN method are then evaluated in comparison with the stan-
+dard SDN method and ISM in cuboid room scenarios.
+2. BACKGROUND
+An SDN consists of a network of bidirectional delay lines connect-
+ing scattering nodes, one for each wall of the modelled room.  The
+network  further  includes  source  and  receiver  nodes  that  are  con-
+nected to the scattering nodes via unidirectional dissipative delay
+lines.  The direct path is modelled by an absorptive delay line that
+connects the sound source node directly to the receiver node.  The
+room geometry and the source and listener positions can be updated
+in real-time to simulate dynamic scenes [4].   Figure 1a depicts a
+standard SDN configuration.
+In SDNs, the source node acts as the excitation point that in-
+jects the input signal into the scattering network.  Scattering nodes
+recursively reflect incoming signals to other scattering nodes and to
+2023 IEEE Workshop on Applications of Signal Processing to Audio and AcousticsOctober 22-25, 2023, New Paltz, NY
+A
+A
+A
+A
+Receiver
+Source
+(a)
+A
+A
+A
+A
+Receiver
+Source
+(b)
+Figure 1: 2D view of (a) standard SDN and (b) proposed 2nd order
+HO-SDN. Solid lines denote direct-propagation path, dotted lines
+represent  source-node  connections,  dashed  lines  represent  node-
+receiver connections and double lines represent bidirectional con-
+nections  between  scattering  nodes.   The  red  lines  represent  a  1st
+order path, which is modelled outside of the recursive network in
+(b).The dash-dotted line shows the actual path of a 2nd order reflec-
+tion modelled by the green line where the length of the source-node
+path is longer than the delay between the two points in space.  Re-
+peated lines are greyed out in (b) for clarity.
+the receiver.  This is achieved by multiplying the vector of signals
+incoming from other nodes by a scattering matrix, to obtain a vec-
+tor of outgoing, reflected signals. The scattering matrix is designed
+to be unitary [19], to ensure that the scattering operation preserves
+energy [12] and that the system is stable when coupled with dissi-
+pative delay lines and wall absorption.  The scattering operation is
+similar to the one implemented in digital waveguide meshes [7] and
+is isotropic,i.e.it does not depend on the incidence or reflection di-
+rections.  In addition to the scattering operation, filtering is applied
+to outgoing signals before they are passed to the delay lines in order
+to model the wall absorption.
+A fundamental strength of the SDN model is that its parameters
+are derived directly from the enclosure it simulates and, therefore,
+have explicit physical interpretations. For instance, the nodes of the
+model correspond to locations in space,  while the delay between
+the nodes is given by the propagation time between their physical
+locations. As early reflections strongly contribute to the perception
+of the spaciousness of a room [20], another important characteristic
+of SDNs is its ability to exactly model the first-order reflections.
+This is achieved by placing scattering nodes at points where first-
+order reflections bounce off the walls of the modelled enclosure (see
+Figure  1a),  matching  the  delay-line  lengths  to  the  exact  physical
+length of the propagation path of these reflections.
+The gains of the delay lines are chosen so as to model the atten-
+uation associated to spherical energy spreading.  More specifically,
+the gains of the source-node delay lines and the node-receiver delay
+lines are set as:
+g
+Sk
+=
+1
+α
+k
+andg
+kR
+=
+1
+1 +
+β
+k
+α
+k
+,(1)
+respectively, whereα
+k
+is the distance between the source and the
+nodek, andβ
+k
+is the distance between the nodekand the receiver.
+This choice ensures that the total attenuation, given by the product
+of the two gains,  is the exact attenuation of the first-order reflec-
+tions:g
+Sk
+g
+kR
+=
+1
+α
+k
++β
+k
+.
+The accuracy of the second-order reflections varies depending
+on the specific reflection but the delays of the approximated paths
+remain similar to the actual physical paths [3]. The approximations
+become coarser as the reflection order increases.   Thus,  SDN be-
+haves equivalently to geometric-acoustic methods such as ISM up
+to the first-order reflections, while providing a degrading approxi-
+mation for higher-order ones.  This design is motivated by the di-
+minishing perceptual importance of reflection accuracy as their or-
+der increases, and results in a complexity that is one to two orders
+of magnitude lower than (fft-based) convolution alone [4].
+Several studies have extended SDN capabilities,e.g.to handle
+coupled enclosures [5], to include additional nodes to improve its
+physical accuracy [17] and to model outdoor scenes [21]. This work
+introduces an extension to accurately render early reflections up to
+a given order,  whilst maintaining its complexity to the minimum
+of one scattering node per wall.   The proposed extension will be
+referred to as the higher-order SDN (HO-SDN), whilst the original
+concept will be referred to as the standard SDN.
+3. PROPOSED APPROACH
+The  objective  of  the  proposed  HO-SDNs  is  to  accurately  model
+higher-order reflections up to a desired order, while approximating
+the late reverberation to maintain low computational cost of render-
+ing of the room acoustic component that does not require the same
+level of accuracy to maintain perceived reverberation quality.
+Assume that one wishes to render exact early reflections up to
+orderN.  The proposed method involves treating the reflections up
+to  and  including  orderN−1differently  from  the  reflections  of
+higher orders.  The former are treated as separate delay lines with
+the correct delay and attenuation connected directly to the receiver
+(see the red dotted arrow in Figure 1b), with no interaction with the
+recursive part of the network.  The reflections of orderN, on the
+other hand, feed the recursive network. More specifically, eachNth
+order  reflection  is  modelled  by  connecting  the  source  directly  to
+the scattering node on the wall of the last “bounce” of the reflection
+(see the dash-dotted line in Figure 1b), and from the node it is partly
+sent to the receiver.  As there are6×5
+N−1
+Nth order reflections
+(assuming a cuboid room [22]), each scattering node is fed by5
+N−1
+such reflections.  The length of the node-receiver delay line is set
+according to the length of the node-receiver pathβ
+k
+, while that of
+the source-node delay line,α
+k
+, is set such that the total pathα
+k
++β
+k
+matches  the  correct  physical  path  (denoted  asδ
+true
+in  Figure  1b)
+in length.   This design makes the HO-SDN structure converge to
+the standard SDN model whenN= 1.  The block diagram of the
+proposed HO-SDN is shown in Figure 2.
+The  main  difference  between  [17]  and  the  low-complexity
+SDNs proposed in this paper is that in [17] the number of scatter-
+ing nodes increases with the order, while in this paper the number
+of nodes remains one per wall (i.e.  6 in a cuboid room) regardless
+of the desired order.  Considering that the complexity of SDN in-
+creases asO
+
+K
+3
+
+, whereKis the number of scattering nodes, the
+methods proposed in this paper have a dramatically lower complex-
+ity than [17], and comparable to that of standard SDNs.
+3.1. Attenuation strategy
+ForN≥2,  each  scattering  node  is  fed  by  multiple  reflections.
+Given  that  the  scattering  nodes  do  not  conserve  memory  about
+2023 IEEE Workshop on Applications of Signal Processing to Audio and AcousticsOctober 22-25, 2023, New Paltz, NY
+x[n]
+S
+direct.
+S-A
+delay
+S-A
+prop.
+(N−1)×wall
+abs.
++
+Scatt.
+matrix
+A-A delay
+1×wall
+abs.
+A-R
+prop.
+A-R
+delay
+R
+direct.
+S
+direct.
+S-R
+delay
+S-R
+prop.
+(N−1)×wall
+abs.
+R
+direct.
+S
+direct.
+S-R
+delay
+S-R
+prop.
+R
+direct.
++
+y[n]
+Figure 2: HO-SDN block diagram. Here, “S” stands for “Source”, “R” for “Receiver”. The letter
+“A” is used to indicate a connection with the node, “Prop.”  denotes propagation scaling, and “di-
+rect.” the source or receiver directivity pattern. Narrow lines represent single connections, double
+dashed lines represent multiple connections relative to the orderN−1, and double continuous
+lines represent multiple connections relative to the recursive network and orderN. WhenN= 1
+the dashed lines branch is disabled. Note that in theN−1andNbranches, ”source” refers to the
+reflections of orderN−1andNcoming from the source.
+Nth-order reflections
+Earliest Nth-order reflection
+Wall centre
+Nth-order reflection centroid
+Figure 3:  Diagram of one of the room
+walls   explaining   the   proposed   node
+placement strategies.
+which reflection a signal was received from, it is not possible to use
+the same attenuation strategy of equation (1). More specifically, it is
+not possible to calculate the node-receiver attenuation,g
+kR
+, because
+there are multipleα
+k
+values from as many incoming reflections. To
+address this issue, we propose to invert the distribution of the simple
+and corrective attenuation terms compared to (1), as follows:
+g
+Sk
+=
+1
+1 +
+α
+k
+β
+k
+andg
+kR
+=
+1
+β
+k
+.(2)
+Here, the corrective term is applied to the source-node path (instead
+of node-receiver), while the attenuation of the node-receiver delay
+line is common to allNth-order reflections and is set according to
+the node-receiver distance, making the calculation possible.
+3.2. Node position strategies
+In standard SDN models, scattering nodes are placed at positions
+where the first-order reflections impinge on the walls. This method
+allows to maintain correct delays and angles of incidence of the first
+order reflections.  However, for an HO-SDN model withN >1,
+multiple reflections of the same order bounce off each wall.  Thus,
+the standard SDN method to define node locations cannot be ap-
+plied in the higher-order case.   Several placement strategies were
+examined, as illustrated in Figure 3:
+i) The nodes can be placed at the location where the first reflec-
+tion of theNth order bounces off the wall. In this scenario, the node
+position is set by the earliest reflection with the strongest amplitude,
+while otherNth order reflections do not influence the node position.
+This strategy prioritises the accurate reproduction of the direction of
+arrival of the perceptually most important reflection from each wall
+and will be referred to as thefirst-reflectionstrategy.
+ii) An alternative strategy is to position the scattering nodes at
+the centroid of allNth order reflection points.  In this strategy, no
+specific reflection is prioritised and the resulting angle of incidence
+is an average of all the reflections from a wall. This strategy will be
+referred to as theintersection-centroidstrategy.
+iii) Studies have shown that incorporating delay lines parallel
+with the enclosure axes can improve the accuracy of axial frequency
+modes in acoustic models [22, 23].  Considering a rectangular ge-
+ometry, positioning the scattering nodes at wall centres aligns the
+delay lines connecting opposite pairs of walls to said axes. Towards
+enhancing the accuracy of modelled room modes, we consider plac-
+ing the nodes at the centre of the walls, which will be referred to as
+thecentre-wallstrategy.
+The advantage of the first reflection and intersection-centroid
+strategies is that they converge towards the standard SDN solution
+whenN= 1, providing accurate first-order reflections.
+4. EVALUATION
+The proposed structures are compared to the image source method
+(ISM) and the standard SDN. All SDN and HO-SDN RIRs were
+produced using a Python implementation. The ISM RIRs were gen-
+erated using a Python implementation of [24]. The RIRs were gen-
+erated without the use of fractional delay or air absorption. To mit-
+igate the sweeping echoes in the ISM RIRs, a randomisation tech-
+nique  for  the  image  source  positions  with  a  range  of  10  cm  was
+employed [24]. The simulated room dimensions were6×4×7m,
+with the source positioned at[3.6,1.3,5.3]m and the receiver at
+[1.2,2.4,1.8]m. Wall absorption was set at0.1for all walls.
+Results not included here show that, as expected, the RIRs pro-
+duced by HO-SDN have an increasingly good match with the one
+produced by ISM with increasing orderN.  The considered mod-
+els were assessed in terms of objective metrics provided by energy
+decay  curves  (EDC)  and  reverberation  time  (T60)  [22],  and  nor-
+malised echo density (NED) [25].
+4.1. Energy decay curve and reverberation time
+The EDC provides a measure of the energy decay rate of a RIR. Fig-
+ure 4 compares the EDCs of the reference methods to the proposed
+HO-SDN with the three node positioning strategies forN= 1,2,3.
+While  all  SDN-based  methods  suffer  from  an  initial  drop  in  the
+early EDC, their decay quickly becomes exponential (correspond-
+ing to linear EDC in dB), in line with the expected energy behaviour
+of rooms with frequency-independent uniform absorption  [22, 26].
+Thecentroidstrategy provides the closest EDCs to the ISM, while
+thecentre-walland thefirst-reflectionstrategies appear to have re-
+spectively slightly shorter and longer T60s.   Table 1 presents the
+T60s  of  each  model  and  strategy  with  the  Sabine  value  as  refer-
+2023 IEEE Workshop on Applications of Signal Processing to Audio and AcousticsOctober 22-25, 2023, New Paltz, NY
+0.000.250.500.751.001.251.501.752.00
+Time [s]
+60
+50
+40
+30
+20
+10
+0
+Energy [dB]
+0.020.040.06
+4
+2
+0
+ISM
+Standard SDN
+HO-SDN center wall N=1
+HO-SDN center wall N=2
+HO-SDN center wall N=3
+(a) Centre-wall strategy
+0.000.250.500.751.001.251.501.752.00
+Time [s]
+60
+50
+40
+30
+20
+10
+0
+Energy [dB]
+0.020.040.06
+4
+2
+0
+ISM
+Standard SDN
+HO-SDN centroid N=1
+HO-SDN centroid N=2
+HO-SDN centroid N=3
+(b) Intersection-centroid strategy
+0.000.250.500.751.001.251.501.752.00
+Time [s]
+60
+50
+40
+30
+20
+10
+0
+Energy [dB]
+0.020.040.06
+4
+2
+0
+ISM
+Standard SDN
+HO-SDN first reflection N=1
+HO-SDN first reflection N=2
+HO-SDN first reflection N=3
+(c) First-reflection strategy
+Figure 4: Energy decay curves for the three HO-SDN strategies compared to ISM and standard SDN.
+0.0000.0250.0500.0750.1000.1250.1500.1750.200
+Time [s]
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+1.2
+1.4
+Normalized Echo Density
+0.020.030.04
+0.0
+0.1
+0.2
+0.3
+ISM
+Standard SDN
+HO-SDN centroid N=1
+HO-SDN centroid N=2
+HO-SDN centroid N=3
+Figure 5: Time evolution of the normalised echo density for the HO-
+SDN intersection-centroid strategies compared to ISM and standard
+SDN. Notice that the RIR of HO-SDN forN= 3matches that of
+the ISM closely only up to 25 ms.
+ences.  As expected, first-order HO-SDN closely matches the stan-
+dard SDN.
+Table 1: T60s derived from EDC measurements.
+T60 [s]
+ModelsN=1N=2N=3
+Sabine [22]1.47 s
+ISM1.72 s
+Standard SDN1.71 s--
+HO-SDN centre-wall1.67 s1.66 s1.64 s
+HO-SDN intersection-centroid1.72 s1.74 s1.69 s
+HO-SDN first-reflection1.72 s1.82 s1.84 s
+4.2. Normalised echo density
+The NED provides a measure of the deviation of a windowed part
+of an RIR from Gaussian noise.  It was found to be strongly cor-
+related to the perceived reverberation texture [25].  Figure 5 shows
+the  time  evolution  of  the  NED  for  the  proposed  HO-SDN  struc-
+tures with intersection-centroid strategy forN= 1,2,3, along with
+ISM and standard SDN. It can be observed that asNincreases, the
+HO-SDNs tend to converge towards the ISM’s NED. This is in part
+expected, since the RIR of HO-SDNs match the ISM’s RIR for a
+longer time period. However, it should be noted how the echo den-
+sity of the third-order HO-SDN continues to match the echo den-
+sity of the ISM even beyond the time where the reflections are no
+longer rendered exactly (25 ms), indicating that the strategy adopted
+to feed the recursive network is effective in approximating the de-
+lay of reflections beyondN.  Results not shown here indicate that
+HO-SDN does not appear sensitive to the particular node placement
+strategy in terms of time evolution of the NED.
+4.3. Computational complexity
+The  only  additional  cost  of  the  HO-SDNs  proposed  here  comes
+from the computation of the delay and attenuation of early reflec-
+tions up to orderN−1and the associated convolution with the in-
+put signal.  This results in only negligible additional computational
+cost beyond that of the standard SDN. The delay and attenuation of
+the early reflections are computed using the ISM [27]. Considering
+that ISM requires 25 operations per image source [4], and that in a
+cuboid room there are6 + (N−1)(12 + 4(N−2))unique image
+sources up to orderN, the number of operations forN= 3is 950.
+In a dynamic simulation where this is recomputed, say, 50 times per
+second,  this would amount to just 50 kFLOPs (0.3% of the SDN
+complexity, assuming sampling frequency of44.1KHz [4]).  Ad-
+ditionally, to model exact reflections up to orderN, a tapped delay
+line can be deployed, requiring 1.7 MFLOPs (11% extra compared
+to SDN). For context, overlap-add convolution with a full impulse
+response has a cost of 200 MFLOPs (assuming a T60 of 0.5 s, and
+an update rate of 50 Hz [4]), and this does not even take into account
+the computation of the RIR itself.
+5. CONCLUSIONS
+This paper presented a low-complexity approach for room acous-
+tics simulation based on scattering delay networks capable of mod-
+elling precisely higher-order reflections up to a selected order. The
+introduced HO-SDN model employs a modified attenuation distri-
+bution compared to the standard SDN. Moreover, three strategies to
+determine the position of the scattering nodes were explored.  Ob-
+jective measures showed that the proposed model performs on a par
+to the image source method (ISM) in terms of energy behaviour and
+improves over standard SDN in terms of normalised echo density,
+correctness of delay, attenuation and direction of early reflections,
+all while maintaining the low complexity of the standard SDNs.
+Future work will investigate the energy drop in the early sec-
+tions of energy decay curves and propose solutions. In addition, we
+are planning to evaluate the proposed methodology perceptually.

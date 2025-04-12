@@ -50,6 +50,7 @@ class DelayNetwork:
                  more_absorption: bool = False,
                  print_mic_pressures: bool = False,
                  print_parameter_summary: bool = False,
+                 normalize_to_first_impulse: bool = False,
                  label: str = ""):
         """Initialize SDN with test flags.
         

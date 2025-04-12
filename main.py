@@ -2,11 +2,7 @@ import numpy as np
 import geometry
 import plot_room as pp
 import matplotlib.pyplot as plt
-from sdn_core import DelayNetwork
-from ISM_manual import calculate_ism_rir
-import pyroomacoustics as pra
 import path_tracker
-import random
 from sdn_path_calculator import SDNCalculator, ISMCalculator, PathCalculator
 import frequency as ff
 import EchoDensity as ned  # Import the EchoDensity module
@@ -14,19 +10,31 @@ import analysis as an
 import dsp
 from collections import defaultdict
 import pickle  # Added for loading pickled Treble RI
+from scipy.io import wavfile
+
+from rir_calculators import (
+    calculate_pra_rir,
+    calculate_rimpy_rir,
+    calculate_sdn_rir,
+    calculate_ho_sdn_rir
+)
 
 """ Method flags """
 PLOT_SDN_BASE = True
-PLOT_SDN_Test1 = False
-PLOT_SDN_Test2 = False
+PLOT_SDN_Test1 = True
+PLOT_SDN_Test2 = True
 PLOT_SDN_Test3 = False
 PLOT_SDN_Test4 = False
 PLOT_SDN_Test5 = False
 PLOT_SDN_Test6 = False
 PLOT_TREBLE = False
+PLOT_HO_SDN_N2 = True  # Higher Order SDN flag
+PLOT_HO_SDN_N3 = True  # Higher Order SDN flag
 
 PLOT_ISM = False # manual ISM
 PLOT_ISM_with_pra = True
+PLOT_ISM_rimPy_pos = True  # rimPy ISM with positive reflection
+PLOT_ISM_rimPy_neg = True  # rimPy ISM with negative reflection
 PLOT_ISM_TEST = False
 pra_order = 100
 
@@ -47,7 +55,7 @@ pulse_analysis = False
 plot_smoothed_rirs = False
 
 # Parameters
-duration = 1  # seconds
+duration = 2  # seconds
 Fs = 44100
 num_samples = int(Fs * duration)
 rirs = {}
@@ -56,15 +64,16 @@ rirs_analysis = {}
 # Assign source signals
 impulse_dirac = geometry.Source.generate_signal('dirac', num_samples)
 impulse_gaussian = geometry.Source.generate_signal('gaussian', num_samples)
+
 # ISM_signal = geometry.Source.generate_signal('dirac', num_samples) # only for manual ISM
 
 """ Room Setup """
 
 # ho-waspaa paper room
 room_waspaa = {
-        'width': 6, 'depth': 4, 'height': 7,
-        'source x': 3.6, 'source y': 1.3, 'source z': 5.3,
-        'mic x': 1.2, 'mic y': 2.4, 'mic z': 1.8,
+        'width': 6, 'depth': 7, 'height': 4,
+        'source x': 3.6, 'source y': 5.3, 'source z': 1.3,
+        'mic x': 1.2, 'mic y': 1.8, 'mic z': 2.4,
         'absorption': 0.1,
     }
 
@@ -72,9 +81,9 @@ room_aes = {'width': 9, 'depth': 7, 'height': 4,
                    'source x': 4.5, 'source y': 3.5, 'source z': 2,
                    'mic x': 2, 'mic y': 2, 'mic z': 1.5,
                    'absorption': 0.2,
-                    'air': {'humidity': 50,
-                           'temperature': 20,
-                           'pressure': 100},
+                    # 'air': {'humidity': 50,
+                    #        'temperature': 20,
+                    #        'pressure': 100},
                    }
 
 room_journal = {'width': 3.2, 'depth': 4, 'height': 2.7,
@@ -83,7 +92,7 @@ room_journal = {'width': 3.2, 'depth': 4, 'height': 2.7,
                    'absorption': 0.1,
                    }
 
-room_parameters = room_aes
+room_parameters = room_waspaa
 
 room = geometry.Room(room_parameters['width'], room_parameters['depth'], room_parameters['height'])
 room.set_microphone(room_parameters['mic x'], room_parameters['mic y'], room_parameters['mic z'])
@@ -92,19 +101,24 @@ room.set_source(room_parameters['source x'], room_parameters['source y'], room_p
 
 room_dim = np.array([room_parameters['width'], room_parameters['depth'], room_parameters['height']])
 
+# Setup signal
+room.source.signal = impulse_dirac['signal']
+# room.source.signal = impulse_gaussian['signal']
+
 # Calculate reflection coefficient - will be overwritten for each method
 room_parameters['reflection'] = np.sqrt(1 - room_parameters['absorption'])
 room.wallAttenuation = [room_parameters['reflection']] * 6
+
 
 # SDN Test Configurations
 sdn_tests = {
     'Test1': {
         'enabled': PLOT_SDN_Test1,
         # 'absorption': 0.2,
-        'info': "c1 ",
+        'info': " ",
         'flags': {
-            'specular_source_injection': True,
-            'source_weighting': 1,
+            # 'specular_source_injection': True,
+            # 'source_weighting': 1,
         # 'scattering_matrix_update_coef' : 0.05
         },
         'label': "SDN"
@@ -127,16 +141,17 @@ sdn_tests = {
     'Test3': {  # New test configuration
         'enabled': PLOT_SDN_Test3,
         # 'absorption': 0.3,
-        'info': "specular + specular -0.02",
+        # 'info': "specular + specular -0.02",
+        'info': "c3",
         'flags': {
         # "ignore_wall_absorption" : True,
         # "ignore_src_node_atten" : True,
         # "ignore_node_mic_atten" : True,
         'specular_source_injection': True,
-        'source_weighting': 5,
+        'source_weighting': 3,
         # "source_pressure_injection_coeff": 0.01,
         # "coef": -0.01
-        'scattering_matrix_update_coef' : -0.02
+        # 'scattering_matrix_update_coef' : -0.02
         },
         'label': "SDN"
     },
@@ -186,56 +201,16 @@ sdn_tests = {
 
 # Function to run SDN tests with given configuration, new implementation (SDN-Ege)
 def run_sdn_test(test_name, config):
-    
-    print("Running SDN test:", test_name)
-    if 'absorption' in config:
-    # Override absorption
-        room_parameters['absorption'] = config['absorption']
-        room_parameters['reflection'] = np.sqrt(1 - config['absorption'])
-    room.wallAttenuation = [room_parameters['reflection']] * 6
-    
-    # Setup signal
-    room.source.signal = impulse_dirac['signal']
-    
-    # Create SDN instance with configured flags
-    sdn = DelayNetwork(room, Fs=Fs, label=config['label'], **config['flags'])
-    
-    # Calculate RIR
-    rir = sdn.calculate_rir(duration)
-    rir = rir / np.max(np.abs(rir))
-    
-    # Check if this is a default configuration (no flags)
-    is_default = len(config.get('flags', {})) == 0
-    
-    # Store result with optional info
-    if is_default:
-        label = 'SDN-Original'
-    else:
-        label = f'SDN-{test_name}'
-        
-    if 'info' in config:
-        label += f': {config["info"]}'
+
+    sdn, rir, label, is_default = calculate_sdn_rir(room_parameters, test_name, room, duration, Fs, config)
     
     rirs[label] = rir
-    
+
     # Track if this is a default configuration
     if is_default:
         default_rirs.add(label)
     
     return sdn
-
-
-"""# Ensure all RIRs have no DC component for consistent comparison
-print("\nRemoving DC component from all RIRs for consistent comparison...")
-for rir_label in list(rirs.keys()):
-    # Remove DC component
-    dc_value = np.mean(rirs[rir_label])
-    if abs(dc_value) > 1e-10:  # Only report if DC is significant
-        print(f"  {rir_label}: Removed DC offset of {dc_value:.6f}")
-    rirs[rir_label] = rirs[rir_label] - dc_value
-    
-    # Re-normalize to ensure max amplitude is 1.0 after DC removal
-    rirs[rir_label] = rirs[rir_label] / np.max(np.abs(rirs[rir_label]))"""
 
 
 def get_method_pairs():
@@ -281,150 +256,31 @@ def get_method_pairs():
 
 if __name__ == '__main__':
 
+
+
     """ Image Source Methods and Treble """
     if PLOT_ISM_with_pra:
-        # Override absorption for ISM
-        ray_tracing_flag = False
-        # Setup room for ISM with PRA package
-        source_loc = np.array([room_parameters['source x'], room_parameters['source y'], room_parameters['source z']])
-        mic_loc = np.array([room_parameters['mic x'], room_parameters['mic y'], room_parameters['mic z']])
-
-        # if room_parameters == room_journal:
-
-        if room_parameters.get('air') is None:
-
-            pra_room = pra.ShoeBox(room_dim, fs=Fs,
-                                   materials=pra.Material(energy_absorption = room_parameters['absorption']),
-                                   max_order=pra_order,
-                                   air_absorption=False, ray_tracing=ray_tracing_flag, use_rand_ism=False)
-        else:
-            print("air absorption True")
-            pra_room = pra.ShoeBox(room_dim, fs=Fs,
-                                   materials=pra.Material(energy_absorption=room_parameters['absorption']),
-                                   max_order=pra_order,
-                                   temperature=room_parameters['air']['temperature'],
-                                   humidity=room_parameters['air']['humidity'], air_absorption=True)
-
-
-        pra_room.set_sound_speed(343)
-        pra_room.add_source(source_loc).add_microphone(mic_loc)
-
-        pra_room.compute_rir()
-        pra_rir = pra_room.rir[0][0]
-
-        # Remove DC component by subtracting the mean
-        # pra_rir = pra_rir  np.mean(pra_rir)
-
-        global_delay = pra.constants.get("frac_delay_length") // 2
-        pra_rir = pra_rir[global_delay:]  # Shift left by removing the initial delay
-        pra_rir = np.pad(pra_rir, (0, global_delay))  # Pad with zeros at the end to maintain length
-        pra_rir = pra_rir[:num_samples]
-        pra_rir = pra_rir / np.max(np.abs(pra_rir))
-        label = 'ISM'
+        pra_rir, label = calculate_pra_rir(room_parameters, duration, Fs, pra_order)
         rirs[label] = pra_rir
 
-    # Load Treble RIR if enabled
-    if PLOT_TREBLE:
-        # Function to load, normalize, and align a Treble RIR
-        def load_and_align_treble_rir(file_path, label_suffix=""):
-            try:
-                # Load the Treble RIR
-                treble_raw = np.load(file_path)
+    # Calculate rimPy ISM RIR
+    if PLOT_ISM_rimPy_pos or PLOT_ISM_rimPy_neg:
+     
+        # Run rimPy with positive reflection coefficient
+        if PLOT_ISM_rimPy_pos:
+            rimpy_rir_pos, label = calculate_rimpy_rir(room_parameters, duration/3, Fs, reflection_sign=1)
+            rirs[label] = rimpy_rir_pos
 
-                # Normalize the RIR
-                treble_raw = treble_raw / np.max(np.abs(treble_raw))
-
-                # Find the peak of the Treble RIR
-                treble_peak_idx = np.argmax(np.abs(treble_raw))
-
-                # Find the typical peak position in other RIRs (using ISM as reference if available)
-                if 'ISM' in rirs:
-                    reference_peak_idx = np.argmax(np.abs(rirs['ISM']))
-                else:
-                    assert "ISM or SDN-Original RIR is required for alignment"
-
-                # Calculate the shift needed
-                shift_amount = reference_peak_idx - treble_peak_idx
-
-                # Shift the Treble RIR
-                if shift_amount > 0:
-                    # Shift right
-                    treble_aligned = np.pad(treble_raw, (shift_amount, 0))[:len(treble_raw)]
-                else:
-                    # Shift left
-                    treble_aligned = np.pad(treble_raw[abs(shift_amount):], (0, abs(shift_amount)))
-
-                # Ensure the RIR has the correct length
-                if len(treble_aligned) > num_samples:
-                    treble_rir = treble_aligned[:num_samples]
-                else:
-                    treble_rir = np.pad(treble_aligned, (0, num_samples - len(treble_aligned)))
-
-                # Add to the rirs dictionary
-                rir_label = f"Treble{label_suffix}"
-                # rirs[rir_label] = treble_rir
-                rirs[rir_label] = treble_raw
-                print(
-                    f"Successfully loaded {rir_label} RIR from {file_path} and aligned it (shift: {shift_amount} samples)")
-                return True
-            except Exception as e:
-                print(f"Error loading Treble RIR from {file_path}: {e}")
-                return False
-
-
-        # Load the original Treble RIR
-        load_and_align_treble_rir('rir_44k_treble.npy', "")
-
-        # Load the new Treble RIR
-        load_and_align_treble_rir('rir_treble_ism12_no_air.npy', " ISM12")
-
-    # Calculate ISM test RIR if needed
-    if PLOT_ISM_TEST:
-        from ISM import ISM
-
-        # Setup parameters for ISM test
-        xs = np.array([room_parameters['source x'],
-                       room_parameters['source y'],
-                       room_parameters['source z']])
-        xr = np.array([[room_parameters['mic x'],
-                        room_parameters['mic y'],
-                        room_parameters['mic z']]])
-        xr = np.transpose(xr)
-        L = np.array([room_parameters['width'],
-                      room_parameters['depth'],
-                      room_parameters['height']])
-        N = np.array([0, 0, 0])
-        beta = room_parameters['reflection']  # Use reflection coefficient directly
-        Tw = 11
-        Fc = 0.9
-        Rd = 0.08
-        Nt = round(Fs / 2)
-        c = 343
-
-        # Calculate RIR using ISM test method
-        B = ISM(xr, xs, L, beta, N, Nt, Rd, [], Tw, Fc, Fs, c)
-        ism_test_rir = B[0].flatten()  # Flatten the 2D array to 1D
-        ism_test_rir = ism_test_rir / np.max(np.abs(ism_test_rir))
-        ism_test_rir = ism_test_rir[:num_samples]
-        rirs['ISM_test'] = ism_test_rir
-
-    # Calculate manual ISM RIR if needed
-    if PLOT_ISM:
-        ISM_signal = impulse_dirac  # or impulse_dirac (only change this line, not the subsequent)
-        room.source.signal = ISM_signal['signal']
-        print("manual ISM")
-        ism_rir, fs = calculate_ism_rir(room, max_order=8, duration=duration)
-        print("takes time")
-        ism_rir = ism_rir / np.max(np.abs(ism_rir))
-        ism_manual_rir = ism_rir[:num_samples]
-        rirs['ISM_manual'] = ism_manual_rir
-
+        # Run rimPy with negative reflection coefficient
+        if PLOT_ISM_rimPy_neg:
+                rimpy_rir_neg, label = calculate_rimpy_rir(room_parameters, duration/3, Fs, reflection_sign=-1)
+                rirs[label] = rimpy_rir_neg
 
     if duration > 0.7:
         # Theoretical RT60 if room dimensions and absorption are provided
         if room_dim is not None and room_parameters['absorption'] is not None:
-            rt60_sabine, rt60_eyring = pp.calculate_rt60_theoretical(room_dim, 0.2)
-            print(f"\nTheoretical RT60 values of the room with a=0.2:")
+            rt60_sabine, rt60_eyring = pp.calculate_rt60_theoretical(room_dim, room_parameters['absorption'])
+            print(f"\nTheoretical RT60 values of the room with a= {room_parameters['absorption']}:")
             print(f"Sabine: {rt60_sabine:.3f} s")
             print(f"Eyring: {rt60_eyring:.3f} s")
 
@@ -483,7 +339,16 @@ if __name__ == '__main__':
 
             sdn.get_path_summary()
 
-    if interactive_rirs:
+    # Calculate HO-SDN RIR after SDN tests
+    if PLOT_HO_SDN_N2:
+        rir_ho2_sdn, label = calculate_ho_sdn_rir(room_parameters, room, Fs, duration, order=2)
+        rirs[label] = rir_ho2_sdn
+
+    if PLOT_HO_SDN_N3:
+        rir_ho3_sdn, label = calculate_ho_sdn_rir(room_parameters, room, Fs, duration, order=3)
+        rirs[label] = rir_ho3_sdn
+
+    if interactive_rirs:    
         pp.create_interactive_rir_plot(rirs)
         plt.show(block=False)
 
@@ -743,3 +608,7 @@ if PLOT_ROOM:
     # plt.grid()
     # plt.show()
 
+import pickle
+# Save the RIRs to a file
+with open('rir_data_rim_ism_ho23_sdn_waspaa.pkl', 'wb') as f:
+    pickle.dump(rirs, f)

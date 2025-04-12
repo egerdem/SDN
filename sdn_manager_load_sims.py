@@ -65,7 +65,7 @@ from sdn_experiment_manager import Room
 class SDNExperiment:
     """Class to store and manage acoustic simulation experiment data and metadata."""
     
-    def __init__(self, config, rir, fs=44100, duration=0.5, experiment_id=None, skip_metrics=False):
+    def __init__(self, config, rir, fs=44100, duration=0.5, experiment_id=None):
         """
         Initialize an acoustic simulation experiment.
         
@@ -75,7 +75,6 @@ class SDNExperiment:
             fs (int): Sampling frequency
             duration (float): Duration of the RIR in seconds
             experiment_id (str, optional): Unique ID for the experiment. If None, will be generated.
-            skip_metrics (bool): If True, skip calculating metrics (useful for temporary objects)
         """
         self.config = config
         self.rir = rir
@@ -84,6 +83,7 @@ class SDNExperiment:
         self.timestamp = datetime.now().isoformat()
         self._metrics_calculated = False
         self.metrics = {}
+        self._calculate_metrics()
         
         # Generate a unique ID if not provided
         if experiment_id is None:
@@ -93,11 +93,8 @@ class SDNExperiment:
             self.experiment_id = hashlib.md5(config_str.encode()).hexdigest()[:10]
         else:
             self.experiment_id = experiment_id
-            
-        # Calculate metrics if not skipped
-        if not skip_metrics:
-            # print("Calculating metrics for", self.experiment_id)
-            self._calculate_metrics()
+
+
     
     def _prepare_config_for_id(self, config):
         """
@@ -210,18 +207,7 @@ class SDNExperiment:
         """Get RT60 value, calculating metrics if needed."""
         self.ensure_metrics_calculated()
         return self.metrics.get('rt60', None)
-    
-    # @property
-    # def edc_data(self):
-    #     """Get EDC data, calculating metrics if needed."""
-    #     self.ensure_metrics_calculated()
-    #     return self.edc
-    #
-    # @property
-    # def ned_data(self):
-    #     """Get NED data, calculating metrics if needed."""
-    #     self.ensure_metrics_calculated()
-    #     return self.ned
+
     
     def get_label(self):
         """Generate a descriptive label for the experiment."""
@@ -317,26 +303,26 @@ class SDNExperiment:
         return experiment
 
 
-class SDNExperimentManager:
+class ExperimentLoaderManager:
     """Class to manage loading and accessing acoustic simulation experiments from storage."""
     
-    def __init__(self, results_dir='results', is_batch_manager=False, skip_metrics=False, project_names=None):
+    def __init__(self, results_dir='results', is_batch_manager=False, project_names=None):
         """
         Initialize the experiment manager.
         
         Args:
             results_dir (str): Base directory to store experiment data
             is_batch_manager (bool): If True, this manager handles batch processing experiments
-            skip_metrics (bool): If True, skip calculating metrics during loading
             project_names (list or str, optional): Specific project names to load. Can be:
                 - None: Load all projects (default)
                 - str: Load a single project
                 - list: Load multiple specific projects
+                For batch_manager=True, these are folder names in 'results/rooms/'
+                For batch_manager=False, these are folder names in 'results/room_singulars/'
         """
         self.results_dir = results_dir
         self.is_batch_manager = is_batch_manager
         self.projects = {}  # name -> Room
-        self.skip_metrics = skip_metrics
         self.project_names = project_names
         self.ensure_dir_exists()
         self.load_experiments()
@@ -357,10 +343,10 @@ class SDNExperimentManager:
             # For batch experiments, use the normal structure
             return os.path.join(self.results_dir, 'rooms', room_name)
     
-    def _get_source_dir(self, room_name, source_label):
-        """Get the directory path for a source within a room."""
-        room_dir = self._get_room_dir(room_name)
-        return os.path.join(room_dir, source_label)  
+    # def _get_source_dir(self, room_name, source_label):
+    #     """Get the directory path for a source within a room."""
+    #     room_dir = self._get_room_dir(room_name)
+    #     return os.path.join(room_dir, source_label)
     
     def get_display_name_from_folder(self, folder_name):
         """Create display name from folder name.
@@ -372,9 +358,28 @@ class SDNExperimentManager:
         return folder_name.upper()
 
     @staticmethod
-    def get_available_projects(results_dir='results'):
+    def print_projects(projects_dict, title="Available projects by category"):
+        """Print available projects by category in a formatted way.
+        
+        Args:
+            projects_dict (dict): Dictionary with categories as keys and project lists as values
+            title (str): Title to display before the project listing
+        """
+        print(f"\n{title}:")
+        for category, projects in projects_dict.items():
+            print(f"\n{category.upper()}:")
+            for i, project in enumerate(projects):
+                print(f"  {i}: {project}")
+        print()  # Add an empty line for better formatting
+    
+    @staticmethod
+    def get_available_projects(results_dir='results', mode='batch'):
         """Get list of available project names in the results directory.
         
+        Args:
+            results_dir (str): Base directory to store experiment data
+            mode (str): 'batch' for batch projects in 'rooms/' or 'singular' for singular projects in 'room_singulars/'
+            
         Returns:
             dict: Dictionary with categories as keys and list of project names as values
                  Example: {
@@ -383,14 +388,26 @@ class SDNExperimentManager:
                      'waspaa': ['waspaa_test']
                  }
         """
-        rooms_dir = os.path.join(results_dir, 'rooms')
-        if not os.path.exists(rooms_dir):
+        # Determine the correct directory based on mode
+        if mode == 'singular':
+            target_dir = os.path.join(results_dir, 'room_singulars')
+        else:  # Default to batch mode
+            target_dir = os.path.join(results_dir, 'rooms')
+            
+        if not os.path.exists(target_dir):
             return {}
         
         projects = {}
-        for name in os.listdir(rooms_dir):
-            path = os.path.join(rooms_dir, name)
-            if os.path.isdir(path):
+        for name in os.listdir(target_dir):
+            path = os.path.join(target_dir, name)
+            
+            # Check if it's a directory and apply appropriate filters
+            is_valid_dir = os.path.isdir(path)
+            if mode == 'singular':
+                # For singular mode, skip hidden folders and folders starting with underscore
+                is_valid_dir = is_valid_dir and not name.startswith('.') and not name.startswith('_')
+                
+            if is_valid_dir:
                 # Determine category based on name prefix
                 if 'aes' in name.lower():
                     category = 'aes'
@@ -415,157 +432,163 @@ class SDNExperimentManager:
         """Load all experiments from the results directory."""
         self.projects = {}
 
+        # Determine the directory path based on manager type
+        base_dir = os.path.join(self.results_dir, 'room_singulars' if not self.is_batch_manager else 'rooms')
+        if not os.path.exists(base_dir):
+            print(f"No {base_dir} directory found")
+            return
+
+        # Create project_dirs list based on project_names
+        if self.project_names is None:
+            # Load all projects from the directory
+            project_dirs = [d for d in os.listdir(base_dir) 
+                          if os.path.isdir(os.path.join(base_dir, d))]
+            # For singular case, filter out hidden folders and folders starting with underscore
+            if not self.is_batch_manager:
+                project_dirs = [d for d in project_dirs if not d.startswith('.') and not d.startswith('_')]
+            print(f"Loading all {len(project_dirs)} projects from {base_dir}")
+        elif isinstance(self.project_names, str):
+            # Load single project
+            project_dirs = [self.project_names]
+            print(f"Loading specified project: {self.project_names}")
+        elif isinstance(self.project_names, list):
+            # Load multiple specified projects
+            project_dirs = self.project_names
+            print(f"Loading {len(project_dirs)} specified projects")
+        else:
+            print("Warning: project_names should be None, a string, or a list")
+            project_dirs = []
+
         # SINGULAR EXPERIMENTS
         if not self.is_batch_manager:
             # Singular case: Load from room_singulars with unified rooms
-            singulars_dir = os.path.join(self.results_dir, 'room_singulars')
-            if os.path.exists(singulars_dir):
-                unified_rooms = {}  # To collect experiments for unified rooms
-                
-                # Process each experiment group (subfolder)
-                for folder_name in os.listdir(singulars_dir):
-                    folder_path = os.path.join(singulars_dir, folder_name)
-                    # Skip non-directories, hidden folders, and folders starting with underscore
-                    if not os.path.isdir(folder_path) or folder_name.startswith('.') or folder_name.startswith('_'):
+            unified_rooms = {}  # To collect experiments for unified rooms
+            
+            # Process each experiment group (subfolder)
+            for folder_name in project_dirs:
+                folder_path = os.path.join(base_dir, folder_name)
+                # Skip if folder doesn't exist
+                if not os.path.isdir(folder_path):
+                    print(f"Warning: Folder {folder_name} does not exist. Skipping...")
+                    continue
+
+                try:
+                    # Determine which room_info to use based on folder name
+                    if 'aes' in folder_name.lower():
+                        room_info_file = 'room_info_aes.json'
+                    elif 'journal' in folder_name.lower():
+                        room_info_file = 'room_info_journal.json'
+                    elif 'waspaa' in folder_name.lower():
+                        room_info_file = 'room_info_waspaa.json'
+                    else:
+                        print(f"Warning: Could not determine room type for {folder_name}")
                         continue
 
-                    try:
-                        # Determine which room_info to use based on folder name
-                        if 'aes' in folder_name.lower():
-                            room_info_file = 'room_info_aes.json'
-                        elif 'journal' in folder_name.lower():
-                            room_info_file = 'room_info_journal.json'
-                        elif 'waspaa' in folder_name.lower():
-                            room_info_file = 'room_info_waspaa.json'
-                        else:
-                            print(f"Warning: Could not determine room type for {folder_name}")
-                            continue
+                    # Load room info
+                    room_info_path = os.path.join(base_dir, room_info_file)
+                    if not os.path.exists(room_info_path):
+                        print(f"Warning: Room info file {room_info_file} not found")
+                        continue
 
-                        # Load room info
-                        room_info_path = os.path.join(singulars_dir, room_info_file)
-                        if not os.path.exists(room_info_path):
-                            print(f"Warning: Room info file {room_info_file} not found")
-                            continue
+                    with open(room_info_path, 'r') as f:
+                        room_info = json.load(f)
 
-                        with open(room_info_path, 'r') as f:
-                            room_info = json.load(f)
+                    # Create individual room with formatted display name
+                    individual_room = Room(folder_name, room_info['parameters'])
+                    individual_room.display_name = self.get_display_name_from_folder(folder_name)
+                    self.projects[folder_name] = individual_room
 
-                        # Create individual room with formatted display name
-                        individual_room = Room(folder_name, room_info['parameters'])
-                        individual_room.display_name = self.get_display_name_from_folder(folder_name)
-                        self.projects[folder_name] = individual_room
+                    # Get room type for unified room
+                    room_type = folder_name.split('_')[0].lower()
 
-                        # Get room type for unified room
-                        room_type = folder_name.split('_')[0].lower()
+                    # Create unified room if it doesn't exist
+                    if room_type not in unified_rooms:
+                        unified_room = Room(room_info['name'], room_info['parameters'])
+                        unified_room.display_name = room_info['display_name']
+                        unified_rooms[room_type] = unified_room
 
-                        # Create unified room if it doesn't exist
-                        if room_type not in unified_rooms:
-                            unified_room = Room(room_info['name'], room_info['parameters'])
-                            unified_room.display_name = room_info['display_name']
-                            unified_rooms[room_type] = unified_room
+                    # Load experiments using existing logic
+                    for file_name in os.listdir(folder_path):
+                        if file_name.endswith('.json') and file_name != 'room_info.json':
+                            config_path = os.path.join(folder_path, file_name)
+                            
+                            # Handle both naming patterns for RIR files
+                            if file_name.startswith('config_'):
+                                base_name = file_name[7:-5]  # Remove 'config_' and '.json'
+                                rir_file = f'rirs_{base_name}.npy'
+                            else:
+                                rir_file = file_name[:-5] + '.npy'
+                            
+                            rir_path = os.path.join(folder_path, rir_file)
+                            
+                            # Load experiment if both files exist
+                            if os.path.exists(config_path) and os.path.exists(rir_path):
+                                try:
+                                    with open(config_path, 'r') as f:
+                                        config_data = json.load(f)
+                                    
+                                    # Load RIR data and ensure correct shape
+                                    rir_data = np.load(rir_path)
+                                    if rir_data.ndim > 1:
+                                        # If RIR is 2D array, take first row
+                                        rir = rir_data[0]
+                                    else:
+                                        # If RIR is already 1D array, use as is
+                                        rir = rir_data
+                                    
+                                    # Handle both config formats
+                                    if 'config' in config_data and 'room_parameters' in config_data['config']:
+                                        experiment_config = config_data['config']
+                                        fs = config_data.get('fs')
+                                        duration = config_data.get('duration')
+                                    else:
+                                        experiment_config = config_data
+                                        fs = config_data.get('fs')
+                                        duration = config_data.get('duration')
+                                    
+                                    # Set experiment_id based on file naming
+                                    if file_name.startswith('config_'):
+                                        experiment_id = file_name[7:-5]
+                                    else:
+                                        experiment_id = config_data.get('experiment_id')
+                                    
+                                    # Create experiment object
+                                    experiment = SDNExperiment(
+                                        config=experiment_config,
+                                        rir=rir,
+                                        fs=fs,
+                                        duration=duration,
+                                        experiment_id=experiment_id,
+                                    )
+                                    
+                                    # Add experiment to both individual and unified rooms
+                                    individual_room.add_experiment(experiment)
+                                    unified_rooms[room_type].add_experiment(experiment)
+                                    
+                                    print(f"Successfully loaded experiment: {file_name} with ID: {experiment_id}")
+                                except Exception as e:
+                                    print(f"Error loading experiment {file_name}: {str(e)}")
+                                    import traceback
+                                    traceback.print_exc()
 
-                        # Load experiments using existing logic
-                        for file_name in os.listdir(folder_path):
-                            if file_name.endswith('.json') and file_name != 'room_info.json':
-                                config_path = os.path.join(folder_path, file_name)
-                                
-                                # Handle both naming patterns for RIR files
-                                if file_name.startswith('config_'):
-                                    base_name = file_name[7:-5]  # Remove 'config_' and '.json'
-                                    rir_file = f'rirs_{base_name}.npy'
-                                else:
-                                    rir_file = file_name[:-5] + '.npy'
-                                
-                                rir_path = os.path.join(folder_path, rir_file)
-                                
-                                # Load experiment if both files exist
-                                if os.path.exists(config_path) and os.path.exists(rir_path):
-                                    try:
-                                        with open(config_path, 'r') as f:
-                                            config_data = json.load(f)
-                                        
-                                        # Load RIR data and ensure correct shape
-                                        rir_data = np.load(rir_path)
-                                        if rir_data.ndim > 1:
-                                            # If RIR is 2D array, take first row
-                                            rir = rir_data[0]
-                                        else:
-                                            # If RIR is already 1D array, use as is
-                                            rir = rir_data
-                                        
-                                        # Handle both config formats
-                                        if 'config' in config_data and 'room_parameters' in config_data['config']:
-                                            experiment_config = config_data['config']
-                                            fs = config_data.get('fs')
-                                            duration = config_data.get('duration')
-                                        else:
-                                            experiment_config = config_data
-                                            fs = config_data.get('fs')
-                                            duration = config_data.get('duration')
-                                        
-                                        # Set experiment_id based on file naming
-                                        if file_name.startswith('config_'):
-                                            experiment_id = file_name[7:-5]
-                                        else:
-                                            experiment_id = config_data.get('experiment_id')
-                                        
-                                        # Create experiment object
-                                        experiment = SDNExperiment(
-                                            config=experiment_config,
-                                            rir=rir,
-                                            fs=fs,
-                                            duration=duration,
-                                            experiment_id=experiment_id,
-                                            skip_metrics=self.skip_metrics
-                                        )
-                                        
-                                        # Add experiment to both individual and unified rooms
-                                        individual_room.add_experiment(experiment)
-                                        unified_rooms[room_type].add_experiment(experiment)
-                                        
-                                        print(f"Successfully loaded experiment: {file_name} with ID: {experiment_id}")
-                                    except Exception as e:
-                                        print(f"Error loading experiment {file_name}: {str(e)}")
-                                        import traceback
-                                        traceback.print_exc()
+                    print(f"Loaded experiments from {folder_name} as room {individual_room.display_name}\n")
+                except Exception as e:
+                    print(f"Error processing folder {folder_name}: {str(e)}")
 
-                        print(f"Loaded experiments from {folder_name} as room {individual_room.display_name}")
-                    except Exception as e:
-                        print(f"Error processing folder {folder_name}: {str(e)}")
-
-                # Add unified rooms to self.projects
-                for unified_room in unified_rooms.values():
-                    self.projects[unified_room.name] = unified_room
-                    print(f"Created unified room {unified_room.display_name} with {len(unified_room.experiments)} total experiments")
+            # Add unified rooms to self.projects
+            for unified_room in unified_rooms.values():
+                self.projects[unified_room.name] = unified_room
+                print(f"Created unified room {unified_room.display_name} with {len(unified_room.experiments)} total experiments")
 
         # BATCH EXPERIMENTS
         else:
             # Batch case: Load from rooms directory without unification
-            rooms_dir = os.path.join(self.results_dir, 'rooms')
-            if not os.path.exists(rooms_dir):
-                print("No rooms directory found")
-                return
-            
-            # Get list of project directories to process
-            if self.project_names is None:
-                print("No specific project chosen. Loading all projects from the rooms directory...")
-                project_dirs = [d for d in os.listdir(rooms_dir) 
-                              if os.path.isdir(os.path.join(rooms_dir, d))]
-                print(f"Found {len(project_dirs)} projects in the rooms directory.")
-                print("project_dirs", project_dirs)
-
-            elif isinstance(self.project_names, str): #
-                print("chosen project name: {self.project_names}")
-                project_dirs = [self.project_names]
-            else:
-                print("project name should be a string")
-            
             total_projects = len(project_dirs)
             print(f"\nLoading {total_projects} projects:")
             
             # Iterate through selected project directories
             for project_idx, project_name in enumerate(project_dirs, 1):
-                project_path = os.path.join(rooms_dir, project_name)
+                project_path = os.path.join(base_dir, project_name)
                 if not os.path.isdir(project_path):
                     print(f"Skipping non-directory or non-existent project: {project_name}")
                     continue
@@ -658,7 +681,6 @@ class SDNExperimentManager:
                                                 fs=config_data.get('fs'),
                                                 duration=config_data.get('duration'),
                                                 experiment_id=receiver_single.get('experiment_id'),
-                                                skip_metrics=self.skip_metrics
                                             )
                                             
                                             # Add experiment to room
@@ -707,8 +729,8 @@ class SDNExperimentManager:
             list: List of matching experiments
         """
         experiments = []
-        for room in self.projects.values():
-            experiments.extend([exp for exp in room.experiments.values() if label in exp.get_label()])
+        for project in self.projects.values():
+            experiments.extend([exp for exp in project.experiments.values() if label in exp.get_label()])
         return experiments
     
     def get_all_experiments(self):
@@ -723,134 +745,63 @@ class SDNExperimentManager:
             experiments.extend(list(project.experiments.values()))
         return experiments
 
-def get_batch_manager(results_dir='results', skip_metrics=False, project_names=None):
-    """
-    Get a batch experiment manager.
-    
-    Args:
-        results_dir (str): Directory containing the results
-        skip_metrics (bool): If True, skip calculating metrics during loading
-        project_names (list or str, optional): Specific project names to load. Can be:
-            - None: Load all projects (default)
-            - str: Load a single project
-            - list: Load multiple specific projects
-        
-    Returns:
-        SDNExperimentManager: The batch experiment manager
-    """
-    _batch_manager = SDNExperimentManager(
-        results_dir=results_dir,
-        is_batch_manager=True,
-        skip_metrics=skip_metrics,
-        project_names=project_names
-    )
-    return _batch_manager
 
-def get_fast_batch_manager(results_dir='results'):
-    """
-    Get a batch manager with faster loading speed by skipping metric calculations.
-    Metrics will be calculated on-demand when needed.
-    
-    Args:
-        results_dir (str): Directory containing the results
-        
-    Returns:
-        SDNExperimentManager: The batch experiment manager with lazy metric calculation
-    """
-    return get_batch_manager(results_dir=results_dir, skip_metrics=True)
-
-def get_singular_manager(results_dir='results', skip_metrics=False):
-    """
-    Get a singular experiment manager.
-    
-    Args:
-        results_dir (str): Directory containing the results
-        skip_metrics (bool): If True, skip calculating metrics during loading
-        
-    Returns:
-        SDNExperimentManager: The singular experiment manager
-    """
-    _singular_manager = SDNExperimentManager(
-        results_dir=results_dir,
-        is_batch_manager=False,
-        skip_metrics=skip_metrics
-    )
-    return _singular_manager
-
-# Load all experiments
-# load_manager = SDNExperimentManager(results_dir='results')
-# load_manager.load_experiments()
-
-# Or use the singletons
-# batch_manager = get_batch_manager(results_dir='results')
-# singular_manager = get_singular_manager()
-
-# Access experiments
-# experiments = batch_manager.get_all_experiments()
-# experiment = batch_manager.get_experiment("some_experiment_id")
-
-# For batch experiments
-# from sdn_experiment_visualizer import SDNExperimentVisualizer
-
-# Option 1: Pass the manager explicitly
-# visualizer = SDNExperimentVisualizer(get_batch_manager())
-# visualizer.show()
-
-# Option 2: Let the visualizer select the appropriate manager
-# visualizer = SDNExperimentVisualizer()
-# visualizer.show(is_batch=True)  # For batch experiments
-# visualizer.show(is_batch=False)  # For singular experiments
-
-from sdn_experiment_visualizer import SDNExperimentVisualizer
+from sdn_experiment_visualizer import ExperimentVisualizer
 # Create a visualizer using the batch manager
 
 # Example usage in main:
 if __name__ == "__main__":
 
     results_dir = 'results'
-    IS_SINGULAR = True  # Set to False for batch processing
+    IS_SINGULAR = False  # Set to False for batch processing
+
+    # Display available projects for both modes
+    singular_projects = ExperimentLoaderManager.get_available_projects(results_dir, mode='singular')
+    ExperimentLoaderManager.print_projects(singular_projects, "Available singular projects by category")
+    
+    batch_projects = ExperimentLoaderManager.get_available_projects(results_dir, mode='batch')
+    ExperimentLoaderManager.print_projects(batch_projects, "Available batch projects by category")
 
     if IS_SINGULAR:
-
-        # for singular experiments
-        singular_manager = get_singular_manager(results_dir=results_dir)
-        single_visualizer = SDNExperimentVisualizer(singular_manager)
-        single_visualizer.show(port=1997)
+        # Example 1: Load all singular experiments
+        # singular_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=False)
+        
+        # Example 2: Load a single specific singular experiment folder
+        singular_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=False, 
+                                                  project_names="temp_room_aes")
+        
+        # Example 3: Load multiple specific singular experiment folders
+        # singular_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=False, 
+        #                                           project_names=["aes_quartergrid", "journal_experiment1"])
+        
+        single_visualizer = ExperimentVisualizer(singular_manager)
+        single_visualizer.show(port=1999)
 
         # import sdn_experiment_visualizer as sev
         # import importlib
         # importlib.reload(sev)
-        # single_visualizer = sev.SDNExperimentVisualizer(singular_manager)
+        # single_visualizer = sev.ExperimentVisualizer(singular_manager)
         # single_visualizer.show(port=1983)
 
     else: # Batch processing
+        # Example 1: Load all batch projects
+        # batch_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=True)
 
-        # Get available projects
-        available_projects = SDNExperimentManager.get_available_projects(results_dir)
-        print("\nAvailable projects by category:")
-        for category, projects in available_projects.items():
-            print(f"\n{category.upper()}:")
-            for i, project in enumerate(projects):
-                print(f"  {i}: {project}")
+        # Example 2: Load a single specific batch project
+        batch_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=True, 
+                                               project_names="aes_quartergrid_new")
 
-        # Example 1: Load all projects
-        # batch_manager = get_batch_manager(results_dir=results_dir)
-
-        # Example 2: Load single project
-        batch_manager = get_batch_manager(results_dir=results_dir,
-                                         project_names="aes_quartergrid_new")
-
-        # Example 3: Load multiple specific projects
-        # aes_projects = available_projects.get('aes', [])
+        # Example 3: Load multiple specific batch projects
+        # aes_projects = batch_projects.get('aes', [])
         # if len(aes_projects) >= 2:
-        #     batch_manager = get_batch_manager(results_dir=results_dir,
-        #                                      project_names=aes_projects[:2])
-        #
-        batch_visualizer = SDNExperimentVisualizer(batch_manager)
+        #     batch_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=True, 
+        #                                            project_names=aes_projects[:2])
+        
+        batch_visualizer = ExperimentVisualizer(batch_manager)
         batch_visualizer.show(port=2029)
 
-        # import sdn_experiment_visualizer as sev
-        # import importlib
-        # importlib.reload(sev)
-        # batch_visualizer = sev.SDNExperimentVisualizer(batch_manager)
-        # batch_visualizer.show(port=2048)
+        import sdn_experiment_visualizer as sev
+        import importlib
+        importlib.reload(sev)
+        batch_visualizer = sev.ExperimentVisualizer(batch_manager)
+        batch_visualizer.show(port=2048)

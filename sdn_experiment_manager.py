@@ -5,6 +5,7 @@ from datetime import datetime
 import hashlib
 import sys
 import spatial_analysis as sa
+# import sdn_manager_load_sims as sml
 
 # Import modules for core functionality
 import geometry
@@ -421,7 +422,7 @@ class SDNExperimentManager:
             print("load_experiment() is removed. cant check the duplicates. retrieve from the previous commit if you want")
         else:
             print("Skipping experiment loading (dont_check_duplicates=True)")
-    
+
     def _get_results_dir(self):
         """Get the base results directory."""
         return self.results_dir
@@ -546,7 +547,7 @@ class SDNExperimentManager:
             # Check if this manager is set up for batch processing
             if not self.is_batch_manager:
                 # Create or get a batch manager
-                batch_manager = get_batch_manager()
+                batch_manager = set_batch_manager()
                 # Delegate to batch manager
                 return batch_manager.run_experiment(
                     config=config,
@@ -735,7 +736,6 @@ class SDNExperimentManager:
             
             # Setup signal
             num_samples = int(fs * duration)
-            print(" num_samples: ", num_samples)
             impulse_dirac = geometry.Source.generate_signal('dirac', num_samples)
             geom_room.source.signal = impulse_dirac['signal']
             
@@ -801,7 +801,21 @@ class SDNExperimentManager:
                 raise ValueError(f"Unknown simulation method: {method}")
             
             # Normalize RIR
-            rir = rir / np.max(np.abs(rir))
+            if method == 'SDN' and flags.get('normalize_to_first_impulse', False):
+                # For SDN, normalize by the first non-zero impulse
+                # Find the first significant sample (using a small threshold to avoid noise)
+                threshold = 1e-6 * np.max(np.abs(rir))
+                first_impulse_idx = np.where(np.abs(rir) > threshold)[0]
+                if len(first_impulse_idx) > 0:
+                    first_idx = first_impulse_idx[0]
+                    # Normalize by the amplitude of the first impulse
+                    rir = rir / np.abs(rir[first_idx])
+                else:
+                    # Fallback to max normalization if no significant samples found
+                    rir = rir / np.max(np.abs(rir))
+            else:
+                # For other methods, use standard max normalization
+                rir = rir / np.max(np.abs(rir))
             
             # Create experiment object
             experiment = SDNExperiment(
@@ -1040,7 +1054,7 @@ class SDNExperimentManager:
 # Singleton pattern for batch manager
 # _batch_manager = None
 
-def get_batch_manager(results_dir='results', dont_check_duplicates=False):
+def set_batch_manager(results_dir='results', dont_check_duplicates=False):
     """
     Get or create the batch experiment manager singleton.
     
@@ -1061,7 +1075,7 @@ def get_batch_manager(results_dir='results', dont_check_duplicates=False):
     )
     return _batch_manager
 
-def get_singular_manager(results_dir='results', dont_check_duplicates=False):
+def set_singular_manager(results_dir='results', dont_check_duplicates=False):
     """
     Get or create the singular experiment manager singleton.
     
@@ -1075,9 +1089,7 @@ def get_singular_manager(results_dir='results', dont_check_duplicates=False):
     Returns:
         SDNExperimentManager: The singular experiment manager instance  
     """
-    global _singular_manager
-    if _singular_manager is None or _singular_manager.results_dir != results_dir:
-        _singular_manager = SDNExperimentManager(
+    _singular_manager = SDNExperimentManager(
             results_dir=results_dir,
             is_batch_manager=False,
             dont_check_duplicates=dont_check_duplicates
@@ -1088,29 +1100,21 @@ _singular_manager = None
 
 if __name__ == "__main__":
 
-    run_single_experiments = False
-    run_batch_experiments = False
-    only_show_experiments = True
+    # run_single_experiments = True
+    run_batch_experiments = True
 
-    if only_show_experiments:
-        from sdn_experiment_visualizer import SDNExperimentVisualizer
+    show_experiments = True
+    project_name = "temp_room_aes"
 
-        singular_manager = get_singular_manager(results_dir='results')
-        print(singular_manager.get_experiments_by_label("weighted psk"))
-        print(singular_manager.get_experiments_by_label("original"))
-        print(singular_manager.get_experiments_by_label("pra"))
-        single_visualizer = SDNExperimentVisualizer(singular_manager)
-        single_visualizer.show(port=1990) 
-    
     duration = 1
 
     # Use this as a parent directory for the results (optional)
     results_dir = 'results'  # Default: uses results/rooms/
 
     room_waspaa = {
-        'width': 6, 'depth': 4, 'height': 7,
-        'source x': 3.6, 'source y': 1.3, 'source z': 5.3,
-        'mic x': 1.2, 'mic y': 2.4, 'mic z': 1.8,
+        'width': 6, 'depth': 7, 'height': 4,
+        'source x': 3.6, 'source y': 5.3, 'source z': 1.3,
+        'mic x': 1.2, 'mic y': 1.8, 'mic z': 2.4,
         'absorption': 0.1,
     }
 
@@ -1129,9 +1133,6 @@ if __name__ == "__main__":
     room = room_aes
     # room_name = "room_aes"
 
-    # batch experiments
-    project_name = "aes_absorptioncoeffs"
-
 
     if run_batch_experiments:
 
@@ -1143,7 +1144,7 @@ if __name__ == "__main__":
 
         # Run batch experiments
         # Use custom results directory for batch experiments (optional)
-        batch_manager = get_batch_manager(results_dir, dont_check_duplicates=False)  # Default: uses results/rooms/
+        batch_manager = set_batch_manager(results_dir, dont_check_duplicates=False)  # Default: uses results/rooms/
 
         print(f"Batch experiments saved in: {batch_manager._get_room_dir(project_name)}")
 
@@ -1166,44 +1167,6 @@ if __name__ == "__main__":
             receiver_positions=receiver_positions  # Provide receiver positions
         )
 
-        # batch_manager.run_experiment(
-        #     config={
-        #         'label': 'weighted psk',
-        #         'info': '',
-        #         'method': 'SDN',
-        #         'flags': {
-        #             'specular_source_injection': True,
-        #             'source_weighting': 4,
-        #         }
-        #     },
-        #     room_parameters=room,
-        #     duration=duration,
-        #     fs=44100,
-        #     project_name=project_name,
-        #     batch_processing=True,  # Enable batch processing
-        #     source_positions=source_positions,  # Provide source positions
-        #     receiver_positions=receiver_positions  # Provide receiver positions
-        # )
-
-        # batch_manager.run_experiment(
-        #     config={
-        #         'label': 'weighted psk',
-        #         'info': '',
-        #         'method': 'SDN',
-        #         'flags': {
-        #             'specular_source_injection': True,
-        #             'source_weighting': 5,
-        #         }
-        #     },
-        #     room_parameters=room,
-        #     duration=duration,
-        #     fs=44100,
-        #     project_name=project_name,
-        #     batch_processing=True,  # Enable batch processing
-        #     source_positions=source_positions,  # Provide source positions
-        #     receiver_positions=receiver_positions  # Provide receiver positions
-        # )
-
         batch_manager.run_ism_experiment(
             room_parameters=room,
             duration=duration,  # Shorter duration for batch processing
@@ -1221,8 +1184,8 @@ if __name__ == "__main__":
         # Method 1: Run experiments directly
         # Use custom results directory for singular experiments (optional)
 
-        single_manager = get_singular_manager()  # Will use results_custom/room_singulars/
-        # single_manager = get_singular_manager(results_dir)  # Default: uses results/room_singulars/
+        single_manager = set_singular_manager()  # Will use results_custom/room_singulars/
+        # single_manager = set_singular_manager(results_dir)  # Default: uses results/room_singulars/
 
         # print(f"Singular experiments saved in: {single_manager._get_room_dir(project_name)}")
 
@@ -1252,6 +1215,7 @@ if __name__ == "__main__":
                 'flags': {
                     'specular_source_injection': True,
                     'source_weighting': 3,
+                    # 'normalize_to_first_impulse': True
                 }
             },
             room_parameters=room,
@@ -1259,22 +1223,22 @@ if __name__ == "__main__":
             fs=44100,
             project_name = project_name
         )
-        #
-        single_manager.run_experiment(
-            config={
-                'label': 'weighted psk',
-                'info': '',
-                'method': 'SDN',
-                'flags': {
-                    'specular_source_injection': True,
-                    'source_weighting': 5,
-                }
-            },
-            room_parameters=room,
-            duration=duration,
-            fs=44100,
-            project_name=project_name
-        )
+
+        # single_manager.run_experiment(
+        #     config={
+        #         'label': 'weighted psk nor',
+        #         'info': 'normed',
+        #         'method': 'SDN',
+        #         'flags': {
+        #             'specular_source_injection': True,
+        #             'source_weighting': 3,
+        #         }
+        #     },
+        #     room_parameters=room,
+        #     duration=duration,
+        #     fs=44100,
+        #     project_name=project_name
+        # )
         #
         single_manager.run_experiment(
             config={
@@ -1291,40 +1255,60 @@ if __name__ == "__main__":
             fs=44100,
             project_name=project_name
         )
-
-        single_manager.run_experiment(
-            config={
-                'label': 'weighted psk',
-                'info': '',
-                'method': 'SDN',
-                'flags': {
-                    'specular_source_injection': True,
-                    'source_weighting': 10,
-                }
-            },
-            room_parameters=room,
-            duration=duration,
-            fs=44100,
-            project_name=project_name
-        )
-
-        single_manager.run_experiment(
-            config={
-                'label': 'weighted psk',
-                'info': '',
-                'method': 'SDN',
-                'flags': {
-                    'specular_source_injection': True,
-                    'source_weighting': 50,
-                }
-            },
-            room_parameters=room,
-            duration=duration,
-            fs=44100,
-            project_name=project_name
-        )
         #
-        # # Run an ISM experiment
+        # single_manager.run_experiment(
+        #     config={
+        #         'label': 'weighted psk',
+        #         'info': '',
+        #         'method': 'SDN',
+        #         'flags': {
+        #             'specular_source_injection': True,
+        #             'source_weighting': 6,
+        #             'normalize_to_first_impulse': True
+        #         }
+        #     },
+        #     room_parameters=room,
+        #     duration=duration,
+        #     fs=44100,
+        #     project_name=project_name
+        # )
+        # #
+        # single_manager.run_experiment(
+        #     config={
+        #         'label': 'weighted psk',
+        #         'info': '',
+        #         'method': 'SDN',
+        #         'flags': {
+        #             'specular_source_injection': True,
+        #             'source_weighting': 50,
+        #             'normalize_to_first_impulse': True
+        #         }
+        #     },
+        #     room_parameters=room,
+        #     duration=duration,
+        #     fs=44100,
+        #     project_name=project_name
+        # )
+        #
+        # single_manager.run_experiment(
+        #     config={
+        #         'label': 'weighted psk',
+        #         'info': '',
+        #         'method': 'SDN',
+        #         'flags': {
+        #             'specular_source_injection': True,
+        #             'source_weighting': 100,
+        #             'normalize_to_first_impulse': True
+        #         }
+        #     },
+        #     room_parameters=room,
+        #     duration=duration,
+        #     fs=44100,
+        #     project_name=project_name
+        # )
+
+        # #
+        # # # Run an ISM experiment
         single_manager.run_ism_experiment(
             room_parameters=room,
             max_order=100,
@@ -1340,3 +1324,16 @@ if __name__ == "__main__":
     # with open('batch_manager_roomaes_4exp.pkl', 'wb') as f:
     #     pickle.dump(batch_manager.rooms, f)
 
+    if show_experiments:
+        from sdn_experiment_visualizer import ExperimentVisualizer
+        from sdn_manager_load_sims import ExperimentLoaderManager
+
+        singular_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=False,
+                                                   project_names=project_name)
+
+        print(singular_manager.get_experiments_by_label("weighted psk"))
+        print(singular_manager.get_experiments_by_label("original"))
+        print(singular_manager.get_experiments_by_label("pra"))
+
+        single_visualizer = ExperimentVisualizer(singular_manager)
+        single_visualizer.show(port=1990)

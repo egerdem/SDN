@@ -158,3 +158,60 @@ class PathTracker:
                 else:
                     validity_str = "(INVALID)" if (sdn_path and not sdn_path.is_valid) or (ism_path and not ism_path.is_valid) else ""
                     print(f"{sdn_str}        |     {ism_str}        {validity_str}")
+
+
+if __name__ == "__main__":
+    from sdn_path_calculator import SDNCalculator, ISMCalculator, PathCalculator
+    import geometry
+    import plot_room as pp
+    import matplotlib.pyplot as plt
+
+    room_aes = {'width': 9, 'depth': 7, 'height': 4,
+                'source x': 4.5, 'source y': 3.5, 'source z': 2,
+                'mic x': 2, 'mic y': 2, 'mic z': 1.5,
+                'absorption': 0.2,
+                'air': {'humidity': 50,
+                        'temperature': 20,
+                        'pressure': 100},
+                }
+
+    room_journal = {'width': 3.2, 'depth': 4, 'height': 2.7,
+                    'source x': 2, 'source y': 3., 'source z': 2,
+                    'mic x': 1, 'mic y': 1, 'mic z': 1.5,
+                    'absorption': 0.1,
+                    }
+
+    room_parameters = room_aes
+
+    room = geometry.Room(room_parameters['width'], room_parameters['depth'], room_parameters['height'])
+    room.set_microphone(room_parameters['mic x'], room_parameters['mic y'], room_parameters['mic z'])
+    room.set_source(room_parameters['source x'], room_parameters['source y'], room_parameters['source z'],
+                    signal="will be replaced", Fs=44100)
+
+
+    # Only Path Length Analysis, No RIR Calculation
+    # Create shared path tracker and calculate paths
+    path_tracker = PathTracker()
+    sdn_calc = SDNCalculator(room.walls, room.source.srcPos, room.micPos)
+    ism_calc = ISMCalculator(room.walls, room.source.srcPos, room.micPos)
+    sdn_calc.set_path_tracker(path_tracker)
+    ism_calc.set_path_tracker(path_tracker)
+
+    # Compare paths and analyze invalid ISM paths
+    PathCalculator.compare_paths(sdn_calc, ism_calc,
+                                 max_order=2)  # compare_paths() prints the comparison table but doesn't return anything
+
+    # analyze_paths() returns a list of invalid paths (only for ISM calculator)
+    # Each path is a list of node labels ['s', 'wall1', 'wall2', ..., 'm']
+    invalid_paths = ism_calc.analyze_paths(max_order=2)
+
+    # Visualize example ISM paths
+    example_paths = [
+        ['s', 'east', 'west', 'm'],
+        # ['s', 'west', 'm'],
+        # ['s', 'west', 'east', 'north', 'm']
+    ]
+
+    for path in example_paths:
+        pp.plot_ism_path(room, ism_calc, path)
+        plt.show()

@@ -1,4 +1,3 @@
-import os
 import dash
 from dash import dcc, html, callback, Input, Output, State, dash_table
 import plotly.graph_objects as go
@@ -6,11 +5,9 @@ import numpy as np
 import webbrowser
 from threading import Timer
 from sdn_experiment_manager import Room
-import spatial_analysis
 import analysis as an
-from scipy.interpolate import griddata
 
-class SDNExperimentVisualizer:
+class ExperimentVisualizer:
     print("visualizer started")
 
     # Class-level constants for error metrics
@@ -303,6 +300,11 @@ class SDNExperimentVisualizer:
         # Create Dash app
         app = dash.Dash(__name__)
         server = app.server
+
+        @app.server.after_request
+        def add_header(response):
+            response.headers["ngrok-skip-browser-warning"] = "true"
+            return response
 
         # Dark theme colors
         dark_theme = {
@@ -1083,30 +1085,3 @@ class SDNExperimentVisualizer:
         print("=" * 70)
         # Run the app
         app.run_server(debug=True, port=port)
-
-# Import needed for Room class access
-# from sdn_manager_load_sims import Room
-# from sdn_manager_load_sims import get_batch_manager, get_singular_manager
-
-if __name__ == "__main__":
-
-    from sdn_manager_load_sims import get_batch_manager, get_singular_manager
-
-    # Create a visualizer using the singular manager
-    print("single manager")
-    single_manager = get_singular_manager()
-
-    singular_visualizer = SDNExperimentVisualizer(single_manager)
-    singular_visualizer.show(port=9052)
-
-    # Create a visualizer using the batch manager
-    # print("batch")
-    # batch_manager = get_batch_manager()
-    # batch_visualizer = SDNExperimentVisualizer(batch_manager)
-    # batch_visualizer.show(port=9062)
-
-    # import sdn_experiment_visualizer as sev
-    # import importlib
-    # importlib.reload(sev)
-    # batch_visualizer = sev.SDNExperimentVisualizer(batch_manager)
-    # batch_visualizer.show(port=9062)
