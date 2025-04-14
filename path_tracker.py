@@ -53,6 +53,7 @@ class PathTracker:
             'SDN': defaultdict(list),
             'ISM': defaultdict(list)
         }
+        self.speed_of_sound = 343.0  # m/s
         
     def add_path(self, nodes: List[str], distance: float, method: str, 
                  is_valid: bool = True, segment_distances: List[float] = None):
@@ -159,6 +160,49 @@ class PathTracker:
                     validity_str = "(INVALID)" if (sdn_path and not sdn_path.is_valid) or (ism_path and not ism_path.is_valid) else ""
                     print(f"{sdn_str}        |     {ism_str}        {validity_str}")
 
+    def get_latest_arrival_time_by_order(self, method: str = 'ISM') -> Dict[int, float]:
+        """Get the latest arrival time for each order considering only valid paths.
+        
+        Args:
+            method: 'SDN' or 'ISM'
+            
+        Returns:
+            Dictionary mapping order to latest arrival time in seconds
+        """
+        latest_times = {}
+        for order, paths in self.paths[method].items():
+            # Filter valid paths and get their distances
+            valid_distances = [p.distance for p in paths if p.is_valid]
+            if valid_distances:
+                # Convert maximum distance to time using speed of sound
+                latest_times[order] = max(valid_distances) / self.speed_of_sound
+        return latest_times
+
+    def count_valid_paths_up_to_order(self, max_order: int, method: str = 'ISM') -> int:
+        """Count number of valid paths up to and including the specified order.
+        
+        Args:
+            max_order: Maximum reflection order to include
+            method: 'SDN' or 'ISM'
+            
+        Returns:
+            Total number of valid paths from order 0 to max_order
+        """
+        valid_count = 0
+        for order in range(max_order + 1):
+            valid_count += sum(1 for path in self.paths[method][order] if path.is_valid)
+        return valid_count
+
+    def print_valid_paths_count(self, max_order: int):
+        """Print the count of valid paths up to specified order for ISM."""
+        valid_count = self.count_valid_paths_up_to_order(max_order, 'ISM')
+        print(f"\nNumber of valid ISM paths up to order {max_order}: {valid_count}")
+        
+        # Print breakdown by order
+        print("\nBreakdown by order:")
+        for order in range(max_order + 1):
+            count = sum(1 for path in self.paths['ISM'][order] if path.is_valid)
+            print(f"Order {order}: {count} valid paths")
 
 if __name__ == "__main__":
     from sdn_path_calculator import SDNCalculator, ISMCalculator, PathCalculator
@@ -196,22 +240,76 @@ if __name__ == "__main__":
     ism_calc = ISMCalculator(room.walls, room.source.srcPos, room.micPos)
     sdn_calc.set_path_tracker(path_tracker)
     ism_calc.set_path_tracker(path_tracker)
-
+    N = 3
     # Compare paths and analyze invalid ISM paths
     PathCalculator.compare_paths(sdn_calc, ism_calc,
-                                 max_order=2)  # compare_paths() prints the comparison table but doesn't return anything
+                                 max_order=N, print_comparison=True)  # Increased to 5
 
     # analyze_paths() returns a list of invalid paths (only for ISM calculator)
-    # Each path is a list of node labels ['s', 'wall1', 'wall2', ..., 'm']
-    invalid_paths = ism_calc.analyze_paths(max_order=2)
+    invalid_paths = ism_calc.analyze_paths(max_order=N)  # Increased to 5
 
     # Visualize example ISM paths
-    example_paths = [
-        ['s', 'east', 'west', 'm'],
-        # ['s', 'west', 'm'],
-        # ['s', 'west', 'east', 'north', 'm']
-    ]
+        # example_paths = [
+        #     ['s', 'east', 'west', 'm'],
+            # ['s', 'west', 'm'],
+            # ['s', 'west', 'east', 'north', 'm']
+        # ]
 
-    for path in example_paths:
-        pp.plot_ism_path(room, ism_calc, path)
-        plt.show()
+    # for path in example_paths:
+    #     pp.plot_ism_path(room, ism_calc, path)
+    #     plt.show()
+    
+    TOA_order_SDN = path_tracker.get_latest_arrival_time_by_order('SDN')
+    TOA_order_ISM = path_tracker.get_latest_arrival_time_by_order('ISM')
+
+    # Print arrival times
+    print("\nLatest Arrival Times by Order:")
+    print("=" * 50)
+    print(f"{'Order':>5} {'SDN (s)':>10} {'ISM (s)':>10}")
+    print("-" * 50)
+    
+    for order in range(5):
+        sdn_time = f"{TOA_order_SDN.get(order, '-'):>10.5f}" if order in TOA_order_SDN else " " * 10
+        ism_time = f"{TOA_order_ISM.get(order, '-'):>10.5f}" if order in TOA_order_ISM else " " * 10
+        print(f"{order:>5} {sdn_time} {ism_time}")
+
+    path_tracker.print_valid_paths_count(N)
+
+    # Create scatter plot of arrival times vs order
+    plt.figure(figsize=(10, 6))
+
+    # Plot SDN points
+    sdn_orders = []
+    sdn_times = []
+    for order in range(N+1):  # 0 to 4
+        if order in TOA_order_SDN:
+            sdn_orders.append(order)
+            sdn_times.append(TOA_order_SDN[order])
+    plt.scatter(sdn_times, sdn_orders, label='SDN', marker='o', s=100, alpha=0.6)
+
+    # Plot ISM points
+    ism_orders = []
+    ism_times = []
+    for order in range(1, 5):  # 1 to 4 (ISM doesn't have 0th order)
+        if order in TOA_order_ISM:
+            ism_orders.append(order)
+            ism_times.append(TOA_order_ISM[order])
+    # Add 0th order from SDN to ISM (they're the same)
+    if 0 in TOA_order_SDN:
+        ism_orders.insert(0, 0)
+        ism_times.insert(0, TOA_order_SDN[0])
+    plt.scatter(ism_times, ism_orders, label='ISM', marker='x', s=100, alpha=0.6)
+
+    plt.xlabel('Arrival Time (s)')
+    plt.ylabel('Reflection Order')
+    plt.title('Latest Arrival Times per Reflection Order')
+    plt.grid(True)
+    plt.legend()
+    plt.show(block=False)
+
+    paths = path_tracker.paths["SDN"]
+    # Flatten and sort all paths by distance
+    sorted_paths = sorted(
+        (path for order_paths in paths.values() for path in order_paths),
+        key=lambda p: p.distance
+    )

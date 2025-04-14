@@ -407,3 +407,175 @@ def create_interactive_edc_plot(rirs_dict, Fs, default_rirs):
     fig.check = check
 
     plt.show(block=False)  # Non-blocking
+
+def create_unified_interactive_plot(rirs_dict, Fs, default_rirs, room_parameters, reflection_times=None):
+    """Create a unified interactive plot with RIR and EDC side by side, and NED below, sharing synchronized checkboxes.
+
+    Args:
+        rirs_dict: Dictionary containing RIRs with their labels as keys
+        Fs: Sampling frequency
+        default_rirs: Set of RIR labels that should be plotted in black
+        room_parameters: Dictionary containing room parameters including dimensions and display_name
+        reflection_times: Dictionary containing arrival times for different reflection orders
+    """
+    from matplotlib.widgets import CheckButtons
+    import analysis as an
+    import EchoDensity as ned
+
+    # Create the main figure with subplots and a checkbox area
+    fig = plt.figure(figsize=(15, 10))
+    gs = plt.GridSpec(2, 3, height_ratios=[1, 1], width_ratios=[1, 1, 0.2])
+    
+    # Create axes for RIR, EDC, NED, and checkboxes
+    ax_ned = fig.add_subplot(gs[0, 0])
+    ax_edc = fig.add_subplot(gs[0, 1])
+    ax_rir = fig.add_subplot(gs[1, 0:2])  # NED plot spans both columns
+    ax_check = fig.add_subplot(gs[0:1, 2])  # Checkboxes span both rows
+
+    # Add room information at the top
+    room_name = room_parameters.get('display_name', 'Custom Room')  # Use display_name if available, else 'Custom Room'
+    room_info = f"**{room_name}: {room_parameters['width']}×{room_parameters['depth']}×{room_parameters['height']}m**"
+    fig.suptitle(room_info, x= 0.43,  y= 0.97, fontsize=12)
+
+    # Initialize lines dictionaries for all plots
+    rir_lines = {}
+    edc_lines = {}
+    ned_lines = {}
+    visibility = {}
+
+    # Plot all RIRs, EDCs, and NEDs initially
+    for label, rir in rirs_dict.items():
+        # Create time arrays in seconds
+        time = np.arange(len(rir)) / Fs
+        
+        # Plot RIR
+        rir_line, = ax_rir.plot(time, rir, label=label, alpha=0.7)
+        rir_lines[label] = rir_line
+        
+        # Calculate and plot EDC
+        edc = an.compute_edc(rir, Fs, label=label, plot=False)
+        
+        edc_line, = ax_edc.plot(time, edc, label=label, alpha=0.7)
+        edc_lines[label] = edc_line
+        
+        # Calculate and plot NED
+        echo_density = ned.echoDensityProfile(rir, fs=Fs)
+        ned_time = np.arange(len(echo_density)) / Fs
+        ned_line, = ax_ned.plot(ned_time, echo_density, label=label, alpha=0.7)
+        ned_lines[label] = ned_line
+        
+        visibility[label] = True
+
+    # Add vertical lines for reflection arrival times if provided
+    if reflection_times is not None:
+        colors = ['red', 'blue', 'green']  # Colors for 1st, 2nd, and 3rd order reflections
+        order_map = {
+            'first_order': 1,
+            'second_order': 2,
+            'third_order': 3
+        }
+        for order_name, time in reflection_times.items():
+            if time is not None:  # Only plot if time exists
+                order_num = order_map.get(order_name)
+                if order_num is not None:
+                    time_sec = time  # time is already in seconds
+                    color = colors[order_num - 1]
+                    
+                    # Add vertical lines to RIR plot (without label)
+                    ax_rir.axvline(x=time_sec, color=color, linestyle='--', alpha=0.3)
+                    # Add text annotation
+                    ax_rir.text(time_sec - 0.02, 0.95, f'N={order_num}',
+                              color=color, alpha=0.3, transform=ax_rir.get_xaxis_transform(),
+                              verticalalignment='top')
+                    
+                    # Add vertical lines to EDC plot (without label)
+                    ax_edc.axvline(x=time_sec, color=color, linestyle='--', alpha=0.3)
+                    # Add text annotation
+                    ax_edc.text(time_sec - 0.02, 0.95, f'N={order_num}',
+                              color=color, alpha=0.3, transform=ax_edc.get_xaxis_transform(),
+                              verticalalignment='top')
+
+                    # Add vertical lines to NED plot (without label)
+                    ax_ned.axvline(x=time_sec, color=color, linestyle='--', alpha=0.3)
+                    # Add text annotation
+                    ax_ned.text(time_sec - 0.02, 0.95, f'N={order_num}',
+                              color=color, alpha=0.3, transform=ax_ned.get_xaxis_transform(),
+                              verticalalignment='top')
+
+    # Set up the RIR plot
+    ax_rir.set_title('Room Impulse Response Comparison')
+    ax_rir.set_xlabel('Time (s)')
+    ax_rir.set_ylabel('Amplitude')
+    ax_rir.grid(True)
+    ax_rir.legend()
+
+    # Set up the EDC plot
+    ax_edc.set_title('Energy Decay Curve Comparison')
+    ax_edc.set_xlabel('Time (s)')
+    ax_edc.set_ylabel('Energy (dB)')
+    ax_edc.grid(True)
+    ax_edc.legend()
+    ax_edc.set_ylim(-65, 5)
+
+    # Set up the NED plot
+    ax_ned.set_title('Normalized Echo Density')
+    ax_ned.set_xlabel('Time (s)')
+    ax_ned.set_ylabel('Normalized Echo Density')
+    ax_ned.grid(True)
+    ax_ned.legend()
+    # ax_ned.set_xscale('log')
+    #ax_ned.set_xlim(left=100/Fs)  # Convert sample index to time
+
+    # Create CheckButtons
+    labels = list(rirs_dict.keys())
+    actives = [True] * len(labels)
+
+    # Remove the outer box and title from the checkbox area
+    ax_check.set_xticks([])
+    ax_check.set_yticks([])
+    for spine in ax_check.spines.values():
+        spine.set_visible(False)
+
+    # Position the checkboxes
+    ax_check.set_position([0.85, 0.4, 0.1, 0.2])
+    check = CheckButtons(
+        ax=ax_check,
+        labels=labels,
+        actives=actives
+    )
+
+    def update_visibility(label):
+        # Toggle visibility of the corresponding lines in all plots
+        rir_line = rir_lines[label]
+        edc_line = edc_lines[label]
+        ned_line = ned_lines[label]
+        
+        rir_line.set_visible(not rir_line.get_visible())
+        edc_line.set_visible(not edc_line.get_visible())
+        ned_line.set_visible(not ned_line.get_visible())
+        
+        # Update legends for all plots
+        rir_handles = [line for line in rir_lines.values() if line.get_visible()]
+        rir_labels = [line.get_label() for line in rir_lines.values() if line.get_visible()]
+        ax_rir.legend(rir_handles, rir_labels)
+        
+        edc_handles = [line for line in edc_lines.values() if line.get_visible()]
+        edc_labels = [line.get_label() for line in edc_lines.values() if line.get_visible()]
+        ax_edc.legend(edc_handles, edc_labels)
+        
+        ned_handles = [line for line in ned_lines.values() if line.get_visible()]
+        ned_labels = [line.get_label() for line in ned_lines.values() if line.get_visible()]
+        ax_ned.legend(ned_handles, ned_labels)
+        
+        fig.canvas.draw_idle()
+
+    # Connect the callback
+    check.on_clicked(update_visibility)
+
+    # Keep a reference to prevent garbage collection
+    fig.check = check
+
+    plt.tight_layout()
+    # Adjust layout to make room for the suptitle
+    plt.subplots_adjust(top=0.93)
+    plt.show(block=False)

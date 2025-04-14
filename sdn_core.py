@@ -1,7 +1,7 @@
 from collections import deque
 import numpy as np
 from typing import Dict, List, Optional
-from geometry import Room, Point, build_angle_mappings, get_best_reflection_target, build_specular_matrices_from_angles
+from geometry import Room, Point, build_angle_mappings, get_best_reflection_target, get_best_reflection_targets, build_specular_matrices_from_angles
 from path_logger import PathLogger, PressurePacket, deque_plotter
 import matplotlib.pyplot as plt
 import path_logger as pl
@@ -178,6 +178,15 @@ class DelayNetwork:
             non_default_params.append("• Using Specular Source Injection")
             if self.source_weighting != defaults['source_weighting']:
                 non_default_params.append(f"  - Source Weighting Factor: {self.source_weighting}")
+            
+            # Print best and second-best targets for each wall
+            non_default_params.append("  - Best and Second-Best Reflection Targets:")
+            for wall_id in self.room.walls:
+                targets = get_best_reflection_targets(wall_id, self.room.angle_mappings, num_targets=2)
+                if targets:
+                    best_target = targets[0]
+                    second_best = targets[1] if len(targets) > 1 else "None"
+                    non_default_params.append(f"    - {wall_id} -> {best_target} (best), {second_best} (second-best)")
 
         # Attenuation Settings
         if self.ignore_wall_absorption:
@@ -466,17 +475,20 @@ class DelayNetwork:
             ###############################################
 
             iter = 0
-            target = get_best_reflection_target(wall_id, self.room.angle_mappings)
+            # Get both best and second-best targets
+            targets = get_best_reflection_targets(wall_id, self.room.angle_mappings, num_targets=2)
+            best_target = targets[0]
+            second_best_target = targets[1]
+            # target = get_best_reflection_target(wall_id, self.room.angle_mappings) # old
+
             i = 1
             for other_id in self.room.walls:
                 if other_id != wall_id:
                     other_nodes.append(other_id)  # Add this line to collect other_nodes
                     # Read from delay line and add half of source pressure
-                    
-                    
+
                     if self.enable_path_logging == False:
                         pki_pressure = self.node_to_node[other_id][wall_id][0]  # incoming wave from other node at n
-                        p_tilde = pki_pressure + psk  # if p_tilde is zero, no pressure at the node
 
                     ###############################################
                     else:  # LOG CASE
@@ -512,13 +524,26 @@ class DelayNetwork:
 
                     # p_tilde = pki_pressure + psk  # if p_tilde is zero, no pressure at the node
                     if self.specular_source_injection:
-                        c = self.source_weighting
-                        if other_id == target:
-                            incoming_waves.append(pki_pressure + c*psk)
-                        else:
-                            incoming_waves.append(pki_pressure + (5 - c) / 4 * psk)
-                            # incoming_waves.append(pki_pressure + 0 * psk)
-                    else:
+
+                        if psk != 0.0: # change the source injection distribution. new approach.
+                            c = self.source_weighting
+                            if other_id == best_target:
+                                # print(i)
+                                p_tilde = pki_pressure + c*psk
+                                i += 1
+                            else:
+                                # print(i)
+                                p_tilde = pki_pressure + (5 - c) / 4 * psk # or pki_pressure + 0 * psk
+
+                                i += 1
+
+                        else: # if source pressure = 0, no need to adjust source injection
+                            p_tilde = pki_pressure # since psk=0
+
+                        incoming_waves.append(p_tilde) # p_tilde is calculated according to above if-else's.
+
+                    else: # original SDN , no change for psk distribution
+                        p_tilde = pki_pressure + psk  # if p_tilde is zero, no pressure at the node
                         incoming_waves.append(p_tilde)
 
             # Apply appropriate scattering matrix

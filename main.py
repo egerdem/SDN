@@ -7,55 +7,84 @@ from sdn_path_calculator import SDNCalculator, ISMCalculator, PathCalculator
 import frequency as ff
 import EchoDensity as ned  # Import the EchoDensity module
 import analysis as an
-import dsp
-from collections import defaultdict
 import pickle  # Added for loading pickled Treble RI
-from scipy.io import wavfile
-
-from rir_calculators import (
-    calculate_pra_rir,
-    calculate_rimpy_rir,
-    calculate_sdn_rir,
-    calculate_ho_sdn_rir
-)
+from rir_calculators import calculate_pra_rir, calculate_rimpy_rir,calculate_sdn_rir
+from rir_calculators import calculate_ho_sdn_rir, rir_normalisation
 
 """ Method flags """
 PLOT_SDN_BASE = True
-PLOT_SDN_Test1 = True
-PLOT_SDN_Test2 = True
-PLOT_SDN_Test3 = False
-PLOT_SDN_Test4 = False
-PLOT_SDN_Test5 = False
-PLOT_SDN_Test6 = False
-PLOT_TREBLE = False
-PLOT_HO_SDN_N2 = True  # Higher Order SDN flag
-PLOT_HO_SDN_N3 = True  # Higher Order SDN flag
+RUN_SDN_Test1 = False
+RUN_SDN_Test2 = True
+RUN_SDN_Test3 = True
+RUN_SDN_Test4 = True
+RUN_SDN_Test5 = True
+RUN_SDN_Test6 = True
 
-PLOT_ISM = False # manual ISM
+PLOT_TREBLE = False
+
 PLOT_ISM_with_pra = True
 PLOT_ISM_rimPy_pos = True  # rimPy ISM with positive reflection
 PLOT_ISM_rimPy_neg = True  # rimPy ISM with negative reflection
-PLOT_ISM_TEST = False
 pra_order = 100
+
+PICKLE_LOAD_RIRS = False  # Load RIRs from pickle file
+file_name = "rir_data_rim_ism_ho23_ho23gauss_sdn_c3c5_c3c5gauss_aes.pkl"
 
 """ Visualization flags """
 PLOT_ROOM = False        # 3D Room Visualisation
 PLOT_ISM_PATHS = False   # Visualize example ISM paths
 ISM_SDN_PATH_DIFF_TABLE = False    # Run path analysis (ISM vs SDN comparison, invalid paths, visualization)
+PLOT_REFLECTION_LINES = True     # Plot vertical lines at reflection arrival times
+SAVE_audio = False
 
 """ Analysis flags """
-PLOT_EDC = True
-PLOT_FREQ = False        # Frequency response plot
-PLOT_NED = True         # Plot Normalized Echo Density
+PLOT_EDC = False
+PLOT_NED = False         # Plot Normalized Echo Density
 PLOT_lsd = False         # Plot LSD
+PLOT_FREQ = False # Frequency response plot
+UNIFIED_PLOTS = True    # Flag to switch between unified and separated plots
+normalize_to_first_impulse = True  # Set this to True if you want to normalize to first impulse
 
 Print_RIR_comparison_metrics = True
 interactive_rirs = True
-pulse_analysis = False
+pulse_analysis = "upto_4"
 plot_smoothed_rirs = False
 
+""" Room Setup """
+
+# ho-waspaa paper room
+room_waspaa = {
+        'display_name': 'WASPAA Room',
+        'width': 6, 'depth': 7, 'height': 4,
+        'source x': 3.6, 'source y': 5.3, 'source z': 1.3,
+        'mic x': 1.2, 'mic y': 1.8, 'mic z': 2.4,
+        'absorption': 0.1,
+    }
+
+room_aes = {
+        'display_name': 'AES Room',
+        'width': 9, 'depth': 7, 'height': 4,
+        'source x': 4.5, 'source y': 3.5, 'source z': 2,
+        'mic x': 2, 'mic y': 2, 'mic z': 1.5,
+        'absorption': 0.2,
+        # 'air': {'humidity': 50,
+        #        'temperature': 20,
+        #        'pressure': 100},
+    }
+
+room_journal = {
+        'display_name': 'Journal Room',
+        'width': 3.2, 'depth': 4, 'height': 2.7,
+        'source x': 2, 'source y': 3., 'source z': 2,
+        'mic x': 1, 'mic y': 1, 'mic z': 1.5,
+        'absorption': 0.1,
+    }
+
+room_parameters = room_waspaa  # Choose the room
+
 # Parameters
-duration = 2  # seconds
+duration = 1  # seconds
+duration_in_ms = 1000 * duration  # Convert to milliseconds
 Fs = 44100
 num_samples = int(Fs * duration)
 rirs = {}
@@ -65,34 +94,9 @@ rirs_analysis = {}
 impulse_dirac = geometry.Source.generate_signal('dirac', num_samples)
 impulse_gaussian = geometry.Source.generate_signal('gaussian', num_samples)
 
-# ISM_signal = geometry.Source.generate_signal('dirac', num_samples) # only for manual ISM
-
-""" Room Setup """
-
-# ho-waspaa paper room
-room_waspaa = {
-        'width': 6, 'depth': 7, 'height': 4,
-        'source x': 3.6, 'source y': 5.3, 'source z': 1.3,
-        'mic x': 1.2, 'mic y': 1.8, 'mic z': 2.4,
-        'absorption': 0.1,
-    }
-
-room_aes = {'width': 9, 'depth': 7, 'height': 4,
-                   'source x': 4.5, 'source y': 3.5, 'source z': 2,
-                   'mic x': 2, 'mic y': 2, 'mic z': 1.5,
-                   'absorption': 0.2,
-                    # 'air': {'humidity': 50,
-                    #        'temperature': 20,
-                    #        'pressure': 100},
-                   }
-
-room_journal = {'width': 3.2, 'depth': 4, 'height': 2.7,
-                   'source x': 2, 'source y': 3., 'source z': 2,
-                   'mic x': 1, 'mic y': 1, 'mic z': 1.5,
-                   'absorption': 0.1,
-                   }
-
-room_parameters = room_waspaa
+#print room name and duration of the experiment
+print(f"\n=== {room_parameters['display_name']} ===")
+print(f"Duration: {duration} seconds")
 
 room = geometry.Room(room_parameters['width'], room_parameters['depth'], room_parameters['height'])
 room.set_microphone(room_parameters['mic x'], room_parameters['mic y'], room_parameters['mic z'])
@@ -109,37 +113,41 @@ room.source.signal = impulse_dirac['signal']
 room_parameters['reflection'] = np.sqrt(1 - room_parameters['absorption'])
 room.wallAttenuation = [room_parameters['reflection']] * 6
 
-
 # SDN Test Configurations
 sdn_tests = {
     'Test1': {
-        'enabled': PLOT_SDN_Test1,
+        'enabled': RUN_SDN_Test1,
         # 'absorption': 0.2,
-        'info': " ",
+        'info': "orig",
         'flags': {
-            # 'specular_source_injection': True,
-            # 'source_weighting': 1,
+            'specular_source_injection': True,
+            'source_weighting': 1,
         # 'scattering_matrix_update_coef' : 0.05
+        #     "ignore_wall_absorption" : True,
+        #     "ignore_src_node_atten" : True,
+        #     "ignore_node_mic_atten" : True,
         },
         'label': "SDN"
     },
     'Test2': {
-        'enabled': PLOT_SDN_Test2,
+        'enabled': RUN_SDN_Test2,
         # 'absorption': 0.2,
-        'info': "c5",
+        'info': "c3 Spec Scat matrix.",
         'flags': {
             # "ignore_wall_absorption" : True,
             # "ignore_src_node_atten" : True,
             # "ignore_node_mic_atten" : True,
             'specular_source_injection': True,
-            'source_weighting': 5,
+            'source_weighting': 3,
+            'specular_scattering': True,
+            # 'print_parameter_summary': True,
             # 'scattering_matrix_update_coef' : -0.02
             # 'specular_scattering': True,
         },
         'label': "SDN"
     },
     'Test3': {  # New test configuration
-        'enabled': PLOT_SDN_Test3,
+        'enabled': RUN_SDN_Test3,
         # 'absorption': 0.3,
         # 'info': "specular + specular -0.02",
         'info': "c3",
@@ -157,7 +165,7 @@ sdn_tests = {
     },
 
     'Test4': {  # New test configuration
-            'enabled': PLOT_SDN_Test4,
+            'enabled': RUN_SDN_Test4,
             # 'absorption': 0.3,
             'info': "c=4",
             'flags': {
@@ -173,37 +181,91 @@ sdn_tests = {
         },
 
     'Test5': {  # New test configuration
-                'enabled': PLOT_SDN_Test5,
+                'enabled': RUN_SDN_Test5,
                 # 'absorption': 0.2,
-                'info': "c=3",
+                'info': "c5 specular scat matrix.",
+                # 'source_signal': 'gaussian',  # New parameter to specify the source signal type
                 'flags': {
                 # "ignore_wall_absorption" : True,
-                #     "ignore_src_node_atten" : True,
-                #     "ignore_node_mic_atten" : True,
+                #     "ignore_wall_absorption": True,
+                #     "ignore_src_node_atten": True,
+                #     "ignore_node_mic_atten": True,
+                    'specular_scattering' : True,
                     'specular_source_injection': True,
-                    'source_weighting': 3,
+                    'source_weighting': 5,
                     # 'coef': 1,
                     # 'source_pressure_injection_coeff': 0.2,
                 },
                 'label': "SDN Test 5"
             },
     'Test6': {  # New test configuration
-                    'enabled': PLOT_SDN_Test6,
+                    'enabled': RUN_SDN_Test6,
                     # 'absorption': 0.3,
-                    'info': "no log - remove step 3 ",
+                    'info': "c5",
                     'flags': {
-                        'coef': 0.5,
-                        'source_pressure_injection_coeff': 0.4,
+                        'coef': 0.2, # original : 2/5
+                        'source_pressure_injection_coeff': 1, # original : 1/2
+                        'specular_source_injection': True,
+                        'source_weighting': 5,
                     },
                     'label': "SDN Test 6"
         }
 }
 
+# HO-SDN Test Configurations
+ho_sdn_tests = {
+    'N2': {
+        'enabled': True,
+        'info': "Dirac",
+        'source_signal': 'dirac',
+        'order': 2,
+        'label': "HO-SDN N2"
+    },
+
+    'N2g': {
+            'enabled': False,
+            'info': "Gaussian",
+            'source_signal': 'gaussian',
+            'order': 2,
+            'label': "HO-SDN N2"
+        },
+
+    'N3': {
+        'enabled': True,
+        'info': "Dirac",
+        'source_signal': 'dirac',
+        'order': 3,
+        'label': "HO-SDN N3"
+    },
+
+    'N3g': {
+            'enabled': False,
+            'info': "Gaussian",
+            'source_signal': 'gaussian',
+            'order': 3,
+            'label': "HO-SDN N3"
+        }
+}
+
 # Function to run SDN tests with given configuration, new implementation (SDN-Ege)
 def run_sdn_test(test_name, config):
-
-    sdn, rir, label, is_default = calculate_sdn_rir(room_parameters, test_name, room, duration, Fs, config)
+    # Store original signal
+    original_signal = room.source.signal
     
+    # Check if a specific source signal is requested
+    if 'source_signal' in config:
+        if config['source_signal'] == 'gaussian':
+            room.source.signal = impulse_gaussian['signal']
+            print(f"Using Gaussian impulse for {test_name}")
+        elif config['source_signal'] == 'dirac':
+            room.source.signal = impulse_dirac['signal']
+            print(f"Using Dirac impulse for {test_name}")
+    
+    sdn, rir, label, is_default = calculate_sdn_rir(room_parameters, test_name, room, duration, Fs, config)
+
+    if 'source_signal' in config:
+            room.source.signal = original_signal
+
     rirs[label] = rir
 
     # Track if this is a default configuration
@@ -212,6 +274,37 @@ def run_sdn_test(test_name, config):
     
     return sdn
 
+# Function to run HO-SDN tests with given configuration
+def run_ho_sdn_test(test_name, config):
+    # Store original signal
+    original_signal = room.source.signal
+    
+    # Check if a specific source signal is requested
+    if 'source_signal' in config:
+        if config['source_signal'] == 'gaussian':
+            room.source.signal = impulse_gaussian['signal']
+            print(f"Using Gaussian impulse for {test_name}")
+        elif config['source_signal'] == 'dirac':
+            room.source.signal = impulse_dirac['signal']
+            print(f"Using Dirac impulse for {test_name}")
+    
+    # Get order from config
+    order = config.get('order')  # Default to order 2 if not specified
+    
+    # Calculate HO-SDN RIR
+    rir, label = calculate_ho_sdn_rir(room_parameters, room, Fs, duration, config['source_signal'], order=order)
+    
+    # Restore original signal
+    if 'source_signal' in config:
+        room.source.signal = original_signal
+    
+    # Add info to label if provided
+    if 'info' in config and config['info']:
+        label = f"{label}: {config['info']}"
+    
+    rirs[label] = rir
+    
+    return rir, label
 
 def get_method_pairs():
     """Get pairs of methods with their original labels and configurations.
@@ -235,7 +328,22 @@ def get_method_pairs():
             info1 = label1.split(': ')[1] if ': ' in label1 else ''
             info2 = label2.split(': ')[1] if ': ' in label2 else ''
 
-            # Combine configurations
+            # Get binary flags from the label // new part
+            flags1 = {}
+            flags2 = {}
+            
+            # Extract flags from the label
+            if 'Test' in base1:
+                test_name = base1.split('Test')[1].split()[0]  # Get test number
+                if test_name in sdn_tests:
+                    flags1 = sdn_tests[test_name]['flags']
+            
+            if 'Test' in base2:
+                test_name = base2.split('Test')[1].split()[0]  # Get test number
+                if test_name in sdn_tests:
+                    flags2 = sdn_tests[test_name]['flags']
+
+            # Combine configurations and flags
             combined_info = ""
             if info1 and info2:
                 combined_info = f"{info1} vs {info2}"
@@ -243,6 +351,18 @@ def get_method_pairs():
                 combined_info = info1
             elif info2:
                 combined_info = info2
+
+            # Add flag differences to combined_info // new part
+            flag_diffs = []
+            all_flags = set(flags1.keys()) | set(flags2.keys())
+            for flag in all_flags:
+                if flag not in flags1 or flag not in flags2 or flags1[flag] != flags2[flag]:
+                    flag_diffs.append(f"{flag}={flags1.get(flag, 'False')} vs {flags2.get(flag, 'False')}")
+            
+            if flag_diffs:
+                if combined_info:
+                    combined_info += " | "
+                combined_info += " | ".join(flag_diffs)
 
             pairs.append({
                 'pair': f"{base1} vs {base2}",
@@ -256,101 +376,147 @@ def get_method_pairs():
 
 if __name__ == '__main__':
 
+    if not PICKLE_LOAD_RIRS:
+        """ Image Source Methods and Treble """
+        if PLOT_ISM_with_pra:
+            pra_rir, label = calculate_pra_rir(room_parameters, duration, Fs, pra_order)
+            rirs[label] = pra_rir
 
-
-    """ Image Source Methods and Treble """
-    if PLOT_ISM_with_pra:
-        pra_rir, label = calculate_pra_rir(room_parameters, duration, Fs, pra_order)
-        rirs[label] = pra_rir
-
-    # Calculate rimPy ISM RIR
-    if PLOT_ISM_rimPy_pos or PLOT_ISM_rimPy_neg:
-     
+        # Calculate rimPy ISM RIR
         # Run rimPy with positive reflection coefficient
         if PLOT_ISM_rimPy_pos:
-            rimpy_rir_pos, label = calculate_rimpy_rir(room_parameters, duration/3, Fs, reflection_sign=1)
+            rimpy_rir_pos, label = calculate_rimpy_rir(room_parameters, duration, Fs, reflection_sign=1)
             rirs[label] = rimpy_rir_pos
 
         # Run rimPy with negative reflection coefficient
         if PLOT_ISM_rimPy_neg:
-                rimpy_rir_neg, label = calculate_rimpy_rir(room_parameters, duration/3, Fs, reflection_sign=-1)
-                rirs[label] = rimpy_rir_neg
+            rimpy_rir_neg, label = calculate_rimpy_rir(room_parameters, duration, Fs, reflection_sign=-1)
+            rirs[label] = rimpy_rir_neg
 
-    if duration > 0.7:
-        # Theoretical RT60 if room dimensions and absorption are provided
-        if room_dim is not None and room_parameters['absorption'] is not None:
-            rt60_sabine, rt60_eyring = pp.calculate_rt60_theoretical(room_dim, room_parameters['absorption'])
-            print(f"\nTheoretical RT60 values of the room with a= {room_parameters['absorption']}:")
-            print(f"Sabine: {rt60_sabine:.3f} s")
-            print(f"Eyring: {rt60_eyring:.3f} s")
+        if duration > 0.7:
+            # Theoretical RT60 if room dimensions and absorption are provided
+            if room_dim is not None and room_parameters['absorption'] is not None:
+                rt60_sabine, rt60_eyring = pp.calculate_rt60_theoretical(room_dim, room_parameters['absorption'])
+                print(f"\nTheoretical RT60 values of the room with a= {room_parameters['absorption']}:")
+                print(f"Sabine: {rt60_sabine:.3f} s")
+                print(f"Eyring: {rt60_eyring:.3f} s")
 
-    # Calculate SDN-Base RIR
-    if PLOT_SDN_BASE:
-        from sdn_base import calculate_sdn_base_rir
+        # Calculate SDN-Base RIR
+        if PLOT_SDN_BASE:
+            from sdn_base import calculate_sdn_base_rir
+            sdn_base_rir = calculate_sdn_base_rir(room_parameters, duration, Fs)
+            label = 'SDN-Base (original)'
+            rirs[label] = sdn_base_rir
 
-        # Override absorption for SDN-Base
-        sdn_base_rir = calculate_sdn_base_rir(room_parameters, duration, Fs)
-        label = 'SDN-Base (original)'
-        rirs[label] = sdn_base_rir
+        # Run SDN tests
+        for test_name, config in sdn_tests.items():
+            if config['enabled']:
+                sdn = run_sdn_test(test_name, config)
 
-    # Run SDN tests
-    for test_name, config in sdn_tests.items():
+                # Additional analysis: path logging
+                if sdn and sdn.enable_path_logging:
+                    print(f"\n=== {test_name} Path Analysis ===")
+                    print("\n=== First Arriving Paths ===")
+                    complete_paths = sdn.path_logger.get_complete_paths_sorted()
+                    print("lennnn", len(complete_paths))
+                    for path_key, packet in complete_paths[:10]:
+                        print(f"{path_key}: arrives at n={packet.birth_sample + packet.delay}, value={packet.value:.6f}")
 
-        if config['enabled']:
-            sdn = run_sdn_test(test_name, config)
+                    # Create rir_with_paths dictionary with pressure and arrival time
+                    rir_with_paths = {}
+                    for path_key, packet in complete_paths:
+                        rir_with_paths[path_key] = {
+                            "pressure": packet.value,
+                            "arrival": packet.birth_sample + packet.delay
+                        }
 
-            # Additional analysis: path logging
-            if sdn and sdn.enable_path_logging:
-                print(f"\n=== {test_name} Path Analysis ===")
-                print("\n=== First Arriving Paths ===")
-                complete_paths = sdn.path_logger.get_complete_paths_sorted()
-                print("lennnn", len(complete_paths))
-                for path_key, packet in complete_paths[:10]:
-                    print(f"{path_key}: arrives at n={packet.birth_sample + packet.delay}, value={packet.value:.6f}")
+                    # Create a path-based RIR from complete_paths
+                    if complete_paths:
+                        # Find the maximum arrival time to determine the length of the RIR
+                        max_arrival = max(packet.birth_sample + packet.delay for _, packet in complete_paths)
 
-                # Create rir_with_paths dictionary with pressure and arrival time
-                rir_with_paths = {}
-                for path_key, packet in complete_paths:
-                    rir_with_paths[path_key] = {
-                        "pressure": packet.value,
-                        "arrival": packet.birth_sample + packet.delay
-                    }
+                        # Create an empty RIR array
+                        path_based_rir = np.zeros(max_arrival + 1)
 
-                # Create a path-based RIR from complete_paths
-                if complete_paths:
-                    # Find the maximum arrival time to determine the length of the RIR
-                    max_arrival = max(packet.birth_sample + packet.delay for _, packet in complete_paths)
+                        # Fill in the RIR with pressure values at their arrival times
+                        for _, packet in complete_paths:
+                            arrival_time = packet.birth_sample + packet.delay
+                            path_based_rir[arrival_time] += packet.value
 
-                    # Create an empty RIR array
-                    path_based_rir = np.zeros(max_arrival + 1)
+                        path_based_rir = path_based_rir / np.max(np.abs(path_based_rir))
 
-                    # Fill in the RIR with pressure values at their arrival times
-                    for _, packet in complete_paths:
-                        arrival_time = packet.birth_sample + packet.delay
-                        path_based_rir[arrival_time] += packet.value
+                        # Add the path-based RIR to the rirs dictionary
+                        rirs[f"SDN {test_name} (Path-based-PROOF)"] = path_based_rir
 
-                    path_based_rir = path_based_rir / np.max(np.abs(path_based_rir))
+                        # Also add it to default_rirs to highlight it
+                        default_rirs.add(f"{test_name} (Path-based)")
 
-                    # Add the path-based RIR to the rirs dictionary
-                    rirs[f"SDN {test_name} (Path-based-PROOF)"] = path_based_rir
+                sdn.get_path_summary()
 
-                    # Also add it to default_rirs to highlight it
-                    default_rirs.add(f"{test_name} (Path-based)")
+        # Run HO-SDN tests
+        for test_name, config in ho_sdn_tests.items():
+            if config['enabled']:
+                rir, label = run_ho_sdn_test(test_name, config)
 
-            sdn.get_path_summary()
+        # Normalize all RIRs
+        
+        rirs = rir_normalisation(rirs, room, Fs, normalize_to_first_impulse)
 
-    # Calculate HO-SDN RIR after SDN tests
-    if PLOT_HO_SDN_N2:
-        rir_ho2_sdn, label = calculate_ho_sdn_rir(room_parameters, room, Fs, duration, order=2)
-        rirs[label] = rir_ho2_sdn
+    else: # rirs are loaded from pickle:
+        with open(file_name, 'rb') as f:
+            rirs = pickle.load(f)
 
-    if PLOT_HO_SDN_N3:
-        rir_ho3_sdn, label = calculate_ho_sdn_rir(room_parameters, room, Fs, duration, order=3)
-        rirs[label] = rir_ho3_sdn
+    # Calculate reflection arrival times if needed
+    reflection_times = None
+    if PLOT_REFLECTION_LINES:
+        path_tracker = path_tracker.PathTracker()
+        sdn_calc = SDNCalculator(room.walls, room.source.srcPos, room.micPos)
+        ism_calc = ISMCalculator(room.walls, room.source.srcPos, room.micPos)
+        sdn_calc.set_path_tracker(path_tracker)
+        ism_calc.set_path_tracker(path_tracker)
+
+        # Compare paths and analyze invalid ISM paths (without printing)
+        PathCalculator.compare_paths(sdn_calc, ism_calc, max_order=3, print_comparison=False)
+        ism_calc.analyze_paths(max_order=3, print_invalid=False)
+
+        # Get arrival times for each order
+        arrival_times = path_tracker.get_latest_arrival_time_by_order('ISM')
+        reflection_times = {
+            'first_order': arrival_times.get(1),
+            'second_order': arrival_times.get(2),
+            'third_order': arrival_times.get(3)
+        }
+
+        if pulse_analysis == "upto_4":
+            # Get the arrival time for 3rd order reflections
+            arrival_time_3rd = arrival_times.get(4)  # in seconds
+            if arrival_time_3rd is not None:
+                sample_idx_3rd = int(arrival_time_3rd * Fs)  # convert to samples
+                
+                # Count nonzero samples for SDN and ISM up to 3rd order arrival
+                threshold = 0  # threshold for considering a sample nonzero
+                
+                # For SDN original
+                sdn_rir = rirs['SDN-Original:  ']
+                sdn_nonzero = np.sum(np.abs(sdn_rir[:sample_idx_3rd]) > threshold)
+                print(f"\nSDN nonzero samples up to 4rd order ({arrival_time_3rd:.3f}s): {sdn_nonzero}")
+                
+                # For ISM rimPy negative
+                
+                ism_rir = rirs['ISM-rimpy-negREF']
+                ism_nonzero = np.sum(np.abs(ism_rir[:sample_idx_3rd]) > threshold)
+                print(f"ISM-rimpy-neg nonzero samples up to 4rd order ({arrival_time_3rd:.3f}s): {ism_nonzero}")
+                
+                # Print valid ISM paths count
+                path_tracker.print_valid_paths_count(4)
 
     if interactive_rirs:    
-        pp.create_interactive_rir_plot(rirs)
-        plt.show(block=False)
+        if UNIFIED_PLOTS:
+            pp.create_unified_interactive_plot(rirs, Fs, default_rirs, room_parameters, reflection_times=reflection_times)
+            plt.show(block=False)
+        else:
+            pp.create_interactive_rir_plot(rirs)
+            plt.show(block=False)
 
     # Calculate RT60 values for all RIRs
     if duration > 0.7:
@@ -367,36 +533,12 @@ if __name__ == '__main__':
 
 
     if PLOT_EDC:
-        pp.create_interactive_edc_plot(rirs, Fs, default_rirs)
+        if not UNIFIED_PLOTS:
+            pp.create_interactive_edc_plot(rirs, Fs, default_rirs)
 
-        # Compare all distinct pairs of EDCs
-        print("\nEDC Comparison (First 50ms RMSE Differences):")
-        print("-" * 50)
-
-        # Get all unique pairs of RIR labels
-        # rir_labels = list(rirs.keys())
-        i = 0
-
-        for pair_info in get_method_pairs():
-            label1, label2 = pair_info['label1'], pair_info['label2']
-
-        # for j in range(i , len(rir_labels)):
-        #     label1 = rir_labels[i]
-        #     label2 = rir_labels[j]
-
-            # Calculate EDCs for both RIRs without plotting
-            edc1 = an.compute_edc(rirs[label1], Fs, label1, plot=False)
-            edc2 = an.compute_edc(rirs[label2], Fs, label2, plot=False)
-
-            # Compare EDCs
-            rms_diff = an.compute_RMS(edc1, edc2, range=50, Fs=Fs, method="mae") # range=50ms
-            # sum_of_raw_diff = an.compute_RMS(edc1, edc2, range=50, Fs=Fs, method="sum_of_raw_diff")
-            print(f"{label1} vs {label2}: {rms_diff:.2f} dB RMSE difference")
-            # print(f"{label1} vs {label2}: {sum_of_raw_diff:.2f} dB sum of raw differences")
-
-    if PLOT_NED:
+    if PLOT_NED and not UNIFIED_PLOTS:
         plt.figure(figsize=(12, 6))
-
+        print("old NED plot")
         # Plot both normalized and raw echo densities
         for label, rir in rirs.items():
             # Normalized Echo Density
@@ -442,15 +584,30 @@ if __name__ == '__main__':
     if Print_RIR_comparison_metrics:
         # Dictionary to store all RIR analyses
         for rir_label, rir in rirs.items():
-            en, sm = an.calculate_smoothed_energy(rir, window_length=30, range=50, Fs=Fs)
+            
+            smoothed = an.calculate_smoothed_energy(rir, window_length=30, range=50, Fs=Fs)
+            early_energy, energy, ERR = an.calculate_err(rir, early_range=50, Fs=Fs)
+            c50 = an.compute_clarity_c50(rir, Fs=Fs)
+            c80 = an.compute_clarity_c80(rir, Fs=Fs)
+
             rirs_analysis[rir_label] = {
-                "energy": en,
-                "smoothed_energy": sm
+            "smoothed_energy": smoothed,
+            "early_energy": early_energy,
+            "energy": energy,
+            "ERR": ERR,
+            "c50": c50,
+            "c80": c80
             }
+
+            print("\nEnergy Total {} = {:.3f}".format(rir_label, sum(energy)))
+            print("Energy 50ms {} = {:.3f}".format(rir_label, sum(early_energy)))
+            print("ERR: Energy50ms/EnergyTotal {} = {:.3f}".format(rir_label, ERR))
+            print("C50 {} = {:.3f}".format(rir_label, c50))
+            print("C80 {} = {:.3f}".format(rir_label, c80))
 
         # Dictionary to store comparison results for both energy and smoothed signals
         comparison_results = {
-            'energy': [],
+            'early_energy': [],
             'smoothed_energy': []
         }
 
@@ -465,8 +622,8 @@ if __name__ == '__main__':
             l1, l2 = pair_info['label1'], pair_info['label2']
 
             # Compare energy signals
-            energy1 = rirs_analysis[l1]['energy']
-            energy2 = rirs_analysis[l2]['energy']
+            energy1 = rirs_analysis[l1]['early_energy']
+            energy2 = rirs_analysis[l2]['early_energy']
 
             # Store energy comparison results
             energy_result = {
@@ -476,7 +633,7 @@ if __name__ == '__main__':
                 'mae': an.compute_RMS(energy1, energy2, method="mae"),
                 'median': an.compute_RMS(energy1, energy2, method="median")
             }
-            comparison_results['energy'].append(energy_result)
+            comparison_results['early_energy'].append(energy_result)
 
             # Print energy comparison results
             print(f"{energy_result['pair']:<40} {energy_result['rmse']:12.6f} {energy_result['mae']:12.6f} "
@@ -515,6 +672,24 @@ if __name__ == '__main__':
         print("="*130)
         print("\n")
 
+        # Compare all distinct pairs of EDCs
+        print("\nEDC Comparison (First 50ms RMSE Differences):")
+        print("-" * 50)
+
+        # Get all unique pairs of RIR labels
+        i = 0
+
+        for pair_info in get_method_pairs():
+            label1, label2 = pair_info['label1'], pair_info['label2']
+
+            # Calculate EDCs for both RIRs without plotting
+            edc1 = an.compute_edc(rirs[label1], Fs, label1, plot=False)
+            edc2 = an.compute_edc(rirs[label2], Fs, label2, plot=False)
+
+            # Compare EDCs
+            rms_diff = an.compute_RMS(edc1, edc2, range=50, Fs=Fs, method="mae")  # range=50ms
+            print(f"{label1} vs {label2}: {rms_diff:.2f} dB RMSE difference")
+
     if plot_smoothed_rirs:
         # Iterate through each method in rirs_analysis
         for rir_label, signals in rirs_analysis.items():
@@ -537,27 +712,26 @@ if __name__ == '__main__':
             plt.show()
 
 # Only Path Length Analysis, No RIR Calculation 
-# Create shared path tracker and calculate paths
 if ISM_SDN_PATH_DIFF_TABLE:
-    path_tracker = path_tracker.PathTracker()
-    sdn_calc = SDNCalculator(room.walls, room.source.srcPos, room.micPos)
-    ism_calc = ISMCalculator(room.walls, room.source.srcPos, room.micPos)
-    sdn_calc.set_path_tracker(path_tracker)
-    ism_calc.set_path_tracker(path_tracker)
+    
+    if not PLOT_REFLECTION_LINES:
+        path_tracker = path_tracker.PathTracker()
+        sdn_calc = SDNCalculator(room.walls, room.source.srcPos, room.micPos)
+        ism_calc = ISMCalculator(room.walls, room.source.srcPos, room.micPos)
+        sdn_calc.set_path_tracker(path_tracker)
+        ism_calc.set_path_tracker(path_tracker)
 
-    # Compare paths and analyze invalid ISM paths
-    PathCalculator.compare_paths(sdn_calc, ism_calc,
-                                 max_order=3)  # compare_paths() prints the comparison table but doesn't return anything
-
+    PathCalculator.compare_paths(sdn_calc, ism_calc, max_order=3, print_comparison=True)
     # analyze_paths() returns a list of invalid paths (only for ISM calculator)
-    # Each path is a list of node labels ['s', 'wall1', 'wall2', ..., 'm']
-    invalid_paths = ism_calc.analyze_paths(max_order=3)
+    invalid_paths = ism_calc.analyze_paths(max_order=3, print_invalid=True)
 
     # Visualize example ISM paths
     example_paths = [
-        ['s', 'east', 'west', 'm'],
-        ['s', 'west', 'm'],
-        ['s', 'west', 'east', 'north', 'm']
+        # ['s', 'east', 'west', 'm'],
+        # ['s', 'west', 'm'],
+        # ['s', 'ceiling', 'm'],
+        # ['s', 'm'],
+        # ['s', 'west', 'east', 'north', 'm']
     ]
 
     for path in example_paths:
@@ -565,50 +739,69 @@ if ISM_SDN_PATH_DIFF_TABLE:
         plt.show()
 
 if PLOT_ROOM:
-    pp.plot_room(room)
+    if not ISM_SDN_PATH_DIFF_TABLE:
+        pp.plot_room(room)
 
-    if pulse_analysis:
-        print("\n=== RIR Pulse Analysis ===")
-        for rir_label, rir in rirs.items():
+
+if pulse_analysis == "all":
+
+    print("\n=== RIR Pulse Analysis ===")
+    from scipy.signal import find_peaks
+    for rir_label, rir in rirs.items():
+        print(f"\n{rir_label}:")
+
+        if "ISM-pra" in rir_label:  # For PRA method, use peak detection
+            # Find peaks that are at least 1% of the maximum amplitude
+            threshold = 0.01 * np.max(np.abs(rir))
+            peaks, _ = find_peaks(np.abs(rir), height=threshold)
+
+            print(f"  Total significant peaks: {len(peaks)}")
+            print(f"  First peak at: {peaks[0]/Fs*1000:.2f} ms")
+            print(f"  Last peak at: {peaks[-1]/Fs*1000:.2f} ms")
+            print(f"  Time span: {(peaks[-1] - peaks[0])/Fs*1000:.2f} ms")
+
+        else:  # For other methods, use non-zero analysis
             # Count total nonzero pulses (using small threshold to account for floating point)
             threshold = 1e-10  # Adjust this threshold based on your needs
-            nonzero_count = np.sum(np.abs(rir) > threshold)
+            nonzero_indices = np.where(np.abs(rir) > threshold)[0]
+            nonzero_count = len(nonzero_indices)
 
             # Calculate percentage of nonzero samples
             percentage = (nonzero_count / len(rir)) * 100
 
             # Find first and last nonzero indices
-            nonzero_indices = np.where(np.abs(rir) > threshold)[0]
-            first_pulse = nonzero_indices[0] if len(nonzero_indices) > 0 else 0
-            last_pulse = nonzero_indices[-1] if len(nonzero_indices) > 0 else 0
+            first_pulse = nonzero_indices[0] if nonzero_count > 0 else 0
+            last_pulse = nonzero_indices[-1] if nonzero_count > 0 else 0
 
-            # Calculate time span of pulses
-            time_span_ms = (last_pulse - first_pulse) / Fs * 1000  # in milliseconds
-
-            print(f"\n{rir_label}:")
             print(f"  Total (nonzero) pulses: {nonzero_count}")
             print(f"  Percentage of nonzero samples: {percentage:.2f}%")
             print(f"  First pulse at: {first_pulse/Fs*1000:.2f} ms")
             print(f"  Last pulse at: {last_pulse/Fs*1000:.2f} ms")
-            print(f"  Time span: {time_span_ms:.2f} ms")
+            print(f"  Time span: {(last_pulse - first_pulse)/Fs*1000:.2f} ms")
 
-    # # Example RIR data
-    # non_zero_rir = rir[rir != 0]
-    # # Compute the histogram
-    # hist, bin_edges = np.histogram(non_zero_rir, bins=30)
-    # # Print the histogram counts and bin edges
-    # print("Histogram counts:", hist)
-    # print("Bin edges:", bin_edges)
-    # plt.figure()
-    # # Plotting the histogram
-    # plt.hist(non_zero_rir, bins=30, color='blue', alpha=0.7)
-    # plt.title('Histogram of RIR')
-    # plt.xlabel('Value')
-    # plt.ylabel('Frequency')
-    # plt.grid()
-    # plt.show()
 
-import pickle
-# Save the RIRs to a file
-with open('rir_data_rim_ism_ho23_sdn_waspaa.pkl', 'wb') as f:
-    pickle.dump(rirs, f)
+"""import pickle
+# # Save the RIRs to a file
+
+try:
+    with open(file_name, 'rb') as f:
+        existing_rirs = pickle.load(f)
+    # If the file exists, write a message
+    print("File already exists. Not overwriting. Please delete the file to save new data.")
+
+# dump the file otherwise
+except FileNotFoundError:
+    # If the file doesn't exist, write the new data
+    print("File not found. Saving new data.")
+    # Save the RIRs to the file
+    with open(file_name, 'wb') as f:
+        # Save the RIRs to the file
+        pickle.dump(rirs, f)
+
+"""
+
+if SAVE_audio:
+    # Save the RIRs as wav
+    import soundfile as sf
+    for rir_label, rir_audio in rirs.items():
+        sf.write(f"{rir_label}.wav", rir_audio * 0.8, Fs)

@@ -10,6 +10,48 @@ from src import Source as src
 from src import Microphone as mic
 from sdn_core import DelayNetwork
 from sdn_base import calculate_sdn_base_rir
+from scipy.signal import find_peaks
+
+def rir_normalisation(rirs_dict, room, Fs, normalize_to_first_impulse=True):
+    """
+    Normalize RIRs either to maximum absolute value or to first impulse.
+    
+    Args:
+        rirs_dict (dict): Dictionary of RIRs to normalize
+        room: Room object containing source and receiver positions
+        Fs: Sampling frequency
+        normalize_to_first_impulse (bool): If True, normalize to direct sound value
+                                         If False, normalize to maximum absolute value
+    
+    Returns:
+        dict: Dictionary of normalized RIRs
+    """
+    normalized_rirs = {}
+    
+    if normalize_to_first_impulse:
+        print("Normalizing to direct- first impulse")
+        # Calculate theoretical direct sound arrival time
+        direct_distance = room.micPos.getDistance(room.source.srcPos)
+        direct_time = direct_distance / 343.0  # speed of sound in m/s
+        direct_sample = int(direct_time * Fs)
+
+        # Use a small window around the theoretical arrival time to find the peak
+        window_size = 20  # samples
+        for label, rir in rirs_dict.items():
+            # start_idx = max(0, direct_sample - window_size)
+            end_idx = direct_sample + window_size
+            # window = rir[start_idx:end_idx]
+            window = rir[:end_idx]
+            # max_in_window_idx = start_idx + np.argmax(np.abs(window))
+            max_in_window_idx = np.argmax(np.abs(window))
+            normalized_rirs[label] = rir / abs(rir[max_in_window_idx])
+    else:
+        print("Normalizing to maximum absolute value")
+        # Normalize to maximum absolute value
+        for label, rir in rirs_dict.items():
+            normalized_rirs[label] = rir / np.max(np.abs(rir))
+            
+    return normalized_rirs
 
 def calculate_pra_rir(room_parameters, duration, Fs, max_order=100):
     """
@@ -30,7 +72,6 @@ def calculate_pra_rir(room_parameters, duration, Fs, max_order=100):
     room_dim = np.array([room_parameters['width'], room_parameters['depth'], room_parameters['height']])
     
     if room_parameters.get('air') is None:
-
         pra_room = pra.ShoeBox(room_dim, fs=Fs,
                                 materials=pra.Material(energy_absorption = room_parameters['absorption']),
                                 max_order=max_order,
@@ -69,11 +110,11 @@ def calculate_pra_rir(room_parameters, duration, Fs, max_order=100):
         rir = pra_rir[:num_samples]
     
     # Normalize
-    rir = rir / np.max(np.abs(rir))
+    # rir = rir / np.max(np.abs(rir))
     
     return rir, 'ISM-pra'
 
-def calculate_rimpy_rir(room_parameters, duration, Fs, reflection_sign=1):
+def calculate_rimpy_rir(room_parameters, duration, Fs, reflection_sign):
     """
     Calculate RIR using rimPy ISM.
     
@@ -109,10 +150,13 @@ def calculate_rimpy_rir(room_parameters, duration, Fs, reflection_sign=1):
     # Set reflection coefficients
     reflection = room_parameters['reflection']
     if reflection_sign < 0:
+        label = 'ISM-rimpy-negREF'
         reflection = -reflection
-    
+    else:
+        label = 'ISM-rimpy_posREF'
+
     # Run rimPy calculation
-    beta = room_parameters['reflection'] * np.ones((2, 3))
+    beta = reflection * np.ones((2, 3))
     h_rimpy = rimpy.rimPy(
         micPos=mic_loc,
         sourcePos=source_loc,
@@ -126,9 +170,9 @@ def calculate_rimpy_rir(room_parameters, duration, Fs, reflection_sign=1):
         c=343
     )
 
-    h_rimpy = h_rimpy[:, 0]
-    rimpy_rir = h_rimpy / np.max(np.abs(h_rimpy))
-    label = 'ISM-rimpy-posREF'    
+    rimpy_rir = h_rimpy[:, 0]
+    # rimpy_rir = rimpy_rir / np.max(np.abs(rimpy_rir))
+
     return rimpy_rir, label
 
 def calculate_sdn_rir(room_parameters, test_name, room, duration, Fs, config):
@@ -161,7 +205,7 @@ def calculate_sdn_rir(room_parameters, test_name, room, duration, Fs, config):
     rir = sdn.calculate_rir(duration)
     
     # Normalize
-    rir = rir / np.max(np.abs(rir))
+    # rir = rir / np.max(np.abs(rir))
 
     # Check if this is a default configuration (no flags)
     is_default = len(config.get('flags', {})) == 0
@@ -177,33 +221,39 @@ def calculate_sdn_rir(room_parameters, test_name, room, duration, Fs, config):
     
     return sdn, rir, label, is_default
 
-def calculate_ho_sdn_rir(room_parameters, room, Fs, duration, order=2):
+def calculate_ho_sdn_rir(room_parameters, room, Fs, duration, source_signal='dirac', order=2):
+    import geometry
     """
     Calculate RIR using HO-SDN (Higher-Order Scattering Delay Network).
     
     Args:
         room_params (dict): Room parameters including dimensions and absorption
-        source_pos (tuple): Source position (x, y, z)
-        mic_pos (tuple): Microphone position (x, y, z)
-        duration (float): Duration of RIR in seconds
+        room (Room): Room object with source and microphone positions
         Fs (int): Sampling frequency
+        duration (float): Duration of RIR in seconds
+        source_signal (str): Type of source signal ('dirac' or 'gaussian')
         order (int): Order of HO-SDN (2 or 3)
         
     Returns:
-        tuple: (normalized RIR, simulation object)
+        tuple: (normalized RIR, label)
     """
-    
+
+    label = f'HO-SDN N={order}'
+    num_samples = int(Fs * duration)
+
     # Create room object
     ho_room = geom.Room()
     ho_room.shape = geom.Cuboid(room_parameters['width'], room_parameters['height'], room_parameters['depth'])
     ho_room.wallFilters = [None] * 6
     ho_room.wallAttenuation = [room_parameters['reflection']] * 6
+
+    # Create signal based on source_signal parameter
+    if source_signal == 'gaussian':
+        signal_data = geometry.Source.generate_signal('gaussian', num_samples)['signal']
+    else:  # Default to dirac
+        signal_data = geometry.Source.generate_signal('dirac', num_samples)['signal']
     
-    # Create signal
-    signal_data = room.source.signal
-    print("Signal data:", signal_data)
     ho_signal = sig.Signal(Fs, signal_data)
-    num_samples = int(Fs * duration)
     # Create source and mic objects
     ho_source = src.Source(geom.Point(room_parameters['source x'],
                                         room_parameters['source z'],
@@ -230,10 +280,10 @@ def calculate_ho_sdn_rir(room_parameters, room, Fs, duration, order=2):
                                 ho_params['matrix'])
     
     # Run simulation
-    audio, _, _ = simulate_mod.run() # multiAudio, sdnKickIn
+    rir_ho_sdn, _, _ = simulate_mod.run() # multiAudio, sdnKickIn
     
     # Normalize
-    rir_ho_sdn = audio / np.max(np.abs(audio))
-    label = f'HO-SDN N={ho_params["order"]}'
+    # rir_ho_sdn = rir_ho_sdn / np.max(np.abs(rir_ho_sdn))
+
     
     return rir_ho_sdn, label 

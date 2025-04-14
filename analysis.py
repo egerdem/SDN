@@ -72,7 +72,7 @@ def compute_edc(rir, Fs, label=None, plot=True, color=None):
     
     return edc_db
 
-def calculate_smoothed_energy(rir: np.ndarray, window_length: int = 30, range: int = 50, Fs: int = 44100) -> np.ndarray:
+def calculate_smoothed_energy(rir: np.ndarray, window_length: int = 30, range: int = 50, Fs: int = 44100) -> tuple:
     """Calculate smoothed energy of RIR for the early part.
     
     Args:
@@ -82,8 +82,12 @@ def calculate_smoothed_energy(rir: np.ndarray, window_length: int = 30, range: i
         Fs (int): Sampling frequency (default: 44100 Hz)
         
     Returns:
-        np.ndarray: Smoothed energy of early RIR
+        tuple: (energy, smoothed, err) where:
+            - energy: Raw energy of the early RIR
+            - smoothed: Smoothed energy of early RIR
+            - err: Energy ratio (early/total)
     """
+    
     # Calculate number of samples for the given time range
     range_samples = int((range / 1000) * Fs)  # Convert ms to samples
     
@@ -99,7 +103,9 @@ def calculate_smoothed_energy(rir: np.ndarray, window_length: int = 30, range: i
     smoothed = signal.convolve(energy, window, mode='same')
     # smoothed = signal.convolve(energy, window, mode='full')
 
-    return energy, smoothed
+    # Calculate ERR
+
+    return smoothed
 
 # from scipy import signal
 # energy = rir ** 2
@@ -355,3 +361,146 @@ def plot_spectral_comparison(rir1: np.ndarray, rir2: np.ndarray,
     plt.show()
     
     return lsd  # Return the LSD value for reference
+
+def compute_clarity_c50(rir: np.ndarray, Fs: int) -> float:
+    """Calculate C50 clarity metric from a room impulse response.
+    
+    C50 is the ratio of early energy (0-50ms) to late energy (50ms-end) in dB:
+    C50 = 10 * log10(early_energy / late_energy)
+    
+    Args:
+        rir (np.ndarray): Room impulse response
+        Fs (int): Sampling frequency
+        
+    Returns:
+        float: C50 value in dB
+    """
+    # Convert 50ms to samples
+    early_samples = int(0.05 * Fs)
+    
+    # Ensure we don't exceed the length of the RIR
+    early_samples = min(early_samples, len(rir))
+    
+    # Calculate early and late energy
+    early_energy = np.sum(rir[:early_samples]**2)
+    late_energy = np.sum(rir[early_samples:]**2)
+
+    # Calculate C50 in dB
+    try:
+        c50 = 10 * np.log10(early_energy / late_energy)
+    except ZeroDivisionError:
+        print("Warning: Division by zero in C50 calculation.")
+    
+    return c50
+
+def compute_clarity_c80(rir: np.ndarray, Fs: int) -> float:
+    """Calculate C80 clarity metric from a room impulse response.
+    
+    C80 is the ratio of early energy (0-80ms) to late energy (80ms-end) in dB:
+    C80 = 10 * log10(early_energy / late_energy)
+    
+    Args:
+        rir (np.ndarray): Room impulse response
+        Fs (int): Sampling frequency
+        
+    Returns:
+        float: C80 value in dB
+    """
+    # Convert 80ms to samples
+    early_samples = int(0.08 * Fs)
+    
+    # Ensure we don't exceed the length of the RIR
+    early_samples = min(early_samples, len(rir))
+    
+    # Calculate early and late energy
+    early_energy = np.sum(rir[:early_samples]**2)
+    late_energy = np.sum(rir[early_samples:]**2)
+
+    # Calculate C80 in dB
+    try:
+        c80 = 10 * np.log10(early_energy / late_energy)
+    except ZeroDivisionError:
+        print("Warning: Division by zero in C50 calculation.")
+    
+    return c80
+
+def compute_all_metrics(rir: np.ndarray, Fs: int = 44100) -> dict:
+    """Compute all acoustic metrics for a room impulse response.
+    
+    Args:
+        rir (np.ndarray): Room impulse response
+        Fs (int): Sampling frequency (default: 44100 Hz)
+        
+    Returns:
+        dict: Dictionary containing all computed metrics
+    """
+    metrics = {}
+    
+    # Compute EDC
+    metrics['edc'] = compute_edc(rir, Fs, plot=False)
+    
+    # Compute clarity metrics
+    metrics['c50'] = compute_clarity_c50(rir, Fs)
+    metrics['c80'] = compute_clarity_c80(rir, Fs)
+    
+    # Compute LSD (comparing with itself, should be 0)
+    metrics['lsd'] = compute_LSD(rir, rir, Fs)
+    
+    return metrics
+
+def compare_metrics(rir1: np.ndarray, rir2: np.ndarray, Fs: int = 44100) -> dict:
+    """Compare metrics between two room impulse responses.
+    
+    Args:
+        rir1 (np.ndarray): First room impulse response
+        rir2 (np.ndarray): Second room impulse response
+        Fs (int): Sampling frequency (default: 44100 Hz)
+        
+    Returns:
+        dict: Dictionary containing metrics for both RIRs and their differences
+    """
+    # Compute metrics for both RIRs
+    metrics1 = compute_all_metrics(rir1, Fs)
+    metrics2 = compute_all_metrics(rir2, Fs)
+    
+    # Compute differences
+    differences = {}
+    for key in metrics1:
+        if key == 'edc':
+            # For EDC, compute RMS difference
+            differences[key] = np.sqrt(np.mean((metrics1[key] - metrics2[key])**2))
+        else:
+            # For scalar metrics, compute absolute difference
+            differences[key] = abs(metrics1[key] - metrics2[key])
+    
+    return {
+        'rir1': metrics1,
+        'rir2': metrics2,
+        'differences': differences
+    }
+
+def calculate_err(rir: np.ndarray, early_range: int = 50, Fs: int = 44100) -> float:
+    """Calculate Energy Ratio (ERR) metric from a room impulse response.
+    
+    ERR is the ratio of early energy (0-early_range ms) to total energy:
+    ERR = early_energy / total_energy
+    
+    Args:
+        rir (np.ndarray): Room impulse response
+        early_range (int): Time range in milliseconds for early energy (default: 50ms)
+        Fs (int): Sampling frequency (default: 44100 Hz)
+        
+    Returns:
+        float: ERR value (ratio between 0 and 1)
+    """
+    # Calculate total energy of the full RIR
+    energy = rir**2
+    
+    # Calculate early energy (first early_range ms)
+    early_samples = int((early_range / 1000) * Fs)  # Convert ms to samples
+    early_energy = rir[:early_samples]**2
+    
+    # Calculate ERR
+    ERR = np.sum(rir[:early_samples]**2) / np.sum(rir**2)
+    
+    return early_energy, energy, ERR

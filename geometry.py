@@ -313,12 +313,32 @@ def get_best_reflection_target(wall_id: str, mappings: Dict) -> str:
     Returns:
         Wall ID of best reflection target
     """
-    if wall_id not in mappings['node_mappings']:
-        return None
+    # if wall_id not in mappings['node_mappings']:
+    #     return None
         
     # Find wall with smallest reflection angle
     angles = mappings['node_mappings'][wall_id]
     return min(angles.items(), key=lambda x: x[1])[0]
+
+def get_best_reflection_targets(wall_id: str, mappings: Dict, num_targets: int = 2) -> List[str]:
+    """Get the wall IDs that best match the specular reflection direction.
+    
+    Args:
+        wall_id: Current wall ID
+        mappings: Angle mappings dictionary from build_angle_mappings()
+        num_targets: Number of best targets to return (default: 2)
+        
+    Returns:
+        List of wall IDs of best reflection targets, sorted by angle (smallest first)
+    """
+    if wall_id not in mappings['node_mappings']:
+        return []
+        
+    # Find walls with smallest reflection angles
+    angles = mappings['node_mappings'][wall_id]
+    # Sort by angle and get the specified number of targets
+    sorted_targets = sorted(angles.items(), key=lambda x: x[1])[:num_targets]
+    return [target[0] for target in sorted_targets]
 
 def build_specular_matrices_from_angles(room: Room) -> Dict[str, np.ndarray]:
     """Build specular scattering matrices based on node-to-node angle mappings.

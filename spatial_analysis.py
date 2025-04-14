@@ -102,7 +102,8 @@ def plot_rirs(rir_methods: Dict, receiver_positions: List[Tuple[float, float]],
     plt.tight_layout()
     plt.show()
 
-def spatial_error_analysis(room_params: dict, source_pos: Tuple[float, float, float], receiver_positions: List[Tuple[float, float]],
+def spatial_error_analysis(room_params: dict, source_pos: Tuple[float, float, float],
+                           receiver_positions: List[Tuple[float, float]],
                          duration: float, Fs: int, methods: List[str], 
                          method_configs: Dict,
                          comparison_type: str = "smoothed_energy",
@@ -348,6 +349,7 @@ if __name__ == "__main__":
     }
 
     room = room_sdn_original
+    room_parameters = room_sdn_original
 
     # Method configurations
     method_configs = {
@@ -395,7 +397,7 @@ if __name__ == "__main__":
     enabled_methods = [method for method, config in method_configs.items() 
                       if config['enabled']]
 
-    room_parameters = room_sdn_original
+
     source_position = (room_parameters['source x'], 
                       room_parameters['source y'], 
                       room_parameters['source z'])

@@ -16,7 +16,7 @@ __pycache__/
 # Ignore video files
 *.mov
 *.mp4
-
+*.wav
 # Ignore document files
 *.docx
 *.pdf
@@ -27,6 +27,6 @@ copy_of_treble_tsdk/
 tsdk-onboarding-notebook/
 results/
 experiments/
-
+audio/
 SDN-Simplest_Hybrid_HO-SDN/
 ```

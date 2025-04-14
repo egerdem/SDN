@@ -22,56 +22,74 @@ class PathCalculator(ABC):
     def calculate_paths_up_to_order(self, max_order: int):
         pass
 
-    def analyze_paths(self, max_order: int = 3):
+    def analyze_paths(self, max_order: int = 3, print_invalid: bool = False):
         """Calculate and analyze paths for this calculator.
         
         Args:
             max_order: Maximum reflection order to analyze
+            print_invalid: Whether to print the invalid paths analysis
             
         Returns:
             For ISMCalculator: List of invalid paths, where each path is a list of node labels
                              ['s', 'wall1', 'wall2', ..., 'm']
             For SDNCalculator: None (all SDN paths are valid by definition)
         """
-        # Calculate paths
-        self.calculate_paths_up_to_order(max_order)
+        # Only calculate paths if they haven't been calculated yet
+        if not any(self.path_tracker.get_paths_by_order(order, 'ISM') for order in range(max_order + 1)):
+            self.calculate_paths_up_to_order(max_order)
         
         if isinstance(self, ISMCalculator):
-            # Print invalid ISM paths
-            print("\n=== Invalid ISM Paths ===")
             invalid_paths = []
             for order in range(max_order + 1):
                 paths = self.path_tracker.get_paths_by_order(order, 'ISM')
                 invalid_paths.extend([p.nodes for p in paths if not p.is_valid])
             
-            if invalid_paths:
-                print(f"Found {len(invalid_paths)} invalid paths:")
-                for path in invalid_paths[:10]:  # Print first 10 invalid paths
-                    print(f"  {' -> '.join(path)}")
-                if len(invalid_paths) > 10:
-                    print(f"  ... and {len(invalid_paths) - 10} more")
-            else:
-                print("No invalid paths found")
+            if print_invalid:
+                print("\n=== Invalid ISM Paths ===")
+                if invalid_paths:
+                    print(f"Found {len(invalid_paths)} invalid paths:")
+                    for path in invalid_paths[:10]:  # Print first 10 invalid paths
+                        print(f"  {' -> '.join(path)}")
+                    if len(invalid_paths) > 10:
+                        print(f"  ... and {len(invalid_paths) - 10} more")
+                else:
+                    print("No invalid paths found")
             
             return invalid_paths
 
     @staticmethod
-    def compare_paths(sdn_calc: 'SDNCalculator', ism_calc: 'ISMCalculator', max_order: int = 3):
+    def compare_paths(sdn_calc: 'SDNCalculator', ism_calc: 'ISMCalculator', max_order: int = 3, print_comparison: bool = False):
         """Compare paths between SDN and ISM calculators.
         
         Args:
             sdn_calc: SDN calculator instance
             ism_calc: ISM calculator instance
             max_order: Maximum reflection order to analyze
+            print_comparison: Whether to print the path comparison table
             
         Returns:
-            None. Prints comparison table to console.
+            None. Optionally prints comparison table to console if print_comparison is True.
         """
-        # Calculate paths for both methods
-        sdn_calc.calculate_paths_up_to_order(max_order)
-        ism_calc.calculate_paths_up_to_order(max_order)
+        # Check if paths need to be calculated for SDN
+        if not any(sdn_calc.path_tracker.get_paths_by_order(order, 'SDN') for order in range(max_order + 1)):
+            sdn_calc.calculate_paths_up_to_order(max_order)
+            
+        # Check if paths need to be calculated for ISM
+        if not any(ism_calc.path_tracker.get_paths_by_order(order, 'ISM') for order in range(max_order + 1)):
+            ism_calc.calculate_paths_up_to_order(max_order)
         
-        # Print path comparison
+        # Print path comparison if requested
+        if print_comparison:
+            PathCalculator.print_path_comparison(sdn_calc, ism_calc)
+    
+    @staticmethod
+    def print_path_comparison(sdn_calc: 'SDNCalculator', ism_calc: 'ISMCalculator'):
+        """Print comparison table between SDN and ISM paths.
+        
+        Args:
+            sdn_calc: SDN calculator instance with calculated paths
+            ism_calc: ISM calculator instance with calculated paths
+        """
         print("\n=== Path Comparison between ISM and SDN ===")
         sdn_calc.path_tracker.print_path_comparison()
 
