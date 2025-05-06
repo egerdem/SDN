@@ -797,8 +797,8 @@ class ExperimentLoaderManager:
 if __name__ == "__main__":
 
     results_dir = 'results'
-    IS_SINGULAR = True  # Set to False for batch processing
-    IS_BATCH = False  # Set to True for batch processing
+    IS_SINGULAR = False  # Set to False for batch processing
+    IS_BATCH = True  # Set to True for batch processing
 
     # Display available projects for both modes
     singular_category, singular_projects = ExperimentLoaderManager.get_available_projects(results_dir, mode='singular')
@@ -830,7 +830,7 @@ if __name__ == "__main__":
         import importlib
         importlib.reload(sev)
         single_visualizer = sev.ExperimentVisualizer(singular_manager)
-        single_visualizer.show(port=1991, include_bongo=True)
+        single_visualizer.show(port=1991)
 
 
     elif IS_BATCH: # Batch processing
