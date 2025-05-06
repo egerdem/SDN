@@ -12,19 +12,25 @@ from rir_calculators import calculate_pra_rir, calculate_rimpy_rir,calculate_sdn
 from rir_calculators import calculate_ho_sdn_rir, rir_normalisation
 
 """ Method flags """
-PLOT_SDN_BASE = True
-RUN_SDN_Test1 = False
+PLOT_SDN_BASE = False
+RUN_SDN_Test0 = True
+RUN_SDN_Test1 = True
 RUN_SDN_Test2 = True
-RUN_SDN_Test3 = True
+RUN_SDN_Test3 = False
 RUN_SDN_Test4 = True
 RUN_SDN_Test5 = True
 RUN_SDN_Test6 = True
 
+RUN_HO_N2 = False
+RUN_HO_N2g = False
+RUN_HO_N3 = False
+RUN_HO_N3g = False
+
 PLOT_TREBLE = False
 
 PLOT_ISM_with_pra = True
-PLOT_ISM_rimPy_pos = True  # rimPy ISM with positive reflection
-PLOT_ISM_rimPy_neg = True  # rimPy ISM with negative reflection
+PLOT_ISM_rimPy_pos = False  # rimPy ISM with positive reflection
+PLOT_ISM_rimPy_neg = False  # rimPy ISM with negative reflection
 pra_order = 100
 
 PICKLE_LOAD_RIRS = False  # Load RIRs from pickle file
@@ -56,8 +62,10 @@ plot_smoothed_rirs = False
 room_waspaa = {
         'display_name': 'WASPAA Room',
         'width': 6, 'depth': 7, 'height': 4,
-        'source x': 3.6, 'source y': 5.3, 'source z': 1.3,
-        'mic x': 1.2, 'mic y': 1.8, 'mic z': 2.4,
+        # 'source x': 3.6, 'source y': 5.3, 'source z': 1.3,
+        'source x': 3.6, 'source y': 6, 'source z': 1.3,
+        # 'mic x': 1.2, 'mic y': 1.8, 'mic z': 2.4,
+        'mic x': 1.833333, 'mic y': 3, 'mic z': 2.4,
         'absorption': 0.1,
     }
 
@@ -80,10 +88,20 @@ room_journal = {
         'absorption': 0.1,
     }
 
-room_parameters = room_waspaa  # Choose the room
+# room_journal_random = {
+#         'display_name': 'Journal Room',
+#         'width': 3.2, 'depth': 4, 'height': 2.7,
+#         'source x': 1.5, 'source y': 2.4, 'source z': 2,
+#         'mic x': 1.3, 'mic y': 3, 'mic z': 1.4,
+#         'absorption': 0.1,
+#     }
+
+room_parameters = room_aes  # Choose the room
+# room_parameters = room_waspaa  # Choose the room
+# room_parameters = room_journal
 
 # Parameters
-duration = 1  # seconds
+duration = 1. # seconds
 duration_in_ms = 1000 * duration  # Convert to milliseconds
 Fs = 44100
 num_samples = int(Fs * duration)
@@ -115,31 +133,109 @@ room.wallAttenuation = [room_parameters['reflection']] * 6
 
 # SDN Test Configurations
 sdn_tests = {
+
+    'TestOptimizer': {
+            'enabled': False,
+            # 'absorption': 0.2,
+            'info': "[9.    5.879 9.    9.    9.    9.   ]",
+            'flags': {
+                'specular_source_injection': True,
+                'injection_c_vector': [9.,    5.879, 9.,    9.,    9.,    9.,   ],
+            },
+            'label': "SDN"
+        },
+
+    'TestX': {
+                'enabled': False,
+                # 'absorption': 0.2,
+                'info': "[4, 4, 1, 1, 1, 1]",
+                'flags': {
+                    'specular_source_injection': True,
+                    'injection_c_vector': [4, 4, 1, 1, 1, 1],
+                },
+                'label': "SDN"
+            },
+
+    'TestY': {
+            'enabled': False,
+            # 'absorption': 0.2,
+            'info': "[ 7.  7.  7.  7.  7. -5.]",
+            'flags': {
+                'specular_source_injection': True,
+                'injection_c_vector': [ 7.,  7.,  7.,  7.,  7., -5.],
+            # "ignore_wall_absorption" : True,
+            # "ignore_src_node_atten" : True,
+            # "ignore_node_mic_atten" : True,
+            },
+            'label': "SDN"
+                },
+
+    'TestZ': {
+            'enabled': False,
+            # 'absorption': 0.2,
+            'info': "[7, 7, -3, -3, -3, 5]",
+            'flags': {
+                'specular_source_injection': True,
+                # 'injection_c_vector': [5, 1, 1, 1, 1, 1],
+                'injection_c_vector': [7, 7, -3, -3, -3, 5],
+            },
+            'label': "SDN"
+                },
+    'TestT': {
+                'enabled': False,
+                # 'absorption': 0.2,
+                'info': "[8, 1, 1, 1, 1, 1]",
+                'flags': {
+                    'specular_source_injection': True,
+                    'injection_c_vector': [8, 1, 1, 1, 1, 1],
+
+                },
+                'label': "SDN"
+            },
+'Test0': {
+            'enabled': RUN_SDN_Test0,
+            # 'absorption': 0.2,
+            # 'info': "[5,4,3,2,1,1]",
+            'info': "c-3",
+            'flags': {
+                'specular_source_injection': True,
+                # 'injection_c_vector': [5, 4, 3, 2, 1, 1],
+                'source_weighting': -3,
+            # 'scattering_matrix_update_coef' : 0.05
+                "ignore_wall_absorption" : True,
+                "ignore_src_node_atten" : True,
+                "ignore_node_mic_atten" : True,
+            },
+            'label': "SDN"
+        },
+
     'Test1': {
         'enabled': RUN_SDN_Test1,
         # 'absorption': 0.2,
-        'info': "orig",
+        'info': "c1 orjinal",
         'flags': {
             'specular_source_injection': True,
             'source_weighting': 1,
+            # 'specular_scattering': True,
         # 'scattering_matrix_update_coef' : 0.05
-        #     "ignore_wall_absorption" : True,
-        #     "ignore_src_node_atten" : True,
-        #     "ignore_node_mic_atten" : True,
+            "ignore_wall_absorption" : True,
+            "ignore_src_node_atten" : True,
+            "ignore_node_mic_atten" : True,
         },
         'label': "SDN"
     },
     'Test2': {
         'enabled': RUN_SDN_Test2,
         # 'absorption': 0.2,
-        'info': "c3 Spec Scat matrix.",
+        'info': "c-2",
         'flags': {
-            # "ignore_wall_absorption" : True,
-            # "ignore_src_node_atten" : True,
-            # "ignore_node_mic_atten" : True,
+            "ignore_wall_absorption" : True,
+            "ignore_src_node_atten" : True,
+            "ignore_node_mic_atten" : True,
             'specular_source_injection': True,
-            'source_weighting': 3,
-            'specular_scattering': True,
+            'source_weighting': -2,
+            'source_pressure_injection_coeff': 1.,
+            'coef': 1/5,
             # 'print_parameter_summary': True,
             # 'scattering_matrix_update_coef' : -0.02
             # 'specular_scattering': True,
@@ -150,13 +246,13 @@ sdn_tests = {
         'enabled': RUN_SDN_Test3,
         # 'absorption': 0.3,
         # 'info': "specular + specular -0.02",
-        'info': "c3",
+        'info': "c-1",
         'flags': {
         # "ignore_wall_absorption" : True,
         # "ignore_src_node_atten" : True,
         # "ignore_node_mic_atten" : True,
         'specular_source_injection': True,
-        'source_weighting': 3,
+        'source_weighting': -1,
         # "source_pressure_injection_coeff": 0.01,
         # "coef": -0.01
         # 'scattering_matrix_update_coef' : -0.02
@@ -167,15 +263,15 @@ sdn_tests = {
     'Test4': {  # New test configuration
             'enabled': RUN_SDN_Test4,
             # 'absorption': 0.3,
-            'info': "c=4",
+            'info': "c2 eq",
             'flags': {
+                "ignore_wall_absorption" : True,
+                "ignore_src_node_atten" : True,
+                "ignore_node_mic_atten" : True,
                 'specular_source_injection': True,
-                # "ignore_wall_absorption" : True,
-                # "ignore_src_node_atten" : True,
-                # "ignore_node_mic_atten" : True,
-                'source_weighting':4,
-                # 'coef': 1/4,
-                # 'source_pressure_injection_coeff': 0.8,
+                'source_weighting':2,
+                'coef': 1/5,
+                'source_pressure_injection_coeff': 1,
             },
             'label': "SDN"
         },
@@ -183,18 +279,14 @@ sdn_tests = {
     'Test5': {  # New test configuration
                 'enabled': RUN_SDN_Test5,
                 # 'absorption': 0.2,
-                'info': "c5 specular scat matrix.",
+                'info': "c3",
                 # 'source_signal': 'gaussian',  # New parameter to specify the source signal type
                 'flags': {
-                # "ignore_wall_absorption" : True,
-                #     "ignore_wall_absorption": True,
-                #     "ignore_src_node_atten": True,
-                #     "ignore_node_mic_atten": True,
-                    'specular_scattering' : True,
-                    'specular_source_injection': True,
-                    'source_weighting': 5,
-                    # 'coef': 1,
-                    # 'source_pressure_injection_coeff': 0.2,
+                "ignore_wall_absorption": True,
+                "ignore_src_node_atten": True,
+                "ignore_node_mic_atten": True,
+                'specular_source_injection': True,
+                'source_weighting': 3,
                 },
                 'label': "SDN Test 5"
             },
@@ -203,10 +295,13 @@ sdn_tests = {
                     # 'absorption': 0.3,
                     'info': "c5",
                     'flags': {
-                        'coef': 0.2, # original : 2/5
-                        'source_pressure_injection_coeff': 1, # original : 1/2
-                        'specular_source_injection': True,
-                        'source_weighting': 5,
+                    'specular_source_injection': True,
+                    'source_weighting': 5,
+                    "ignore_wall_absorption": True,
+                    "ignore_src_node_atten": True,
+                    "ignore_node_mic_atten": True,
+                    'coef': 1,
+                    'source_pressure_injection_coeff': 0.2,
                     },
                     'label': "SDN Test 6"
         }
@@ -215,7 +310,7 @@ sdn_tests = {
 # HO-SDN Test Configurations
 ho_sdn_tests = {
     'N2': {
-        'enabled': True,
+        'enabled': RUN_HO_N2,
         'info': "Dirac",
         'source_signal': 'dirac',
         'order': 2,
@@ -223,7 +318,7 @@ ho_sdn_tests = {
     },
 
     'N2g': {
-            'enabled': False,
+            'enabled': RUN_HO_N2g,
             'info': "Gaussian",
             'source_signal': 'gaussian',
             'order': 2,
@@ -231,7 +326,7 @@ ho_sdn_tests = {
         },
 
     'N3': {
-        'enabled': True,
+        'enabled': RUN_HO_N3,
         'info': "Dirac",
         'source_signal': 'dirac',
         'order': 3,
@@ -239,7 +334,7 @@ ho_sdn_tests = {
     },
 
     'N3g': {
-            'enabled': False,
+            'enabled': RUN_HO_N3g,
             'info': "Gaussian",
             'source_signal': 'gaussian',
             'order': 3,
@@ -292,7 +387,7 @@ def run_ho_sdn_test(test_name, config):
     order = config.get('order')  # Default to order 2 if not specified
     
     # Calculate HO-SDN RIR
-    rir, label = calculate_ho_sdn_rir(room_parameters, room, Fs, duration, config['source_signal'], order=order)
+    rir, label = calculate_ho_sdn_rir(room_parameters, Fs, duration, config['source_signal'], order=order)
     
     # Restore original signal
     if 'source_signal' in config:
@@ -523,7 +618,8 @@ if __name__ == '__main__':
 
         rt60_values = {}
         for label, rir in rirs.items():
-            rt60_values[label] = pp.calculate_rt60_from_rir(rir, Fs, plot=False)
+            # rt60_values[label] = pp.calculate_rt60_from_rir(rir, Fs, plot=False)
+            rt60_values[label] = an.calculate_rt60_from_rir(rir, Fs, plot=False)
 
         print("\nReverberation Time Analysis:")
         print("-" * 50)
@@ -683,8 +779,8 @@ if __name__ == '__main__':
             label1, label2 = pair_info['label1'], pair_info['label2']
 
             # Calculate EDCs for both RIRs without plotting
-            edc1 = an.compute_edc(rirs[label1], Fs, label1, plot=False)
-            edc2 = an.compute_edc(rirs[label2], Fs, label2, plot=False)
+            edc1, _,_ = an.compute_edc(rirs[label1], Fs, label1, plot=False)
+            edc2, _,_ = an.compute_edc(rirs[label2], Fs, label2, plot=False)
 
             # Compare EDCs
             rms_diff = an.compute_RMS(edc1, edc2, range=50, Fs=Fs, method="mae")  # range=50ms

@@ -65,7 +65,8 @@ from sdn_experiment_manager import Room
 class SDNExperiment:
     """Class to store and manage acoustic simulation experiment data and metadata."""
     
-    def __init__(self, config, rir, fs=44100, duration=0.5, experiment_id=None):
+    def __init__(self, config, rir, fs=44100, duration=0.5, experiment_id=None, skip_metrics=False):
+        # note: skip_metrics is not fully correct yet. due to table retrieval error. only use it if you dont need table error ui.
         """
         Initialize an acoustic simulation experiment.
         
@@ -83,7 +84,10 @@ class SDNExperiment:
         self.timestamp = datetime.now().isoformat()
         self._metrics_calculated = False
         self.metrics = {}
-        self._calculate_metrics()
+        self.skip_metrics = skip_metrics
+
+        if not self.skip_metrics:
+            self._calculate_metrics()
         
         # Generate a unique ID if not provided
         if experiment_id is None:
@@ -171,6 +175,7 @@ class SDNExperiment:
         """Ensure metrics are calculated if they haven't been already."""
         if not hasattr(self, '_metrics_calculated') or not self._metrics_calculated:
             self._calculate_metrics()
+        print("ensure ")
     
     def _calculate_metrics(self):
         """Calculate various acoustic metrics for the RIR."""
@@ -185,27 +190,42 @@ class SDNExperiment:
             self._metrics_calculated = True
             return
         
-        # Calculate RT60 if the RIR is long enough
+        # Calculate EDC once to avoid duplication - now getting both EDC curve and raw energy
+        self.edc, time_edc, schroder_energy = an.compute_edc(self.rir, self.fs, label=self.get_label(), plot=False)
+        
+        # Calculate RT60 if the RIR is long enough - use the pre-calculated EDC and raw energy
         if self.duration > 0.7:
-            self.metrics['rt60'] = pp.calculate_rt60_from_rir(self.rir, self.fs, plot=False)
+            # Pass the pre-calculated EDC and raw energy to the RT60 calculation function
+            self.metrics['rt60'] = an.calculate_rt60_from_rir(
+                self.rir, 
+                self.fs, 
+                plot=False, 
+                pre_calculated_edc=self.edc,
+                schroder_energy=schroder_energy
+            )
         
-        # Calculate EDC
-        self.edc = an.compute_edc(self.rir, self.fs, label=self.get_label(), plot=False)
-        
-        # Calculate NED
-        self.ned = ned.echoDensityProfile(self.rir, fs=self.fs)
+        # Calculate NED - limit to first 0.5 seconds by default and downsample to 22050 Hz
+        # This significantly reduces computation time for long RIRs
+        self.ned = ned.echoDensityProfile(
+            self.rir, 
+            fs=self.fs, 
+            max_duration=0.5,
+        )
         
         # Time axis for plotting
         self.time_axis = np.arange(len(self.rir)) / self.fs
         self.ned_time_axis = np.arange(len(self.ned)) / self.fs
-        
+        self.edc_time_axis = time_edc
         self._metrics_calculated = True
     
     # Add property accessors that ensure metrics are calculated
     @property
     def rt60(self):
         """Get RT60 value, calculating metrics if needed."""
-        self.ensure_metrics_calculated()
+        if self.skip_metrics:
+            return None
+        else:
+            self.ensure_metrics_calculated()
         return self.metrics.get('rt60', None)
 
     
@@ -306,7 +326,8 @@ class SDNExperiment:
 class ExperimentLoaderManager:
     """Class to manage loading and accessing acoustic simulation experiments from storage."""
     
-    def __init__(self, results_dir='results', is_batch_manager=False, project_names=None):
+    def __init__(self, results_dir='results', is_batch_manager=False, project_names=None, disable_unified_rooms=True, skip_metrics=False):
+        #note: skip_metrics is not fully correct yet. due to table retrieval error. only use it if you dont need table error ui.
         """
         Initialize the experiment manager.
         
@@ -319,11 +340,15 @@ class ExperimentLoaderManager:
                 - list: Load multiple specific projects
                 For batch_manager=True, these are folder names in 'results/rooms/'
                 For batch_manager=False, these are folder names in 'results/room_singulars/'
+            disable_unified_rooms (bool): If True, only create individual rooms for singular mode 
+                                         (saves memory by not duplicating experiments in unified rooms)
         """
         self.results_dir = results_dir
         self.is_batch_manager = is_batch_manager
         self.projects = {}  # name -> Room
         self.project_names = project_names
+        self.disable_unified_rooms = disable_unified_rooms
+        self.skip_metrics = skip_metrics
         self.ensure_dir_exists()
         self.load_experiments()
 
@@ -358,20 +383,23 @@ class ExperimentLoaderManager:
         return folder_name.upper()
 
     @staticmethod
-    def print_projects(projects_dict, title="Available projects by category"):
+    def print_projects(projects_dict, projects_list, title="Available projects"):
         """Print available projects by category in a formatted way.
         
         Args:
             projects_dict (dict): Dictionary with categories as keys and project lists as values
             title (str): Title to display before the project listing
         """
-        print(f"\n{title}:")
+        print(f"\n{title}:\n")
+        for i, name in enumerate(projects_list):
+            print(f"  {i}: {name}")
+
+        print("\nby room category:")
         for category, projects in projects_dict.items():
-            print(f"\n{category.upper()}:")
+            print(f"{category.upper()}:")
             for i, project in enumerate(projects):
                 print(f"  {i}: {project}")
-        print()  # Add an empty line for better formatting
-    
+
     @staticmethod
     def get_available_projects(results_dir='results', mode='batch'):
         """Get list of available project names in the results directory.
@@ -397,7 +425,8 @@ class ExperimentLoaderManager:
         if not os.path.exists(target_dir):
             return {}
         
-        projects = {}
+        projects_grouped = {}
+        projectsingular_projects = []
         for name in os.listdir(target_dir):
             path = os.path.join(target_dir, name)
             
@@ -406,8 +435,9 @@ class ExperimentLoaderManager:
             if mode == 'singular':
                 # For singular mode, skip hidden folders and folders starting with underscore
                 is_valid_dir = is_valid_dir and not name.startswith('.') and not name.startswith('_')
-                
+
             if is_valid_dir:
+                projectsingular_projects.append(name)
                 # Determine category based on name prefix
                 if 'aes' in name.lower():
                     category = 'aes'
@@ -418,15 +448,15 @@ class ExperimentLoaderManager:
                 else:
                     category = 'other'
                 
-                if category not in projects:
-                    projects[category] = []
-                projects[category].append(name)
+                if category not in projects_grouped:
+                    projects_grouped[category] = []
+                projects_grouped[category].append(name)
         
         # Sort project names within each category
-        for category in projects:
-            projects[category].sort()
+        for category in projects_grouped:
+            projects_grouped[category].sort()
         
-        return projects
+        return projects_grouped, projectsingular_projects
 
     def load_experiments(self):
         """Load all experiments from the results directory."""
@@ -462,7 +492,7 @@ class ExperimentLoaderManager:
         # SINGULAR EXPERIMENTS
         if not self.is_batch_manager:
             # Singular case: Load from room_singulars with unified rooms
-            unified_rooms = {}  # To collect experiments for unified rooms
+            unified_rooms = {} if not self.disable_unified_rooms else None  # Only create if not disabled
             
             # Process each experiment group (subfolder)
             for folder_name in project_dirs:
@@ -498,14 +528,15 @@ class ExperimentLoaderManager:
                     individual_room.display_name = self.get_display_name_from_folder(folder_name)
                     self.projects[folder_name] = individual_room
 
-                    # Get room type for unified room
-                    room_type = folder_name.split('_')[0].lower()
+                    # Get room type for unified room (if enabled)
+                    if not self.disable_unified_rooms:
+                        room_type = folder_name.split('_')[0].lower()
 
-                    # Create unified room if it doesn't exist
-                    if room_type not in unified_rooms:
-                        unified_room = Room(room_info['name'], room_info['parameters'])
-                        unified_room.display_name = room_info['display_name']
-                        unified_rooms[room_type] = unified_room
+                        # Create unified room if it doesn't exist
+                        if room_type not in unified_rooms:
+                            unified_room = Room(room_info['name'], room_info['parameters'])
+                            unified_room.display_name = room_info['display_name']
+                            unified_rooms[room_type] = unified_room
 
                     # Load experiments using existing logic
                     for file_name in os.listdir(folder_path):
@@ -559,11 +590,15 @@ class ExperimentLoaderManager:
                                         fs=fs,
                                         duration=duration,
                                         experiment_id=experiment_id,
+                                        skip_metrics=self.skip_metrics
                                     )
                                     
-                                    # Add experiment to both individual and unified rooms
+                                    # Add experiment to individual room
                                     individual_room.add_experiment(experiment)
-                                    unified_rooms[room_type].add_experiment(experiment)
+                                    
+                                    # Also add to unified room if enabled
+                                    if not self.disable_unified_rooms:
+                                        unified_rooms[room_type].add_experiment(experiment)
                                     
                                     print(f"Successfully loaded experiment: {file_name} with ID: {experiment_id}")
                                 except Exception as e:
@@ -575,10 +610,11 @@ class ExperimentLoaderManager:
                 except Exception as e:
                     print(f"Error processing folder {folder_name}: {str(e)}")
 
-            # Add unified rooms to self.projects
-            for unified_room in unified_rooms.values():
-                self.projects[unified_room.name] = unified_room
-                print(f"Created unified room {unified_room.display_name} with {len(unified_room.experiments)} total experiments")
+            # Add unified rooms to self.projects if not disabled
+            if not self.disable_unified_rooms:
+                for unified_room in unified_rooms.values():
+                    self.projects[unified_room.name] = unified_room
+                    print(f"Created unified room {unified_room.display_name} with {len(unified_room.experiments)} total experiments")
 
         # BATCH EXPERIMENTS
         else:
@@ -620,76 +656,86 @@ class ExperimentLoaderManager:
                     room = Room(project_name, room_parameters)
                     room.display_name = self.get_display_name_from_folder(project_name)
                     
-                    # Count total sources for progress tracking
-                    source_dirs = [src_folder for src_folder in os.listdir(project_path) if os.path.isdir(os.path.join(project_path, src_folder))]
-                    total_sources = len(source_dirs)
+                    # Use os.walk to traverse the directory structure once
+                    # This eliminates multiple os.listdir() calls
+                    print(f"Scanning directory structure for {project_name}...")
                     
-                    # Load sources directly from room directory
-                    for source_idx, source_label in enumerate(source_dirs, 1):
-                        source_path = os.path.join(project_path, source_label)
-                        print(f"\n  [{source_idx}/{total_sources}] Processing source: {source_label}")
-                        
-                        # Count total methods for this source
-                        method_dirs = [d for d in os.listdir(source_path) if os.path.isdir(os.path.join(source_path, d))]
-                        total_methods = len(method_dirs)
-                        
-                        # For each method directory
-                        for method_idx, method in enumerate(method_dirs, 1):
-                            method_path = os.path.join(source_path, method)
-                            print(f"    [{method_idx}/{total_methods}] Loading method: {method}")
+                    # Structure to store all paths
+                    all_experiment_paths = []
+                    
+                    # Walk through the project directory to find all config.json and rirs.npy files
+                    for root, dirs, files in os.walk(project_path):
+                        if 'config.json' in files and 'rirs.npy' in files:
+                            # Found a simulation set directory
+                            rel_path = os.path.relpath(root, project_path)
+                            parts = rel_path.split(os.sep)
                             
-                            # Count total parameter sets for this method
-                            param_dirs = [d for d in os.listdir(method_path) if os.path.isdir(os.path.join(method_path, d))]
-                            total_params = len(param_dirs)
+                            # For standard structure with 3 levels: source/method/param_set
+                            if len(parts) >= 3:
+                                source_label = parts[0]
+                                method = parts[1]
+                                param_set = parts[2]
+                                
+                                # Store this path
+                                all_experiment_paths.append({
+                                    'source_label': source_label,
+                                    'method': method,
+                                    'param_set': param_set,
+                                    'config_path': os.path.join(root, 'config.json'),
+                                    'rirs_path': os.path.join(root, 'rirs.npy')
+                                })
+                    
+                    # Report how many experiment paths we found
+                    total_experiments = len(all_experiment_paths)
+                    print(f"Found {total_experiments} experiment configurations in {project_name}")
+                    
+                    # Process each experiment path
+                    for exp_idx, exp_path in enumerate(all_experiment_paths, 1):
+                        source_label = exp_path['source_label']
+                        method = exp_path['method']
+                        param_set = exp_path['param_set']
+                        config_path = exp_path['config_path']
+                        rirs_path = exp_path['rirs_path']
+                        
+                        print(f"  [{exp_idx}/{total_experiments}] Loading {source_label}/{method}/{param_set}")
+                        
+                        try:
+                            with open(config_path, 'r') as f:
+                                config_data = json.load(f)
+                            rirs = np.load(rirs_path)
                             
-                            # For each parameter set directory
-                            for sim_idx, sim_set in enumerate(param_dirs, 1):
-                                sim_path = os.path.join(method_path, sim_set)
-                                print(f"      [{sim_idx}/{total_params}] Loading simulation set: {sim_set}")
-                                
-                                # Load config and RIRs
-                                config_path = os.path.join(sim_path, 'config.json')
-                                rirs_path = os.path.join(sim_path, 'rirs.npy')
-                                
-                                if os.path.exists(config_path) and os.path.exists(rirs_path):
-                                    try:
-                                        with open(config_path, 'r') as f:
-                                            config_data = json.load(f)
-                                        rirs = np.load(rirs_path)
-                                        
-                                        # Get receivers from config.json
-                                        receivers_list_of_dicts = config_data.get('receivers', [])
-                                        total_receivers = len(receivers_list_of_dicts)
+                            # Get receivers from config.json
+                            receivers_list_of_dicts = config_data.get('receivers', [])
+                            total_receivers = len(receivers_list_of_dicts)
 
-                                        # Create experiment objects for each source-receiver pair
-                                        for rec_idx, receiver_single in enumerate(receivers_list_of_dicts, 1):
-
-                                            if rec_idx > len(rirs):
-                                                break
-                                                
-                                            # Create a single experiment config
-                                            receiver_config = config_data.copy()
-                                            # take full config, delete receivers list, put only current receiver
-                                            if 'receivers' in receiver_config:
-                                                del receiver_config['receivers']
-                                            receiver_config['receiver'] = receiver_single
-                                            
-                                            # Create experiment object
-                                            experiment = SDNExperiment(
-                                                config=receiver_config,
-                                                rir=rirs[rec_idx-1],
-                                                fs=config_data.get('fs'),
-                                                duration=config_data.get('duration'),
-                                                experiment_id=receiver_single.get('experiment_id'),
-                                            )
-                                            
-                                            # Add experiment to room
-                                            room.add_experiment(experiment)
-                                        
-                                        print(f"        Successfully loaded {total_receivers} receivers")
-                                        
-                                    except Exception as e:
-                                        print(f"        Error loading experiments from {sim_path}: {e}")
+                            # Create experiment objects for each source-receiver pair
+                            for rec_idx, receiver_single in enumerate(receivers_list_of_dicts, 1):
+                                if rec_idx > len(rirs):
+                                    break
+                                    
+                                # Create a single experiment config
+                                receiver_config = config_data.copy()
+                                # take full config, delete receivers list, put only current receiver
+                                if 'receivers' in receiver_config:
+                                    del receiver_config['receivers']
+                                receiver_config['receiver'] = receiver_single
+                                
+                                # Create experiment object
+                                experiment = SDNExperiment(
+                                    config=receiver_config,
+                                    rir=rirs[rec_idx-1],
+                                    fs=config_data.get('fs'),
+                                    duration=config_data.get('duration'),
+                                    experiment_id=receiver_single.get('experiment_id'),
+                                )
+                                
+                                # Add experiment to room
+                                room.add_experiment(experiment)
+                            
+                            print(f"    Successfully loaded {total_receivers} receivers")
+                            
+                        except Exception as e:
+                            print(f"    Error loading experiments from {param_set}: {e}")
                     
                     # Only add room if it has valid experiments
                     if room.experiments:
@@ -746,62 +792,83 @@ class ExperimentLoaderManager:
         return experiments
 
 
-from sdn_experiment_visualizer import ExperimentVisualizer
-# Create a visualizer using the batch manager
 
 # Example usage in main:
 if __name__ == "__main__":
 
     results_dir = 'results'
-    IS_SINGULAR = False  # Set to False for batch processing
+    IS_SINGULAR = True  # Set to False for batch processing
+    IS_BATCH = False  # Set to True for batch processing
 
     # Display available projects for both modes
-    singular_projects = ExperimentLoaderManager.get_available_projects(results_dir, mode='singular')
-    ExperimentLoaderManager.print_projects(singular_projects, "Available singular projects by category")
+    singular_category, singular_projects = ExperimentLoaderManager.get_available_projects(results_dir, mode='singular')
+    ExperimentLoaderManager.print_projects(singular_category, singular_projects, "Available singular projects:")
     
-    batch_projects = ExperimentLoaderManager.get_available_projects(results_dir, mode='batch')
-    ExperimentLoaderManager.print_projects(batch_projects, "Available batch projects by category")
+    batch_category, batch_projects = ExperimentLoaderManager.get_available_projects(results_dir, mode='batch')
+    ExperimentLoaderManager.print_projects(batch_category, batch_projects, "Available batch projects:")
 
     if IS_SINGULAR:
         # Example 1: Load all singular experiments
-        # singular_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=False)
+        singular_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=False, 
+                                                  )
         
         # Example 2: Load a single specific singular experiment folder
-        singular_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=False, 
-                                                  project_names="temp_room_aes")
+        # singular_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=False, 
+        #                                           project_names="waspaa_rr", 
+        #                                           )
         
         # Example 3: Load multiple specific singular experiment folders
         # singular_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=False, 
-        #                                           project_names=["aes_quartergrid", "journal_experiment1"])
-        
+        #                                           project_names=["aes_quartergrid", "journal_experiment1"],
+        #                                           )
+
+        from sdn_experiment_visualizer import ExperimentVisualizer
         single_visualizer = ExperimentVisualizer(singular_manager)
-        single_visualizer.show(port=1999)
-
-        # import sdn_experiment_visualizer as sev
-        # import importlib
-        # importlib.reload(sev)
-        # single_visualizer = sev.ExperimentVisualizer(singular_manager)
-        # single_visualizer.show(port=1983)
-
-    else: # Batch processing
-        # Example 1: Load all batch projects
-        # batch_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=True)
-
-        # Example 2: Load a single specific batch project
-        batch_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=True, 
-                                               project_names="aes_quartergrid_new")
-
-        # Example 3: Load multiple specific batch projects
-        # aes_projects = batch_projects.get('aes', [])
-        # if len(aes_projects) >= 2:
-        #     batch_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=True, 
-        #                                            project_names=aes_projects[:2])
-        
-        batch_visualizer = ExperimentVisualizer(batch_manager)
-        batch_visualizer.show(port=2029)
+        single_visualizer.show(port=1991)
 
         import sdn_experiment_visualizer as sev
         import importlib
         importlib.reload(sev)
-        batch_visualizer = sev.ExperimentVisualizer(batch_manager)
-        batch_visualizer.show(port=2048)
+        single_visualizer = sev.ExperimentVisualizer(singular_manager)
+        single_visualizer.show(port=1991, include_bongo=False)
+
+
+    elif IS_BATCH: # Batch processing
+
+
+        # Example 3: Load multiple specific batch projects
+        #get list of categorized projects
+        aes_projects = batch_category.get('aes', [])
+        waspaa_projects = batch_category.get('waspaa', [])
+        journal_projects = batch_category.get('journal', [])
+
+        multiple_projects = False  # Set to True to select specific projects
+        if multiple_projects:
+            selected_projects = [batch_projects[0], batch_projects[1], batch_projects[3]]
+            print("selected projects: ", selected_projects)
+            batch_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=True, project_names=selected_projects)
+
+        else:
+            # Example 1: Load all batch projects
+            # batch_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=True)
+
+            # Example 2: Load a single specific batch project
+            batch_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=True,
+                                                    project_names="aes_quartergrid_new")
+
+        from sdn_experiment_visualizer import ExperimentVisualizer
+        batch_visualizer = ExperimentVisualizer(batch_manager)
+        # generate random 4 digit with python random
+        import random
+        port_no = random.randint(1000, 9999)
+        batch_visualizer.show(port=port_no)
+        #
+        # # # # import analysis as an
+        # import importlib
+        # # importlib.reload(an)
+        # import sdn_experiment_visualizer as sev
+        # importlib.reload(sev)
+        # import random
+        # port_no = random.randint(1000, 9999)
+        # batch_visualizer = sev.ExperimentVisualizer(batch_manager)
+        # batch_visualizer.show(port=port_no)

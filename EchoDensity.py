@@ -27,16 +27,40 @@ window_type should be one of ['rect', 'bart', 'blac', 'hamm', 'hann']
 
 def echoDensityProfile(rir,
                        window_lentgh_ms=30, window_type='hann', #was 30
-                       fs=44100, use_local_avg=False):
+                       fs=44100, use_local_avg=False, max_duration=0.5):
+    """Calculate echo density profile of a room impulse response.
+    
+    Args:
+        rir: Room impulse response
+        window_lentgh_ms: Window length in milliseconds
+        window_type: Type of window ('rect', 'hann', 'hamm', 'blac', 'bart')
+        fs: Sampling frequency in Hz
+        use_local_avg: Whether to use local average for standard deviation
+        max_duration: Maximum duration in seconds to calculate NED (default: 0.5s)
+                     Set to None to process the entire RIR
+        target_fs: Target sampling frequency in Hz for downsampling (default: None)
+                  If provided and lower than fs, the RIR will be downsampled
+                  before processing to reduce computation time
+    
+    Returns:
+        numpy.ndarray: Echo density profile
+    """
+    # First, limit RIR to max_duration if specified (do this only once)
+    if max_duration is not None:
+        max_samples = int(max_duration * fs)
+        rir_limited = rir[:max_samples]
+    else:
+        rir_limited = rir
+    # Calculate window length in frames based on the working sampling rate
     window_length_frames = int(window_lentgh_ms * fs/1000)
 
     if not window_length_frames % 2:
         window_length_frames += 1
     half_window = int((window_length_frames-1)/2)
 
-    padded_rir = np.zeros(len(rir) + 2*half_window)
-    padded_rir[half_window:-half_window] = rir
-    output = np.zeros(len(rir) + 2*half_window)
+    padded_rir = np.zeros(len(rir_limited) + 2*half_window)
+    padded_rir[half_window:-half_window] = rir_limited
+    output = np.zeros(len(rir_limited) + 2*half_window)
 
     if window_type == 'rect':
         window_func = (1/window_length_frames) * np.ones(window_length_frames)
@@ -55,7 +79,7 @@ def echoDensityProfile(rir,
     else:
         raise ValueError('Unavailable window type.')
 
-    for cursor in range(len(rir)):
+    for cursor in range(len(rir_limited)):
         frame = padded_rir[cursor:cursor+window_length_frames]
         std = weightedStd(frame, window_func, use_local_avg)
 
@@ -63,7 +87,9 @@ def echoDensityProfile(rir,
 
         output[cursor] = (1/ERFC) * count
 
-    return output[:-2*window_length_frames]
+    ned_profile = output[:-2*half_window]
+
+    return ned_profile
 
 """
 Computes the non-normalized Echo Density Profile.

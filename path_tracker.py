@@ -290,7 +290,7 @@ if __name__ == "__main__":
     # Plot ISM points
     ism_orders = []
     ism_times = []
-    for order in range(1, 5):  # 1 to 4 (ISM doesn't have 0th order)
+    for order in range(1, N+1):  # 1 to 4 (ISM doesn't have 0th order)
         if order in TOA_order_ISM:
             ism_orders.append(order)
             ism_times.append(TOA_order_ISM[order])

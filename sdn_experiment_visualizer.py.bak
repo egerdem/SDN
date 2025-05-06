@@ -13,6 +13,7 @@ import plot_room as pp
 import EchoDensity as ned
 import plotly.express as px
 import time
+import flask
 
 class ExperimentVisualizer:
     print("visualizer started")
@@ -47,8 +48,6 @@ class ExperimentVisualizer:
         self.metrics_cache = {}
         # Flag to control whether to use on-demand calculations
         self.use_on_demand_calculations = False
-        # Flag to control whether to include bongo convolution
-        self.include_bongo = True
         
         # Import analysis modules and store them as class attributes
         # This makes them accessible in callback functions via self
@@ -339,7 +338,7 @@ class ExperimentVisualizer:
         
         return fig
 
-    def show(self, is_batch=True, port=9050, use_on_demand_calculations=False, include_bongo=True):
+    def show(self, is_batch=True, port=9050, use_on_demand_calculations=False):
         """
         Launch the visualization dashboard.
         
@@ -347,18 +346,12 @@ class ExperimentVisualizer:
             is_batch (bool): Whether to use batch mode
             port (int): Port number for the Dash server
             use_on_demand_calculations (bool): If True, calculate metrics on demand in the visualizer
-            include_bongo (bool): If True, include bongo convolution feature
         """
         self.use_on_demand_calculations = use_on_demand_calculations
-        self.include_bongo = include_bongo
-        
         if use_on_demand_calculations:
             print("\nUsing ON-DEMAND calculations for EDC and NED (may affect UI responsiveness).")
             print("This mode is useful for testing algorithm changes without reloading data.\n")
             
-        if not include_bongo:
-            print("\nBongo convolution feature is disabled.\n")
-
         # Get the appropriate manager if not provided
         if self.manager is None:
             self.manager = get_batch_manager() if is_batch else get_singular_manager()
@@ -375,6 +368,30 @@ class ExperimentVisualizer:
         def add_header(response):
             response.headers["ngrok-skip-browser-warning"] = "true"
             return response
+            
+        # Add route for on-demand convolved audio
+        @app.server.route('/get-convolved-audio')
+        def get_convolved_audio():
+            experiment_id = flask.request.args.get('id')
+            if not experiment_id:
+                return flask.jsonify({'error': 'No experiment ID provided'}), 400
+                
+            # Find the experiment in the manager
+            experiment = None
+            for room_name, room in self.manager.projects.items():
+                for exp in room.experiments.values():
+                    if exp.experiment_id == experiment_id:
+                        experiment = exp
+                        break
+                if experiment:
+                    break
+                    
+            if not experiment:
+                return flask.jsonify({'error': 'Experiment not found'}), 404
+                
+            # Generate convolved audio
+            convolved_audio = self.generate_convolved_audio_data(experiment.rir, experiment.fs, experiment_id)
+            return flask.jsonify({'audio': convolved_audio})
 
         # Dark theme colors
         dark_theme = {
@@ -694,7 +711,16 @@ class ExperimentVisualizer:
                                     markdown_options={'html': True},
                                     columns=[
                                         {'name': 'Play', 'id': 'play', 'presentation': 'markdown'},
-                                    ]
+                                        {'name': 'Bongo', 'id': 'play_convolved', 'presentation': 'markdown'},  # New column for convolved audio
+                                        {'name': 'ID', 'id': 'id'},
+                                        {'name': 'Method', 'id': 'method'},
+                                        {'name': 'Label', 'id': 'label'},
+                                        {'name': 'RT60', 'id': 'rt60'},
+                                        {'name': 'Total Energy', 'id': 'total_energy'},
+                                        {'name': f'{self.ERROR_METRICS[0]["label"]} [50ms]', 'id': 'error_50ms'},
+                                        {'name': f'{self.ERROR_METRICS[0]["label"]} [500ms]', 'id': 'error_500ms'}
+                                    ],
+                                    data=[]  # Will be populated in callback
                                 ),
                             ], style={'flex': '3'}),
                             # Mean error table
@@ -1004,6 +1030,35 @@ class ExperimentVisualizer:
                                         return;
                                     }
                                     
+                                    // For convolved audio, check if we need to generate it
+                                    if (isConvolved && !audioElement.src) {
+                                        e.target.textContent = '⏳';  // Show loading indicator
+                                        
+                                        // Make an AJAX call to get the convolved audio
+                                        const xhr = new XMLHttpRequest();
+                                        xhr.open('GET', '/get-convolved-audio?id=' + actualId, true);
+                                        xhr.responseType = 'json';
+                                        
+                                        xhr.onload = function() {
+                                            if (xhr.status === 200) {
+                                                // Set the audio source and play
+                                                audioElement.src = 'data:audio/wav;base64,' + xhr.response.audio;
+                                                playAudio(experimentId, e.target);
+                                            } else {
+                                                console.error('Failed to get convolved audio');
+                                                e.target.textContent = '▶';
+                                            }
+                                        };
+                                        
+                                        xhr.onerror = function() {
+                                            console.error('Error in AJAX request for convolved audio');
+                                            e.target.textContent = '▶';
+                                        };
+                                        
+                                        xhr.send();
+                                        return;
+                                    }
+                                    
                                     // Otherwise play the audio
                                     playAudio(experimentId, e.target);
                                 }
@@ -1284,20 +1339,15 @@ class ExperimentVisualizer:
             # Prepare table columns
             columns = [
                 {'name': 'Play', 'id': 'play', 'presentation': 'markdown'},
-            ]
-            
-            if self.include_bongo:
-                columns.append({'name': 'Bongo', 'id': 'play_convolved', 'presentation': 'markdown'})
-                
-            columns.extend([
+                {'name': 'Bongo', 'id': 'play_convolved', 'presentation': 'markdown'},  # New column for convolved audio
                 {'name': 'ID', 'id': 'id'},
                 {'name': 'Method', 'id': 'method'},
                 {'name': 'Label', 'id': 'label'},
                 {'name': 'RT60', 'id': 'rt60'},
                 {'name': 'Total Energy', 'id': 'total_energy'},
-                {'name': f'{error_metric.upper()} [50ms]', 'id': 'error_50ms'},
-                {'name': f'{error_metric.upper()} [500ms]', 'id': 'error_500ms'}
-            ])
+                {'name': f'{self.ERROR_METRICS[0]["label"]} [50ms]', 'id': 'error_50ms'},
+                {'name': f'{self.ERROR_METRICS[0]["label"]} [500ms]', 'id': 'error_500ms'}
+            ]
 
             # Prepare table data
             table_data = []
@@ -1315,6 +1365,7 @@ class ExperimentVisualizer:
                         experiment_id = exp.experiment_id
                         row = {
                             'play': f'<button id="play-button-{experiment_id}" class="play-button">▶</button>',
+                            'play_convolved': f'<button id="play-button-conv_{experiment_id}" class="play-button">▶</button>',
                             'id': idx,
                             'method': exp.config.get('method', 'Unknown'),
                             'label': label_dict['label'],
@@ -1324,9 +1375,6 @@ class ExperimentVisualizer:
                             'error_500ms': 'N/A'
                         }
                         
-                        if self.include_bongo:
-                            row['play_convolved'] = f'<button id="play-button-conv_{experiment_id}" class="play-button">▶</button>'
-
                         # Slice to appropriate time ranges
                         samples_50ms = int(0.05 * ref_exp.fs)
                         samples_500ms = int(0.5 * ref_exp.fs)
@@ -1450,6 +1498,7 @@ class ExperimentVisualizer:
                         label_dict = exp.get_label()
                         table_data.append({
                             'play': f'<button id="play-button-{exp.experiment_id}" class="play-button">▶</button>',
+                            'play_convolved': f'<button id="play-button-conv_{exp.experiment_id}" class="play-button">▶</button>',
                             'id': idx,
                             'method': exp.config.get('method', 'Unknown'),
                             'label': label_dict['label'],
@@ -1458,15 +1507,13 @@ class ExperimentVisualizer:
                             'error_50ms': 'N/A',
                             'error_500ms': 'N/A'
                         })
-                        
-                        if self.include_bongo:
-                            table_data[-1]['play_convolved'] = f'<button id="play-button-conv_{exp.experiment_id}" class="play-button">▶</button>'
             else:
                 # Just populate table with experiment info, no error calculations
                 for idx, exp in enumerate(sorted_experiments, 1):
                     label_dict = exp.get_label()
                     table_data.append({
                         'play': f'<button id="play-button-{exp.experiment_id}" class="play-button">▶</button>',
+                        'play_convolved': f'<button id="play-button-conv_{exp.experiment_id}" class="play-button">▶</button>',
                         'id': idx,
                         'method': exp.config.get('method', 'Unknown'),
                         'label': label_dict['label'],
@@ -1475,9 +1522,6 @@ class ExperimentVisualizer:
                         'error_50ms': 'N/A',
                         'error_500ms': 'N/A'
                     })
-                    
-                    if self.include_bongo:
-                        table_data[-1]['play_convolved'] = f'<button id="play-button-conv_{exp.experiment_id}" class="play-button">▶</button>'
 
             # Create room visualization without error contour
             room_plot = self.create_room_visualization([room], highlight_pos_idx=pos_idx)
@@ -1523,6 +1567,8 @@ class ExperimentVisualizer:
                 
                 # Generate audio data for this experiment
                 audio_data = self.generate_audio_data(exp.rir, exp.fs, experiment_id)
+                # DO NOT generate convolved audio yet - we'll do it on demand
+                # convolved_audio_data = self.generate_convolved_audio_data(exp.rir, exp.fs, experiment_id)
                 
                 # Create hidden audio component
                 audio_components.append(
@@ -1534,19 +1580,16 @@ class ExperimentVisualizer:
                     )
                 )
                 
-                # Add convolved audio only if enabled
-                if self.include_bongo:
-                    convolved_audio_data = self.generate_convolved_audio_data(exp.rir, exp.fs, experiment_id)
-                    
-                    # Create hidden convolved audio component
-                    audio_components.append(
-                        html.Audio(
-                            id=f'audio-conv_{experiment_id}',
-                            src=f'data:audio/wav;base64,{convolved_audio_data}',
-                            controls=True,
-                            style={'display': 'none'}
-                        )
+                # Create empty convolved audio component - we'll set the source on demand
+                audio_components.append(
+                    html.Audio(
+                        id=f'audio-conv_{experiment_id}',
+                        src='',
+                        controls=True,
+                        style={'display': 'none'},
+                        **{'data-experiment-id': experiment_id}  # Store experiment ID for later
                     )
+                )
 
                 """ MONITOR """
                 # Get data for plotting
@@ -1875,3 +1918,40 @@ class ExperimentVisualizer:
         # Keep the method, but it doesn't do anything in this class
         # since metrics are calculated on a per-experiment basis
         return None
+
+    # Add a new dash callback for serving convolved audio on demand
+    @app.callback(
+        Output('dummy-output-audio', 'children'),
+        [Input('url', 'pathname')],
+        [State('url', 'search')]
+    )
+    def serve_convolved_audio(self, pathname, search):
+        if pathname == '/get-convolved-audio':
+            # This is just a placeholder - the actual implementation will need adjustments
+            # due to the need for proper Flask routes instead of using Dash callbacks
+            return dash.no_update
+
+    # Add a Flask route to serve convolved audio
+    @app.server.route('/get-convolved-audio')
+    def get_convolved_audio(self):
+        experiment_id = flask.request.args.get('experiment_id', '')
+        if not experiment_id:
+            return flask.jsonify({'error': 'No experiment ID provided'}), 400
+        
+        # Find the experiment by ID
+        experiment = None
+        for room in self.manager.projects.values():
+            for exp in room.experiments.values():
+                if exp.experiment_id == experiment_id:
+                    experiment = exp
+                    break
+            if experiment:
+                break
+        
+        if not experiment:
+            return flask.jsonify({'error': 'Experiment not found'}), 404
+        
+        # Generate the convolved audio
+        convolved_audio_data = self.generate_convolved_audio_data(experiment.rir, experiment.fs, experiment_id)
+        
+        return flask.jsonify({'audio_data': convolved_audio_data})

@@ -228,21 +228,9 @@ def calculate_rt60_theoretical(room_dim, absorption):
     return rt60_sabine, rt60_eyring
 
 def calculate_rt60_from_rir(rir, fs, plot):
-    """Calculate RT60 from RIR using pyroomacoustics.
-    
-    Args:
-        rir: Room impulse response
-        fs: Sampling frequency
-    
-    Returns:
-        rt60: Estimated RT60 value
-    """
-    # Normalize RIR
-    rir = rir / np.max(np.abs(rir))
-
-    # Estimate RT60
-    rt60 = pra.experimental.rt60.measure_rt60(rir, fs, plot=plot)
-    return rt60
+    # return error with message if rir is empty
+    # new function is moved to analysis.py with the same name
+    raise ValueError("this function is moved to analysis.py. Apparently this reference is forgotten to be updated. [ege]")
 
 def create_interactive_rir_plot(rirs_dict):
     """Create an interactive RIR plot with checkboxes to show/hide different RIRs.
@@ -453,7 +441,7 @@ def create_unified_interactive_plot(rirs_dict, Fs, default_rirs, room_parameters
         rir_lines[label] = rir_line
         
         # Calculate and plot EDC
-        edc = an.compute_edc(rir, Fs, label=label, plot=False)
+        edc, time, _ = an.compute_edc(rir, Fs, label=label, plot=False)
         
         edc_line, = ax_edc.plot(time, edc, label=label, alpha=0.7)
         edc_lines[label] = edc_line

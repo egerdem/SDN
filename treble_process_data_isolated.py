@@ -554,6 +554,7 @@ if __name__ == "__main__":
     else:
         # PROJECT_NAME = "aes_abs20"  # Original treble batch results folder
         PROJECT_NAME = "aes_hybrid_ism12_abs20"  # New batch results folder
+        PROJECT_NAME = "./FINAL set_quartergridMargined_1s/JOURNAL_GA_ism12_abs10_quarterM_1s"  # New batch results folder
         OUTPUT_DIR = os.path.join(PROJECT_ROOT, "rooms")
         TREBLE_BASE_DIR = os.path.join(PROJECT_ROOT, "treble", "multi_experiments")
         PROJECT_DIR = os.path.join(TREBLE_BASE_DIR, PROJECT_NAME)
@@ -612,7 +613,7 @@ if __name__ == "__main__":
                 PROJECT_ROOT, 
                 experiments_by_source,
                 PROJECT_NAME,
-                room_name="aes_quartergrid"
+                room_name="journal_absorptioncoeffs"
             )
 
         print("\nYou can now use sdn_experiment_manager.py to visualize it.")

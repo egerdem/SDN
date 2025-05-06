@@ -32,13 +32,13 @@ def scattering_matrix_crate(increase_coef=0.2):
     adjusted_matrix[off_diagonal_mask] += (c / 4)
     return adjusted_matrix
 
-
 class DelayNetwork:
     """Core SDN implementation focusing on sample-based processing with accessible delay lines."""
 
     def __init__(self, room: Room, Fs: int = 44100, c: float = 343.0, source_pressure_injection_coeff: float = 0.5,
                  coef: float = 2.0/5,
                  source_weighting: float = 1,
+                 injection_c_vector: List[float] = None,
                  use_identity_scattering: bool = False,
                  specular_scattering: bool = False,
                  specular_source_injection: bool = False,
@@ -47,6 +47,7 @@ class DelayNetwork:
                  ignore_node_mic_atten: bool = False,
                  enable_path_logging: bool = False,
                  scattering_matrix_update_coef: float = None,
+                 source_trial_injection: Optional[float] = None,
                  more_absorption: bool = False,
                  print_mic_pressures: bool = False,
                  print_parameter_summary: bool = False,
@@ -73,7 +74,7 @@ class DelayNetwork:
         self.source_pressure_injection_coeff = source_pressure_injection_coeff
         self.coef = coef
         self.source_weighting = source_weighting
-
+        self.injection_c_vector = injection_c_vector
         # Test flags
         self.use_identity_scattering = use_identity_scattering
         self.specular_scattering = specular_scattering
@@ -82,6 +83,7 @@ class DelayNetwork:
         self.ignore_src_node_atten = ignore_src_node_atten
         self.ignore_node_mic_atten = ignore_node_mic_atten
         self.more_absorption = more_absorption
+        self.source_trial_injection = source_trial_injection
         self.scattering_matrix_update_coef = scattering_matrix_update_coef
         self.print_mic_pressures = print_mic_pressures
         self.print_parameter_summary = print_parameter_summary
@@ -93,7 +95,8 @@ class DelayNetwork:
         self.enable_path_logging = enable_path_logging
         self.path_logger = PathLogger() if enable_path_logging else None
         self.label = label
-
+        self.injection_index = 0
+        self.total_injection_count = 6
         # Print parameter summary
         if self.print_parameter_summary:
             self._print_parameter_summary()
@@ -434,7 +437,9 @@ class DelayNetwork:
                 self.source_to_nodes[src_key].append(packet)
             ###############################################
 
+
         # Step 2: Process each node
+
         for wall_id in self.room.walls:
             src_key = f"src_to_{wall_id}"
 
@@ -474,14 +479,13 @@ class DelayNetwork:
                 # source_contribution_packets.append(source_packet) # REMOVE
             ###############################################
 
-            iter = 0
+
             # Get both best and second-best targets
             targets = get_best_reflection_targets(wall_id, self.room.angle_mappings, num_targets=2)
             best_target = targets[0]
             second_best_target = targets[1]
             # target = get_best_reflection_target(wall_id, self.room.angle_mappings) # old
-
-            i = 1
+            iter = 1
             for other_id in self.room.walls:
                 if other_id != wall_id:
                     other_nodes.append(other_id)  # Add this line to collect other_nodes
@@ -523,24 +527,41 @@ class DelayNetwork:
                         ###############################################
 
                     # p_tilde = pki_pressure + psk  # if p_tilde is zero, no pressure at the node
+
+
                     if self.specular_source_injection:
-
                         if psk != 0.0: # change the source injection distribution. new approach.
-                            c = self.source_weighting
-                            if other_id == best_target:
-                                # print(i)
-                                p_tilde = pki_pressure + c*psk
-                                i += 1
-                            else:
-                                # print(i)
-                                p_tilde = pki_pressure + (5 - c) / 4 * psk # or pki_pressure + 0 * psk
 
-                                i += 1
+                            if self.injection_c_vector is not None:
+                                c = self.injection_c_vector[self.injection_index]
+                            else:
+                                c = self.source_weighting
+
+                            # print("wall_id:", wall_id, "other_id:", other_id)
+                            if other_id == best_target:
+                                print(iter, "dom:", c)
+                                p_tilde = pki_pressure + c*psk
+
+                                if iter == self.total_injection_count-1:
+
+                                    self.injection_index += 1
+                            else:
+                                print(iter, "nondom:", (5 - c) / 4)
+                                cf = (5 - c) / 4
+                                # cf = 1.25
+                                p_tilde = pki_pressure + cf * psk # or pki_pressure + 0 * psk
+                                if iter == self.total_injection_count-1:
+                                    self.injection_index += 1
+
+                            iter += 1
 
                         else: # if source pressure = 0, no need to adjust source injection
                             p_tilde = pki_pressure # since psk=0
 
                         incoming_waves.append(p_tilde) # p_tilde is calculated according to above if-else's.
+                    elif self.source_trial_injection is not None:
+                        p_tilde = pki_pressure + self.source_trial_injection * psk
+                        incoming_waves.append(p_tilde)
 
                     else: # original SDN , no change for psk distribution
                         p_tilde = pki_pressure + psk  # if p_tilde is zero, no pressure at the node

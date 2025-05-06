@@ -17,19 +17,23 @@ def rir_normalisation(rirs_dict, room, Fs, normalize_to_first_impulse=True):
     Normalize RIRs either to maximum absolute value or to first impulse.
     
     Args:
-        rirs_dict (dict): Dictionary of RIRs to normalize
+        rirs_dict (dict or np.ndarray): Dictionary of RIRs to normalize or a single RIR array
         room: Room object containing source and receiver positions
         Fs: Sampling frequency
         normalize_to_first_impulse (bool): If True, normalize to direct sound value
                                          If False, normalize to maximum absolute value
     
     Returns:
-        dict: Dictionary of normalized RIRs
+        dict or np.ndarray: Dictionary of normalized RIRs or a single normalized RIR
     """
     normalized_rirs = {}
-    
+
+    # Check if input is a single RIR array
+    if isinstance(rirs_dict, np.ndarray):
+        rirs_dict = {'single_rir': rirs_dict}  # Convert to dict for uniform processing
+
     if normalize_to_first_impulse:
-        print("Normalizing to direct- first impulse")
+        # print("Normalizing to direct- first impulse")
         # Calculate theoretical direct sound arrival time
         direct_distance = room.micPos.getDistance(room.source.srcPos)
         direct_time = direct_distance / 343.0  # speed of sound in m/s
@@ -38,11 +42,8 @@ def rir_normalisation(rirs_dict, room, Fs, normalize_to_first_impulse=True):
         # Use a small window around the theoretical arrival time to find the peak
         window_size = 20  # samples
         for label, rir in rirs_dict.items():
-            # start_idx = max(0, direct_sample - window_size)
             end_idx = direct_sample + window_size
-            # window = rir[start_idx:end_idx]
             window = rir[:end_idx]
-            # max_in_window_idx = start_idx + np.argmax(np.abs(window))
             max_in_window_idx = np.argmax(np.abs(window))
             normalized_rirs[label] = rir / abs(rir[max_in_window_idx])
     else:
@@ -52,6 +53,15 @@ def rir_normalisation(rirs_dict, room, Fs, normalize_to_first_impulse=True):
             normalized_rirs[label] = rir / np.max(np.abs(rir))
             
     return normalized_rirs
+
+def pad_zeros_to_rir(rir, num_samples):
+    if len(rir) < num_samples:
+        # Pad with zeros to reach num_samples
+        rir = np.pad(rir, (0, num_samples - len(rir)))
+    else:
+        # Truncate if longer
+        rir = rir[:num_samples]
+    return rir
 
 def calculate_pra_rir(room_parameters, duration, Fs, max_order=100):
     """
@@ -100,14 +110,9 @@ def calculate_pra_rir(room_parameters, duration, Fs, max_order=100):
     global_delay = pra.constants.get("frac_delay_length") // 2
     pra_rir = pra_rir[global_delay:]  # Shift left by removing the initial delay
     pra_rir = np.pad(pra_rir, (0, global_delay))  # Pad with zeros at the end to maintain length
-    
+
     num_samples = int(Fs * duration)
-    if len(pra_rir) < num_samples:
-        # Pad with zeros to reach num_samples
-        rir = np.pad(pra_rir, (0, num_samples - len(pra_rir)))
-    else:
-        # Truncate if longer
-        rir = pra_rir[:num_samples]
+    rir = pad_zeros_to_rir(pra_rir, num_samples)
     
     # Normalize
     # rir = rir / np.max(np.abs(rir))
@@ -197,9 +202,10 @@ def calculate_sdn_rir(room_parameters, test_name, room, duration, Fs, config):
         room_parameters['absorption'] = config['absorption']
         room_parameters['reflection'] = np.sqrt(1 - config['absorption'])
     room.wallAttenuation = [room_parameters['reflection']] * 6
-    
+
+    flags = config.get('flags', {})
     # Create SDN instance with configured flags
-    sdn = DelayNetwork(room, Fs=Fs, label=config['label'], **config['flags'])
+    sdn = DelayNetwork(room, Fs=Fs, label=config['label'], **flags)
 
     # Calculate RIR
     rir = sdn.calculate_rir(duration)
@@ -221,7 +227,7 @@ def calculate_sdn_rir(room_parameters, test_name, room, duration, Fs, config):
     
     return sdn, rir, label, is_default
 
-def calculate_ho_sdn_rir(room_parameters, room, Fs, duration, source_signal='dirac', order=2):
+def calculate_ho_sdn_rir(room_parameters, Fs, duration, source_signal='dirac', order=None):
     import geometry
     """
     Calculate RIR using HO-SDN (Higher-Order Scattering Delay Network).
@@ -281,9 +287,10 @@ def calculate_ho_sdn_rir(room_parameters, room, Fs, duration, source_signal='dir
     
     # Run simulation
     rir_ho_sdn, _, _ = simulate_mod.run() # multiAudio, sdnKickIn
-    
+    rir_ho_sdn = pad_zeros_to_rir(rir_ho_sdn, num_samples)
+
     # Normalize
     # rir_ho_sdn = rir_ho_sdn / np.max(np.abs(rir_ho_sdn))
 
     
-    return rir_ho_sdn, label 
+    return rir_ho_sdn, label

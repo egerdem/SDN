@@ -2,6 +2,149 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy import signal
 
+def PRA_measure_rt60(h, fs=1, decay_db=60, energy_thres=1.0, plot=False, rt60_tgt=None, energy_db=None, schroder_energy=None):
+    #I took it from pra's code, replacing h with powered h as I 
+    """
+    Analyze the RT60 of an impulse response. Optionaly plots some useful information.
+
+    Parameters
+    ----------
+    h: array_like
+        The impulse response.
+    fs: float or int, optional
+        The sampling frequency of h (default to 1, i.e., samples).
+    decay_db: float or int, optional
+        The decay in decibels for which we actually estimate the time. Although
+        we would like to estimate the RT60, it might not be practical. Instead,
+        we measure the RT20 or RT30 and extrapolate to RT60.
+    energy_thres: float
+        This should be a value between 0.0 and 1.0.
+        If provided, the fit will be done using a fraction energy_thres of the
+        whole energy. This is useful when there is a long noisy tail for example.
+    plot: bool, optional
+        If set to ``True``, the power decay and different estimated values will
+        be plotted (default False).
+    rt60_tgt: float
+        This parameter can be used to indicate a target RT60 to which we want
+        to compare the estimated value.
+    energy_db: array_like, optional
+        Pre-calculated energy decay curve in dB. If provided, the function will skip
+        the EDC calculation step and use this curve directly.
+    raw_energy: array_like, optional
+        Pre-calculated raw energy values (before dB conversion). Can be provided 
+        along with energy_db for more accurate plotting.
+    """
+
+    h = np.array(h)
+    fs = float(fs)
+
+    # Skip EDC calculation if energy_db is provided
+    if energy_db is None:
+        # The power of the impulse response in dB
+        power = h**2
+        # Backward energy integration according to Schroeder
+        energy = np.cumsum(power[::-1])[::-1]  # Integration according to Schroeder
+
+        if energy_thres < 1.0:
+            assert 0.0 < energy_thres < 1.0
+            energy -= energy[0] * (1.0 - energy_thres)
+            energy = np.maximum(energy, 0.0)
+
+        # remove the possibly all zero tail
+        i_nz = np.max(np.where(energy > 0)[0])
+        energy = energy[:i_nz]
+        energy_db = 10 * np.log10(energy)
+        energy_db -= energy_db[0]
+    else:
+        # Use provided energy_db directly
+        power = h**2  # Still needed for plotting
+        energy = schroder_energy  # Use provided raw energy if available
+
+    min_energy_db = -np.min(energy_db)
+    if min_energy_db - 5 < decay_db:
+        decay_db = min_energy_db
+
+    # -5 dB headroom
+    try:
+        i_5db = np.min(np.where(energy_db < -5)[0])
+    except ValueError:
+        return 0.0
+    e_5db = energy_db[i_5db]
+    t_5db = i_5db / fs
+    # after decay
+    try:
+        i_decay = np.min(np.where(energy_db < -5 - decay_db)[0])
+    except ValueError:
+        i_decay = len(energy_db)
+    t_decay = i_decay / fs
+
+    # compute the decay time
+    decay_time = t_decay - t_5db
+    est_rt60 = (60 / decay_db) * decay_time
+
+    if plot:
+        import matplotlib.pyplot as plt
+
+        # If energy wasn't calculated or provided, we need to estimate energy_min for plotting
+        if energy is None:
+            energy_db_min = energy_db[-1]
+            energy_min = 10**(energy_db_min/10)  # Convert from dB back to linear
+        else:
+            energy_min = energy[-1] if len(energy) > 0 else 0
+            energy_db_min = energy_db[-1]
+            
+        # Remove clip power below to minimum energy (for plotting purpose mostly)
+        power[power < energy_min] = energy_min
+        power_db = 10 * np.log10(power)
+        power_db -= np.max(power_db)
+
+        # time vector
+        def get_time(x, fs):
+            return np.arange(x.shape[0]) / fs - i_5db / fs
+
+        T = get_time(power_db, fs)
+
+        # plot power and energy
+        plt.plot(get_time(energy_db, fs), energy_db, label="Energy")
+
+        # now the linear fit
+        plt.plot([0, est_rt60], [e_5db, -65], "--", label="Linear Fit")
+        plt.plot(T, np.ones_like(T) * -60, "--", label="-60 dB")
+        plt.vlines(
+            est_rt60, energy_db_min, 0, linestyles="dashed", label="Estimated RT60"
+        )
+
+        if rt60_tgt is not None:
+            plt.vlines(rt60_tgt, energy_db_min, 0, label="Target RT60")
+
+        plt.legend()
+
+    return est_rt60
+
+
+def calculate_rt60_from_rir(rir, fs, plot, pre_calculated_edc=None, schroder_energy=None):
+    """Calculate RT60 from RIR using pyroomacoustics.
+
+    Args:
+        rir: Room impulse response
+        fs: Sampling frequency
+        plot: Whether to plot the RT60 calculation
+        pre_calculated_edc: Pre-calculated energy decay curve (optional)
+        raw_energy: Pre-calculated raw energy values (optional)
+
+    Returns:
+        rt60: Estimated RT60 value
+    """
+    # Normalize RIR
+    rir = rir / np.max(np.abs(rir))
+
+    # Estimate RT60 - use pre-calculated EDC if provided
+    if pre_calculated_edc is not None:
+        rt60 = PRA_measure_rt60(rir, fs, plot=plot, energy_db=pre_calculated_edc, schroder_energy=schroder_energy)
+    else:
+        rt60 = PRA_measure_rt60(rir, fs, plot=plot)
+    return rt60
+
 def EDC(rir):
     # eski koddan
     """
@@ -52,27 +195,56 @@ def EDC_dp(impulse_response):
 
     return edc_dB
 
-def compute_edc(rir, Fs, label=None, plot=True, color=None):
-    """Compute and optionally plot Energy Decay Curve."""
-    # Calculate EDC
-    squared_rir = rir ** 2
-    edc = np.flip(np.cumsum(np.flip(squared_rir)))
+def compute_edc(rir, Fs, label=None, plot=True, color=None, energy_thres=1.0):
+    """Compute and optionally plot Energy Decay Curve.
     
-    # Add small epsilon to prevent log10(0)
-    eps = 1e-10
-    normalized_edc = edc / np.max(edc)
-    edc_db = 10 * np.log10(normalized_edc + 1e-10)
+    Args:
+        rir (np.ndarray): Room impulse response
+        Fs (int): Sampling frequency
+        label (str, optional): Label for the EDC curve in plots
+        plot (bool): Whether to plot the EDC curve
+        color (str, optional): Color for the EDC curve in plots
+        energy_thres (float): Energy threshold value between 0.0 and 1.0
+            If less than 1.0, the fit will use a fraction of the energy
+        
+    Returns:
+        tuple: (edc_db, raw_energy) where:
+            - edc_db: Energy decay curve in dB, normalized and with proper zero tail handling
+            - raw_energy: Raw energy values before dB conversion, for RT60 calculation
+    """
+    # Calculate squared RIR (power)
+    squared_rir = rir ** 2
+    
+    # Backward energy integration according to Schroeder
+    energy = np.flip(np.cumsum(np.flip(squared_rir)))
+    
+    # Apply energy threshold if specified (like in PRA_measure_rt60)
+    if energy_thres < 1.0:
+        assert 0.0 < energy_thres < 1.0
+        energy -= energy[0] * (1.0 - energy_thres)
+        energy = np.maximum(energy, 0.0)
+    
+    # Handle zero tail (like in PRA_measure_rt60)
+    nonzero_indices = np.where(energy > 0)[0]
+    if len(nonzero_indices) > 0:
+        i_nz = np.max(nonzero_indices)
+        energy = energy[:i_nz]
+    
+    # Convert to dB and normalize
+    energy_db = 10 * np.log10(energy)
+    energy_db -= energy_db[0]  # Normalize like PRA_measure_rt60
     
     # Create time array in seconds, starting from 0
-    time = np.arange(len(rir)) / Fs
+    time_db = np.arange(len(energy_db)) / Fs
     
     # Plot only if requested
     if plot:
-        plt.plot(time, edc_db, color=color, label=label)
+        plt.plot(time_db, energy_db, color=color, label=label)
     
-    return edc_db
+    # Return both the dB curve and the raw energy (for RT60 calculation)
+    return energy_db, time_db, energy
 
-def calculate_smoothed_energy(rir: np.ndarray, window_length: int = 30, range: int = 50, Fs: int = 44100) -> tuple:
+def calculate_smoothed_energy(rir: np.ndarray, window_length: int = 30, range: int = None, Fs: int = 44100) -> tuple:
     """Calculate smoothed energy of RIR for the early part.
     
     Args:
@@ -85,25 +257,21 @@ def calculate_smoothed_energy(rir: np.ndarray, window_length: int = 30, range: i
         tuple: (energy, smoothed, err) where:
             - energy: Raw energy of the early RIR
             - smoothed: Smoothed energy of early RIR
-            - err: Energy ratio (early/total)
     """
-    
-    # Calculate number of samples for the given time range
-    range_samples = int((range / 1000) * Fs)  # Convert ms to samples
-    
-    # Trim RIR to the specified range
-    rir_trimmed = rir[:range_samples]
-    
-    # Calculate energy
-    energy = rir_trimmed ** 2
-    
+    if range is not None:
+        # Calculate number of samples for the given time range
+        range_samples = int((range / 1000) * Fs)  # Convert ms to samples
+        # Trim RIR to the specified range
+        # Calculate energy
+        energy = rir[:range_samples] ** 2 #trimmed energy
+    else:
+        energy = rir ** 2  # Full RIR energy
+
     # Apply smoothing window
     window = signal.windows.hann(window_length)
     # window = window / np.sum(window)
     smoothed = signal.convolve(energy, window, mode='same')
     # smoothed = signal.convolve(energy, window, mode='full')
-
-    # Calculate ERR
 
     return smoothed
 
@@ -188,16 +356,21 @@ def calculate_rms_envelope(signal: np.ndarray,
 
     return rms_values
 
-def compute_RMS(sig1: np.ndarray, sig2: np.ndarray, range: int = 50, Fs: int = 44100, method = "rmse") -> float:
+def compute_RMS(sig1: np.ndarray, sig2: np.ndarray, range: int = None, Fs: int = 44100, method = "rmse") -> float:
     """Compare two energy decay curves or smoothed RIRs and compute difference using various metrics."""
     # Calculate samples for range (e.g., 50ms)
-    samples_range = int(range/1000 * Fs)  # Convert ms to samples
-    # print("trimming signals for error calculation")
+    # only trim if range is not None
+    if range is not None:
+        samples_range = int(range/1000 * Fs)  # Convert ms to samples
+        # print("trimming signals for error calculation"
 
-    # Trim signals to specified range
-    sig1_early = sig1[:samples_range]
-    sig2_early = sig2[:samples_range]
-    
+        # Trim signals to specified range
+        sig1_early = sig1[:samples_range]
+        sig2_early = sig2[:samples_range]
+    else:
+        sig1_early = sig1
+        sig2_early = sig2
+
     # Calculate difference based on method
     if method == "rmse":
         # Root Mean Square Error (for linear scale)
@@ -495,11 +668,11 @@ def calculate_err(rir: np.ndarray, early_range: int = 50, Fs: int = 44100) -> fl
     """
     # Calculate total energy of the full RIR
     energy = rir**2
-    
+
     # Calculate early energy (first early_range ms)
     early_samples = int((early_range / 1000) * Fs)  # Convert ms to samples
     early_energy = rir[:early_samples]**2
-    
+
     # Calculate ERR
     ERR = np.sum(rir[:early_samples]**2) / np.sum(rir**2)
     

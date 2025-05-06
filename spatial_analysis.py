@@ -9,7 +9,7 @@ from scipy import signal
 # import seaborn as sns
 from analysis import calculate_smoothed_energy, calculate_error_metric, plot_smoothing_comparison, compute_RMS, compute_edc
 
-def generate_receiver_grid(room_width: float, room_depth: float, margin = 1, n_points: int = 50) -> List[Tuple[float, float]]:
+def generate_receiver_grid_old(room_width: float, room_depth: float, margin = 1, n_points: int = 50) -> List[Tuple[float, float]]:
     """Generate a grid of receiver positions within the room.
     
     Args:
@@ -24,6 +24,26 @@ def generate_receiver_grid(room_width: float, room_depth: float, margin = 1, n_p
     # margin = 1
     x = np.linspace(margin, room_width - margin, int(np.sqrt(n_points)))
     y = np.linspace(margin, room_depth - margin, int(np.sqrt(n_points)))
+    X, Y = np.meshgrid(x, y)
+    return list(zip(X.flatten(), Y.flatten()))
+
+
+def generate_receiver_grid_tr(room_width: float, room_depth: float, margin=1, n_points: int = 50) -> List[
+    Tuple[float, float]]:
+    """Generate a grid of receiver positions within the room.
+
+    Args:
+        room_width (float): Width of the room
+        room_depth (float): Depth of the room
+        n_points (int): Number of receiver positions to generate
+
+    Returns:
+        List[Tuple[float, float]]: List of (x, y) coordinates for receivers
+    """
+    # Create a grid of points, avoiding walls with margin
+    margin_from_center = margin - 0.2 # less margin for center
+    x = np.linspace(margin, room_width - margin_from_center, int(np.sqrt(n_points)))
+    y = np.linspace(margin, room_depth - margin_from_center, int(np.sqrt(n_points)))
     X, Y = np.meshgrid(x, y)
     return list(zip(X.flatten(), Y.flatten()))
 

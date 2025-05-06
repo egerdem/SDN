@@ -6,7 +6,7 @@ import hashlib
 import sys
 import spatial_analysis as sa
 # import sdn_manager_load_sims as sml
-
+from rir_calculators import rir_normalisation
 # Import modules for core functionality
 import geometry
 import plot_room as pp
@@ -166,7 +166,7 @@ class Room:
 class SDNExperiment:
     """Class to store and manage acoustic simulation experiment data and metadata."""
     
-    def __init__(self, config, rir, fs=44100, duration=0.5, experiment_id=None, skip_metrics=False):
+    def __init__(self, config, rir, fs=44100, duration=None, experiment_id=None, skip_metrics=True):
         """
         Initialize an acoustic simulation experiment.
         
@@ -224,6 +224,18 @@ class SDNExperiment:
                 id_config['ray_tracing'] = config['ray_tracing']
             if 'use_rand_ism' in config:
                 id_config['use_rand_ism'] = config['use_rand_ism']
+                
+        # Add HO-SDN specific parameters
+        elif config.get('method') == 'HO-SDN':
+            if 'order' in config:
+                id_config['order'] = config['order']
+            if 'source_signal' in config:
+                id_config['source_signal'] = config['source_signal']
+                
+        # Add rimpy specific parameters
+        elif config.get('method') == 'RIMPY':
+            reflection_sign = config.get('reflection_sign')  # Default to positive
+            id_config['reflection_sign'] = reflection_sign
                 
         # Keep only room parameters with numerical values
         if 'room_parameters' in config:
@@ -310,11 +322,27 @@ class SDNExperiment:
         if method == 'ISM':
             if 'max_order' in self.config:
                 label += f" order={self.config['max_order']}"
+        elif method == 'SDN':
+            # Add SDN-specific flags that affect the simulation
+            if 'flags' in self.config:
+                flags = self.config['flags']
+                if flags.get('source_weighting'):
+                    label += f" {flags['source_weighting']}"
+                if flags.get('specular_source_injection'):
+                    label += " specular"
+                if 'source_pressure_injection_coeff' in flags:
+                    label += f" src constant coef={flags['source_pressure_injection_coeff']}"
+                if 'scattering_matrix_update_coef' in flags:
+                    label += f" scat={flags['scattering_matrix_update_coef']}"
         
-        # For debugging
-        # print(f"Generated label: {label}")
+        # Create label for legend with method included
+        label_for_legend = f"{method}, {label}"
         
-        return label
+        # Return dictionary with both label versions
+        return {
+            "label": label,
+            "label_for_legend": label_for_legend
+        }
     
     def get_key_parameters(self):
         """Extract and return the key parameters that define this experiment."""
@@ -397,12 +425,12 @@ class SDNExperimentManager:
         
         Directory Structure:
             When is_batch_manager=False (singular):
-                {results_dir}/room_singulars/{room_name}/{experiment_id}.json
-                {results_dir}/room_singulars/{room_name}/{experiment_id}.npy
+                {results_dir}/room_singulars/{project_name}/{experiment_id}.json
+                {results_dir}/room_singulars/{project_name}/{experiment_id}.npy
                 
             When is_batch_manager=True (batch):
-                {results_dir}/rooms/{room_name}/{source_label}/{method}/{param_set}/config.json
-                {results_dir}/rooms/{room_name}/{source_label}/{method}/{param_set}/rirs.npy
+                {results_dir}/rooms/{project_name}/{source_label}/{method}/{param_set}/config.json
+                {results_dir}/rooms/{project_name}/{source_label}/{method}/{param_set}/rirs.npy
                 
         Example:
             # Create a manager for singular experiments in custom directory
@@ -413,7 +441,7 @@ class SDNExperimentManager:
         """
         self.results_dir = results_dir
         self.is_batch_manager = is_batch_manager
-        self.rooms = {}  # name -> Room
+        self.projects = {}  # project_name -> Room (acoustic room object)
         self.ensure_dir_exists()
         
         # Only load experiments if not skipping duplicate checks
@@ -487,7 +515,7 @@ class SDNExperimentManager:
     
     def _generate_param_set_name(self, config):
         """Generate a standardized name for the parameter set based on the config."""
-        method = config.get('method', 'SDN')
+        method = config.get('method')
         param_set = ""
         
         if method == 'SDN':
@@ -522,46 +550,163 @@ class SDNExperimentManager:
             if 'max_order' in config:
                 param_set += f"_order{config['max_order']}"
                 
+        elif method == 'HO-SDN':
+            # Include key HO-SDN parameters in the name
+            param_set = "ho-sdn"
+            if 'order' in config:
+                param_set += f"_order{config['order']}"
+            if 'source_signal' in config and config['source_signal'] != 'dirac':
+                param_set += f"_{config['source_signal']}"
+                
+        elif method == 'RIMPY':
+            # Include key rimpy parameters in the name
+            param_set = ""  # Don't include method name here, it will be added in save_experiment
+            reflection_sign = config.get('reflection_sign')  # Default to positive
+            if reflection_sign < 0:
+                param_set += "negref"
+            else:
+                param_set += "posref"
+                
         else:
             param_set = "unknown method"
             
         return param_set
     
+    def create_experiment_config(self, method, label="", info="", **params):
+        """
+        LEGACY METHOD: Create an experiment configuration for run_with_config.
+        
+        It's recommended to create config dictionaries directly instead.
+        See the docstring of run_experiment() for the expected config structure.
+        
+        Example of direct dictionary creation (preferred):
+        ```python
+        config = {
+            'method': 'SDN',
+            'label': 'weighted psk',
+            'info': '',
+            'flags': {
+                'specular_source_injection': True,
+                'source_weighting': 4
+            }
+        }
+        ```
+        
+        Args:
+            method (str): Simulation method ('SDN', 'ISM', 'HO-SDN', 'RIMPY', etc.)
+            label (str): Label for the experiment
+            info (str): Additional information about the experiment
+            **params: Method-specific parameters:
+                For 'SDN': specular_source_injection, source_weighting, etc.
+                For 'ISM': max_order, ray_tracing, use_rand_ism
+                For 'HO-SDN': order, source_signal
+                For 'RIMPY': reflection_sign
+                
+        Returns:
+            dict: Configuration dictionary ready for run_experiment
+        """
+        config = {
+            'method': method,
+            'label': label,
+            'info': info
+        }
+        
+        # Add method-specific parameters
+        if method == 'SDN':
+            # SDN params go into flags
+            flags = {}
+            for param, value in params.items():
+                if param not in ['room_parameters', 'duration', 'fs']:
+                    flags[param] = value
+            config['flags'] = flags
+                
+        elif method == 'ISM':
+            # ISM params go directly in config
+            for param in ['max_order', 'ray_tracing', 'use_rand_ism']:
+                if param in params:
+                    config[param] = params[param]
+                    
+        elif method == 'HO-SDN':
+            # HO-SDN params go directly in config
+            for param in ['order', 'source_signal']:
+                if param in params:
+                    config[param] = params[param]
+                    
+        elif method == 'RIMPY':
+            # RIMPY params go directly in config
+            if 'reflection_sign' in params:
+                config['reflection_sign'] = params['reflection_sign']
+                
+        return config
+
+
+
     def run_experiment(self, config, room_parameters, duration, fs=44100,
-                      force_rerun=False, project_name=None, method='SDN',
+                      force_rerun=False, project_name=None,
                       batch_processing=False, source_positions=None, receiver_positions=None):
         """
         Run an acoustic simulation experiment with the given configuration.
-        """
-        if project_name is None:
-            print("Generating project name based on method and parameters because project_name is None")
-            project_name = self._generate_project_name(config, method)
-            print("Generated project name:", project_name)
+        This is the main method to use for both singular and batch experiments.
         
-        # Add method to config if not present
-        if 'method' not in config:
-            config['method'] = method
+        Args:
+            config (dict): Configuration dictionary for the experiment. Must include:
+                - 'method': The simulation method ('SDN', 'ISM', 'HO-SDN', 'RIMPY')
+                - Method-specific parameters like:
+                  - For SDN: 'flags' containing settings like 'source_weighting', 'specular_source_injection'
+                  - For ISM: 'max_order', 'ray_tracing', 'use_rand_ism'
+                  - For HO-SDN: 'order', 'source_signal'
+                  - For RIMPY: 'reflection_sign'
+            
+            room_parameters (dict): Room parameters including dimensions, absorption, etc.
+                                    Also contains default source and mic positions.
+            
+            duration (float): Duration of the simulation in seconds
+            
+            fs (int): Sampling frequency
+            
+            force_rerun (bool): If True, rerun the experiment even if it exists
+            
+            project_name (str): Name of the project/experiment group
+            
+            batch_processing (bool): If True, run as batch processing with multiple source/receiver positions.
+                                    If False, use the source/mic positions from room_parameters.
+            
+            source_positions (list, optional): Required for batch_processing=True.
+                                             List of source positions for batch processing.
+            
+            receiver_positions (list, optional): Required for batch_processing=True.
+                                               List of receiver positions for batch processing.
+        
+        Returns:
+            For batch_processing=True: List of experiment IDs
+            For batch_processing=False: SDNExperiment object
+        
+        Example:
+            # Single experiment:
+            manager.run_experiment(
+                config={'method': 'SDN', 'flags': {'source_weighting': 2}},
+                room_parameters=room,
+                duration=0.5,
+                project_name='my_project'
+            )
+            
+            # Batch experiment:
+            manager.run_experiment(
+                config={'method': 'SDN', 'flags': {'source_weighting': 2}},
+                room_parameters=room,
+                duration=0.5,
+                project_name='my_project',
+                batch_processing=True,
+                source_positions=sources,
+                receiver_positions=receivers
+            )
+        """
+        
+        # Ensure method is in config
+        method = config['method']
 
         # Handle batch processing case
         if batch_processing:
-            # Check if this manager is set up for batch processing
-            if not self.is_batch_manager:
-                # Create or get a batch manager
-                batch_manager = set_batch_manager()
-                # Delegate to batch manager
-                return batch_manager.run_experiment(
-                    config=config,
-                    room_parameters=room_parameters,
-                    duration=duration,
-                    fs=fs,
-                    force_rerun=force_rerun,
-                    project_name=project_name,
-                    method=method,
-                    batch_processing=True,
-                    source_positions=source_positions,
-                    receiver_positions=receiver_positions
-                )
-            
             # Validate batch processing inputs
             if source_positions is None or receiver_positions is None:
                 raise ValueError("Both source_positions and receiver_positions must be provided for batch processing")
@@ -579,14 +724,9 @@ class SDNExperimentManager:
             # Load room info from unified location
             rooms_dir = os.path.join(self.results_dir, 'rooms')
             room_info_path = os.path.join(rooms_dir, room_info_file)
-            if not os.path.exists(room_info_path):
-                raise FileNotFoundError(f"Room info file not found: {room_info_path}")
 
-            try:
-                with open(room_info_path, 'r') as f:
-                    room_info = json.load(f)
-            except Exception as e:
-                raise Exception(f"Error loading room info from {room_info_path}: {e}")
+            with open(room_info_path, 'r') as f:
+                room_info = json.load(f)
 
             # Verify room parameters match
             for key in ['width', 'depth', 'height', 'absorption']:
@@ -594,11 +734,24 @@ class SDNExperimentManager:
                     raise ValueError(f"Room parameter '{key}' mismatch. Expected {room_info['parameters'][key]}, got {room_parameters[key]}")
 
             # Get or create room once
-            if project_name not in self.rooms:
+            if project_name not in self.projects:
                 room = Room(project_name, room_parameters)
-                self.rooms[project_name] = room
+                self.projects[project_name] = room
             else:
-                room = self.rooms[project_name]
+                room = self.projects[project_name]
+            
+            # Create base room geometry once
+            reflection = np.sqrt(1 - room_parameters['absorption'])
+            base_geom_room = geometry.Room(
+                room_parameters['width'], 
+                room_parameters['depth'], 
+                room_parameters['height']
+            )
+            base_geom_room.wallAttenuation = [reflection] * 6
+            
+            # Setup signal once
+            num_samples = int(fs * duration)
+            impulse_dirac = geometry.Source.generate_signal('dirac', num_samples)
             
             experiment_ids = []
             total_combinations = len(source_positions) * len(receiver_positions)
@@ -632,24 +785,122 @@ class SDNExperimentManager:
                         'mic z': mic_z
                     })
                     
+                    # Ensure reflection coefficient is in current_params
+                    if 'reflection' not in current_params:
+                        current_params['reflection'] = reflection
+                    
                     # Add position ID to config
                     position_config = config.copy()
                     position_config['position_id'] = pos_id
                     
-                    # Run single experiment with these positions
+                    # Create a full config with all parameters for ID generation
+                    full_config = {
+                        **position_config,
+                        'room_parameters': current_params,
+                        'duration': duration,
+                        'fs': fs,
+                        'method': method
+                    }
+                    
+                    # Generate experiment ID
+                    temp_experiment = SDNExperiment(full_config, np.array([]), skip_metrics=True)
+                    experiment_id = temp_experiment.experiment_id
+                    
+                    # Check if experiment exists
+                    if experiment_id in room.experiments and not force_rerun:
+                        print(f"    Experiment {experiment_id} already exists. Using cached results.")
+                        experiment_ids.append(experiment_id)
+                        continue
+                    
                     try:
-                        experiment = self.run_experiment(
-                            config=position_config,
-                            room_parameters=current_params,
-                            duration=duration,
-                            fs=fs,
-                            force_rerun=force_rerun,
-                            project_name=project_name,
-                            method=method,
-                            batch_processing=False  # Important: prevent recursion
+                        # Clone the base room geometry and update source/mic positions
+                        geom_room = base_geom_room.copy() if hasattr(base_geom_room, 'copy') else geometry.Room(
+                            room_parameters['width'], 
+                            room_parameters['depth'], 
+                            room_parameters['height']
                         )
                         
-                        experiment_ids.append(experiment.experiment_id)
+                        # Set the source and microphone positions
+                        geom_room.set_microphone(mic_x, mic_y, mic_z)
+                        geom_room.set_source(source_x, source_y, source_z, signal="will be replaced", Fs=fs)
+                        
+                        # Set wallAttenuation if not copied
+                        if not hasattr(base_geom_room, 'copy'):
+                            geom_room.wallAttenuation = [reflection] * 6
+                        
+                        # Set the source signal
+                        geom_room.source.signal = impulse_dirac['signal']
+                        
+                        # Calculate RIR based on method
+                        if method == 'SDN':
+                            # Import the calculate_sdn_rir function from rir_calculators
+                            from rir_calculators import calculate_sdn_rir
+                            
+                            # Ensure config has 'flags' key
+                            if 'flags' not in position_config:
+                                position_config['flags'] = {}
+                            
+                            # Calculate RIR using the unified function
+                            sdn, rir, _, _ = calculate_sdn_rir(current_params, "test", geom_room, duration, fs, position_config)
+                            
+                        elif method == 'ISM':
+                            # Import the calculate_pra_rir function from rir_calculators
+                            from rir_calculators import calculate_pra_rir
+                            
+                            # Get ISM parameters
+                            max_order = position_config.get('max_order')
+                            
+                            # Calculate RIR using the unified function
+                            rir, label = calculate_pra_rir(current_params, duration, fs, max_order)
+                            
+                        elif method == 'HO-SDN':
+                            # Import the calculate_ho_sdn_rir function from rir_calculators
+                            from rir_calculators import calculate_ho_sdn_rir
+                            
+                            # Get HO-SDN parameters
+                            order = position_config.get('order', 2)  # Default to order 2 if not specified
+                            source_signal = position_config.get('source_signal', 'dirac')  # Default to dirac if not specified
+                            
+                            # Calculate RIR using the unified function
+                            rir, label = calculate_ho_sdn_rir(current_params, fs, duration, source_signal, order)
+                            
+                        elif method == 'RIMPY':
+                            # Import the calculate_rimpy_rir function from rir_calculators
+                            from rir_calculators import calculate_rimpy_rir
+                            
+                            # Get reflection sign from config, default to positive (1)
+                            reflection_sign = position_config.get('reflection_sign')
+                            
+                            # Calculate RIR using rimpy with the specified reflection sign
+                            rir, label = calculate_rimpy_rir(current_params, duration, fs, reflection_sign=reflection_sign)
+                            
+                        elif method == 'TRE':
+                            # Placeholder for Treble method
+                            # This would be implemented in the future
+                            raise NotImplementedError("Treble method not yet implemented")
+                            
+                        else:
+                            raise ValueError(f"Unknown simulation method: {method}")
+                        
+                        # Normalize RIR
+                        rir = rir_normalisation(rir, geom_room, fs, normalize_to_first_impulse=True)['single_rir']
+
+                        # Create experiment object
+                        experiment = SDNExperiment(
+                            config=full_config,
+                            rir=rir,
+                            fs=fs,
+                            duration=duration,
+                            experiment_id=experiment_id
+                        )
+                        
+                        # Save experiment
+                        self.save_experiment(experiment, project_name)
+                        
+                        # Add to room's experiments
+                        room.add_experiment(experiment)
+                        
+                        experiment_ids.append(experiment_id)
                     except Exception as e:
                         print(f"    Error: {str(e)}")
             
@@ -657,8 +908,7 @@ class SDNExperimentManager:
             return experiment_ids
         
         else:
-            # Single experiment case
-            print("single position run")
+            # Single experiment case - existing code
             # Determine room type from project name
             if 'aes' in project_name.lower():
                 room_info_file = 'room_info_aes.json'
@@ -687,11 +937,11 @@ class SDNExperimentManager:
                     raise ValueError(f"Room parameter '{key}' mismatch. Expected {room_info['parameters'][key]}, got {room_parameters[key]}")
 
             # Get or create room
-            if project_name not in self.rooms:
+            if project_name not in self.projects:
                 room = Room(project_name, room_parameters)
-                self.rooms[project_name] = room
+                self.projects[project_name] = room
             else:
-                room = self.rooms[project_name]
+                room = self.projects[project_name]
             
             # Create a temporary config with all parameters for ID generation
             full_config = {
@@ -733,7 +983,8 @@ class SDNExperimentManager:
             # Calculate reflection coefficient
             reflection = np.sqrt(1 - room_parameters['absorption'])
             geom_room.wallAttenuation = [reflection] * 6
-            
+            #add reflection key value also to the room parameters
+            room_parameters['reflection'] = reflection
             # Setup signal
             num_samples = int(fs * duration)
             impulse_dirac = geometry.Source.generate_signal('dirac', num_samples)
@@ -741,56 +992,46 @@ class SDNExperimentManager:
             
             # Calculate RIR based on method
             if method == 'SDN':
-                # Get flags from config
-                flags = config.get('flags', {})
+                # Import the calculate_sdn_rir function from rir_calculators
+                from rir_calculators import calculate_sdn_rir
                 
-                # Create SDN instance with configured flags
-                sdn = DelayNetwork(geom_room, Fs=fs, label=config.get('label', ''), **flags)
+                # Ensure config has 'flags' key
+                if 'flags' not in config:
+                    config['flags'] = {}
                 
-                # Calculate RIR
-                rir = sdn.calculate_rir(duration)
+                # Calculate RIR using the unified function
+                sdn, rir, _, _ = calculate_sdn_rir(room_parameters, "test", geom_room, duration, fs, config)
                 
             elif method == 'ISM':
-                # Import pyroomacoustics
-                import pyroomacoustics as pra
+                # Import the calculate_pra_rir function from rir_calculators
+                from rir_calculators import calculate_pra_rir
                 
                 # Get ISM parameters
                 max_order = config.get('max_order')
-                ray_tracing = config.get('ray_tracing', False)
-                use_rand_ism = config.get('use_rand_ism', False)
                 
-                # Setup source and mic locations
-                source_loc = np.array([room_parameters['source x'], room_parameters['source y'], room_parameters['source z']])
-                mic_loc = np.array([room_parameters['mic x'], room_parameters['mic y'], room_parameters['mic z']])
-                room_dim = np.array([room_parameters['width'], room_parameters['depth'], room_parameters['height']])
+                # Calculate RIR using the unified function
+                rir, label = calculate_pra_rir(room_parameters, duration, fs, max_order)
                 
-                # Create pra room
-                pra_room = pra.ShoeBox(
-                    room_dim, 
-                    fs=fs,
-                    materials=pra.Material(room_parameters['absorption']),
-                    max_order=max_order,
-                    air_absorption=False, 
-                    ray_tracing=ray_tracing,
-                    use_rand_ism=use_rand_ism
-                )
-                pra_room.set_sound_speed(343)
-                pra_room.add_source(source_loc).add_microphone(mic_loc)
+            elif method == 'HO-SDN':
+                # Import the calculate_ho_sdn_rir function from rir_calculators
+                from rir_calculators import calculate_ho_sdn_rir
                 
-                # Compute RIR
-                pra_room.compute_rir()
-                pra_rir = pra_room.rir[0][0]
+                # Get HO-SDN parameters
+                order = config.get('order', 2)  # Default to order 2 if not specified
+                source_signal = config.get('source_signal', 'dirac')  # Default to dirac if not specified
                 
-                # Process the RIR
-                global_delay = pra.constants.get("frac_delay_length") // 2
-                pra_rir = pra_rir[global_delay:]  # Shift left by removing the initial delay
-                pra_rir = np.pad(pra_rir, (0, global_delay))  # Pad with zeros at the end to maintain length
-                if len(pra_rir) < num_samples:
-                    # Pad with zeros to reach num_samples
-                    rir = np.pad(pra_rir, (0, num_samples - len(pra_rir)))
-                else:
-                    # Truncate if longer
-                    rir = pra_rir[:num_samples]
+                # Calculate RIR using the unified function
+                rir, label = calculate_ho_sdn_rir(room_parameters, fs, duration, source_signal, order)
+                
+            elif method == 'RIMPY':
+                # Import the calculate_rimpy_rir function from rir_calculators
+                from rir_calculators import calculate_rimpy_rir
+                
+                # Get reflection sign from config, default to positive (1)
+                reflection_sign = config.get('reflection_sign')
+                
+                # Calculate RIR using rimpy with the specified reflection sign
+                rir, label = calculate_rimpy_rir(room_parameters, duration, fs, reflection_sign=reflection_sign)
                 
             elif method == 'TRE':
                 # Placeholder for Treble method
@@ -801,22 +1042,8 @@ class SDNExperimentManager:
                 raise ValueError(f"Unknown simulation method: {method}")
             
             # Normalize RIR
-            if method == 'SDN' and flags.get('normalize_to_first_impulse', False):
-                # For SDN, normalize by the first non-zero impulse
-                # Find the first significant sample (using a small threshold to avoid noise)
-                threshold = 1e-6 * np.max(np.abs(rir))
-                first_impulse_idx = np.where(np.abs(rir) > threshold)[0]
-                if len(first_impulse_idx) > 0:
-                    first_idx = first_impulse_idx[0]
-                    # Normalize by the amplitude of the first impulse
-                    rir = rir / np.abs(rir[first_idx])
-                else:
-                    # Fallback to max normalization if no significant samples found
-                    rir = rir / np.max(np.abs(rir))
-            else:
-                # For other methods, use standard max normalization
-                rir = rir / np.max(np.abs(rir))
-            
+            rir = rir_normalisation(rir, geom_room, fs, normalize_to_first_impulse=True)['single_rir']
+
             # Create experiment object
             experiment = SDNExperiment(
                 config=full_config,
@@ -850,24 +1077,29 @@ class SDNExperimentManager:
             # Generate descriptive filename based on experiment parameters
             method = experiment.config.get('method')
             filename = self._generate_param_set_name(experiment.config)
-            
+            print(filename, method)
             # Add method prefix for singular case
             if method == 'SDN':
                 filename = f"sdn_{filename}"
-            else:
-                # For other methods (ISM, TREBLE), use simpler naming
-                filename = f"{method.lower()}"
-                
-                # Add order for ISM if specified
-                if method == 'ISM' and 'max_order' in experiment.config:
+            elif method == 'HO-SDN':
+                # For HO-SDN, use the param_set name directly without adding method prefix
+                # The param_set name already includes "ho-sdn" and the order
+                filename = filename
+            elif method == 'RIMPY':
+                # For RIMPY, add the method prefix and the reflection sign
+                filename = f"rimpy_{filename}"
+            elif method == 'ISM':
+                # For ISM, add the method prefix and order
+                filename = f"ism_{filename}"
+                if 'max_order' in experiment.config:
                     filename += f"_order{experiment.config['max_order']}"
                     if experiment.config.get('use_rt'):
                         filename += '_rt'
-                
-                # Add order for TREBLE if specified
-                elif method == 'TREBLE' and 'max_order' in experiment.config:
-                    filename += f"_order{experiment.config['max_order']}"
-            
+            else:
+                # For other methods (TREBLE), use simpler naming
+                filename = f"{method.lower()}"
+                    
+
             # Save metadata with descriptive filename
             metadata_path = os.path.join(room_dir, f"{filename}.json")
             with open(metadata_path, 'w') as f:
@@ -975,9 +1207,9 @@ class SDNExperimentManager:
         Returns:
             SDNExperiment: The experiment object
         """
-        for room in self.rooms.values():
-            if experiment_id in room.experiments:
-                return room.experiments[experiment_id]
+        for project in self.projects.values():
+            if experiment_id in project.experiments:
+                return project.experiments[experiment_id]
         return None
     
     def get_experiments_by_label(self, label):
@@ -991,8 +1223,11 @@ class SDNExperimentManager:
             list: List of matching experiments
         """
         experiments = []
-        for room in self.rooms.values():
-            experiments.extend([exp for exp in room.experiments.values() if label in exp.get_label()])
+        for project in self.projects.values():
+            experiments.extend([
+                exp for exp in project.experiments.values() 
+                if label in exp.get_label()['label'] or label in exp.get_label()['label_for_legend']
+            ])
         return experiments
     
     def get_all_experiments(self):
@@ -1003,113 +1238,46 @@ class SDNExperimentManager:
             list: List of all experiments
         """
         experiments = []
-        for room in self.rooms.values():
-            experiments.extend(list(room.experiments.values()))
+        for project in self.projects.values():
+            experiments.extend(list(project.experiments.values()))
         return experiments
 
-    def run_ism_experiment(self, room_parameters, max_order=12, ray_tracing=False, use_rand_ism=False, duration=0.5, fs=44100, force_rerun=False, project_name=None, label="ISM", batch_processing=False, source_positions=None, receiver_positions=None):
-        """
-        Run an Image Source Method (ISM) experiment.
-        
-        Args:
-            room_parameters (dict): Room parameters
-            max_order (int): Maximum reflection order
-            ray_tracing (bool): Whether to use ray tracing
-            use_rand_ism (bool): Whether to use randomized ISM
-            duration (float): Duration of the simulation in seconds
-            fs (int): Sampling frequency
-            force_rerun (bool): If True, rerun the experiment even if it exists
-            project_name (str): Name of the project/experiment group (e.g. 'aes_abs20_comparison')
-            label (str): Label for the experiment
-            batch_processing (bool): If True, run as batch processing with multiple source/receiver positions
-            source_positions (list, optional): List of source positions for batch processing
-            receiver_positions (list, optional): List of receiver positions for batch processing
-            
-        Returns:
-            SDNExperiment or dict: The experiment object or dict of experiment objects for batch processing
-        """
-        # Create config
-        config = {
-            'label': label,
-            'info': "",
-            'max_order': max_order,
-            'ray_tracing': ray_tracing,
-            'use_rand_ism': use_rand_ism,
-        }
-        
-        # Run the experiment
-        return self.run_experiment(
-            config=config,
-            room_parameters=room_parameters,
-            duration=duration,
-            fs=fs,
-            force_rerun=force_rerun,
-            project_name=project_name,
-            method='ISM',
-            batch_processing=batch_processing,
-            source_positions=source_positions,
-            receiver_positions=receiver_positions
-        )
-
-# Singleton pattern for batch manager
-# _batch_manager = None
-
-def set_batch_manager(results_dir='results', dont_check_duplicates=False):
+# Replace the two separate functions with a unified function
+def get_experiment_manager(is_batch=False, results_dir='results', dont_check_duplicates=False):
     """
-    Get or create the batch experiment manager singleton.
+    Create an experiment manager for either batch or singular experiments.
+    This unified function replaces the separate batch and singular manager functions.
     
     Args:
-        results_dir (str): Custom directory to store batch experiment results
-                          Default is 'results' with data in 'results/rooms/'
-        dont_check_duplicates (bool): If True, skip loading existing experiments.
-                                    This significantly speeds up initialization
-                                    when you don't need to check for duplicates.
-    
+        is_batch (bool): If True, create a batch manager; otherwise a singular manager
+        results_dir (str): Base directory to store experiment data
+                         For batch: {results_dir}/rooms/
+                         For singular: {results_dir}/room_singulars/
+        dont_check_duplicates (bool): If True, skip loading existing experiments
+                                    
     Returns:
-        SDNExperimentManager: The batch experiment manager instance
+        SDNExperimentManager: The experiment manager instance
     """
-    _batch_manager = SDNExperimentManager(
+    manager = SDNExperimentManager(
         results_dir=results_dir,
-        is_batch_manager=True,
+        is_batch_manager=is_batch,
         dont_check_duplicates=dont_check_duplicates
     )
-    return _batch_manager
+    return manager
 
-def set_singular_manager(results_dir='results', dont_check_duplicates=False):
-    """
-    Get or create the singular experiment manager singleton.
-    
-    Args:
-        results_dir (str): Custom directory to store singular experiment results
-                          Default is 'results' with data in 'results/room_singulars/'
-        dont_check_duplicates (bool): If True, skip loading existing experiments.
-                                    This significantly speeds up initialization
-                                    when you don't need to check for duplicates.
-    
-    Returns:
-        SDNExperimentManager: The singular experiment manager instance  
-    """
-    _singular_manager = SDNExperimentManager(
-            results_dir=results_dir,
-            is_batch_manager=False,
-            dont_check_duplicates=dont_check_duplicates
-        )
-    return _singular_manager
-
-_singular_manager = None
 
 if __name__ == "__main__":
 
-    # run_single_experiments = True
-    run_batch_experiments = True
+    run_single_experiments = False
+    run_batch_experiments = not run_single_experiments
 
-    show_experiments = True
-    project_name = "temp_room_aes"
-
+    show_experiments = False
+    project_name = "journal_absorptioncoeffs"
+    project_name = "debug_aes_skipmetrics"
     duration = 1
 
     # Use this as a parent directory for the results (optional)
-    results_dir = 'results'  # Default: uses results/rooms/
+    results_dir = 'results'
 
     room_waspaa = {
         'width': 6, 'depth': 7, 'height': 4,
@@ -1131,209 +1299,149 @@ if __name__ == "__main__":
                     }
 
     room = room_aes
-    # room_name = "room_aes"
+    # room = room_aes
 
+    # Create managers if needed
+    batch_manager = get_experiment_manager(is_batch=True, results_dir=results_dir, dont_check_duplicates=False) if run_batch_experiments else None
+    single_manager = get_experiment_manager(is_batch=False, results_dir=results_dir, dont_check_duplicates=False) if run_single_experiments else None
 
+    # DEFINE ALL CONFIGURATIONS ONCE - independent of batch/single mode
+    configs = []
+
+    # ISM experiment
+    # configs.append({
+    #     'method': 'ISM',
+    #     'label': 'pra',
+    #     'info': '',
+    #     'max_order': 100,
+    #     'ray_tracing': False
+    # })
+
+    # Original SDN experiment
+    configs.append({
+        'method': 'SDN',
+        'label': 'original',
+        'info': '',
+        'flags': {
+        }
+    })
+
+    # SDN experiments with different weightings
+    # for weighting in [2, 4, 5]:
+    #     configs.append({
+    #         'method': 'SDN',
+    #         'label': 'weighted psk',
+    #         'info': '',
+    #         'flags': {
+    #             'specular_source_injection': True,
+    #             'source_weighting': weighting,
+    #         }
+    #     })
+
+    # # RIMPY experiments
+    # configs.append({
+    #     'method': 'RIMPY',
+    #     'label': 'posRef',
+    #     'info': '',
+    #     'reflection_sign': 1
+    # })
+    
+    # configs.append({
+    #     'method': 'RIMPY',
+    #     'label': 'negRef',
+    #     'info': '',
+    #     'reflection_sign': -1
+    # })
+    
+    # HO-SDN experiments
+    for order in [2,3]:
+        configs.append({
+            'method': 'HO-SDN',
+            'label': f'N{order}',
+            'info': '',
+            'source_signal': 'dirac',
+            'order': order
+        })
+
+    # SINGLE EXPERIMENTS
+    if run_single_experiments:
+        print(f"Singular experiments saved in: {single_manager._get_room_dir(project_name)}")
+
+        # Run single experiments with the defined configs
+        # No source_positions/receiver_positions needed - uses defaults from room dict
+        for config in configs:
+            single_manager.run_experiment(
+                config=config,
+                room_parameters=room,
+                duration=duration,
+                fs=44100,
+                project_name=project_name,
+                batch_processing=False
+            )
+
+    # BATCH EXPERIMENTS
     if run_batch_experiments:
-
-        # Generate source & receiver positions
-        # receiver_positions = sa.generate_receiver_grid(room['width'], room['depth'], 50)
-
-        receiver_positions = sa.generate_receiver_grid(room['width'] / 2, room['depth'] / 2, n_points=16, margin=0.5)  # room aes
+        # Generate source & receiver positions for batch processing
+        # receiver_positions = sa.generate_receiver_grid_old(room['width'] / 2, room['depth'] / 2, n_points=16, margin=0.5)
+        receiver_positions = sa.generate_receiver_grid_tr(room['width'] / 2, room['depth'] / 2, n_points=16, margin=0.5)
         source_positions = sa.generate_source_positions(room)
 
-        # Run batch experiments
-        # Use custom results directory for batch experiments (optional)
-        batch_manager = set_batch_manager(results_dir, dont_check_duplicates=False)  # Default: uses results/rooms/
-
         print(f"Batch experiments saved in: {batch_manager._get_room_dir(project_name)}")
+        
+        # Run batch experiments with the defined configs
+        for config in configs:
+            batch_manager.run_experiment(
+                config=config,
+                room_parameters=room,
+                duration=duration,
+                fs=44100,
+                project_name=project_name,
+                batch_processing=True,
+                source_positions=source_positions,
+                receiver_positions=receiver_positions
+            )
 
-        batch_manager.run_experiment(
-            config={
-                'label': 'weighted psk',
-                'info': '',
-                'method': 'SDN',
-                'flags': {
-                    'specular_source_injection': True,
-                    'source_weighting': 2,
-                }
-            },
-            room_parameters=room,
-            duration=duration,
-            fs=44100,
-            project_name=project_name,
-            batch_processing=True,  # Enable batch processing
-            source_positions=source_positions,  # Provide source positions
-            receiver_positions=receiver_positions  # Provide receiver positions
-        )
 
-        batch_manager.run_ism_experiment(
-            room_parameters=room,
-            duration=duration,  # Shorter duration for batch processing
-            fs=44100,
-            max_order=5,
-            ray_tracing=False,
-            project_name=project_name,
-            batch_processing=True,  # Enable batch processing
-            source_positions=source_positions,  # Provide source positions
-            receiver_positions=receiver_positions,  # Provide receiver positions
-            label = "pra"
-        )
 
-    if run_single_experiments:
-        # Method 1: Run experiments directly
-        # Use custom results directory for singular experiments (optional)
-
-        single_manager = set_singular_manager()  # Will use results_custom/room_singulars/
-        # single_manager = set_singular_manager(results_dir)  # Default: uses results/room_singulars/
-
-        # print(f"Singular experiments saved in: {single_manager._get_room_dir(project_name)}")
-
-        # Run an SDN experiment - single source and receiver (uses singular manager)
-
-        single_manager.run_experiment(
-            config={
-                'label': 'original',
-                'info': '',
-                'method': 'SDN',
-                'flags': {
-                    # 'specular_source_injection': True,
-                    # 'source_weighting': 2,
-                }
-            },
-            room_parameters=room,
-            duration=duration,
-            fs=44100,
-            project_name=project_name
-        )
-
-        single_manager.run_experiment(
-            config={
-                'label': 'weighted psk',
-                'info': '',
-                'method': 'SDN',
-                'flags': {
-                    'specular_source_injection': True,
-                    'source_weighting': 3,
-                    # 'normalize_to_first_impulse': True
-                }
-            },
-            room_parameters=room,
-            duration=duration,
-            fs=44100,
-            project_name = project_name
-        )
-
-        # single_manager.run_experiment(
-        #     config={
-        #         'label': 'weighted psk nor',
-        #         'info': 'normed',
-        #         'method': 'SDN',
-        #         'flags': {
-        #             'specular_source_injection': True,
-        #             'source_weighting': 3,
-        #         }
-        #     },
-        #     room_parameters=room,
-        #     duration=duration,
-        #     fs=44100,
-        #     project_name=project_name
-        # )
-        #
-        single_manager.run_experiment(
-            config={
-                'label': 'weighted psk',
-                'info': '',
-                'method': 'SDN',
-                'flags': {
-                    'specular_source_injection': True,
-                    'source_weighting': 6,
-                }
-            },
-            room_parameters=room,
-            duration=duration,
-            fs=44100,
-            project_name=project_name
-        )
-        #
-        # single_manager.run_experiment(
-        #     config={
-        #         'label': 'weighted psk',
-        #         'info': '',
-        #         'method': 'SDN',
-        #         'flags': {
-        #             'specular_source_injection': True,
-        #             'source_weighting': 6,
-        #             'normalize_to_first_impulse': True
-        #         }
-        #     },
-        #     room_parameters=room,
-        #     duration=duration,
-        #     fs=44100,
-        #     project_name=project_name
-        # )
-        # #
-        # single_manager.run_experiment(
-        #     config={
-        #         'label': 'weighted psk',
-        #         'info': '',
-        #         'method': 'SDN',
-        #         'flags': {
-        #             'specular_source_injection': True,
-        #             'source_weighting': 50,
-        #             'normalize_to_first_impulse': True
-        #         }
-        #     },
-        #     room_parameters=room,
-        #     duration=duration,
-        #     fs=44100,
-        #     project_name=project_name
-        # )
-        #
-        # single_manager.run_experiment(
-        #     config={
-        #         'label': 'weighted psk',
-        #         'info': '',
-        #         'method': 'SDN',
-        #         'flags': {
-        #             'specular_source_injection': True,
-        #             'source_weighting': 100,
-        #             'normalize_to_first_impulse': True
-        #         }
-        #     },
-        #     room_parameters=room,
-        #     duration=duration,
-        #     fs=44100,
-        #     project_name=project_name
-        # )
-
-        # #
-        # # # Run an ISM experiment
-        single_manager.run_ism_experiment(
-            room_parameters=room,
-            max_order=100,
-            ray_tracing=False,
-            duration=duration,
-            fs=44100,
-            project_name= project_name,
-            label="",
-        )
-
-    #dump batch_manager to pickle
-    # import pickle
-    # with open('batch_manager_roomaes_4exp.pkl', 'wb') as f:
-    #     pickle.dump(batch_manager.rooms, f)
-
+    # VISUALIZE RESULTS
     if show_experiments:
         from sdn_experiment_visualizer import ExperimentVisualizer
-        from sdn_manager_load_sims import ExperimentLoaderManager
 
-        singular_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=False,
+        """from sdn_manager_load_sims import ExperimentLoaderManager
+
+        if run_batch_experiments:
+            batch_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=True,
+                                                    project_names=project_name)
+            print(batch_manager.get_experiments_by_label("weighted psk"))
+            print(batch_manager.get_experiments_by_label("original"))
+            print(batch_manager.get_experiments_by_label("pra"))
+            
+        else:
+
+            singular_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=False,
                                                    project_names=project_name)
+            print(singular_manager.get_experiments_by_label("weighted psk"))
+            print(singular_manager.get_experiments_by_label("original"))
+            print(singular_manager.get_experiments_by_label("pra"))"""
 
-        print(singular_manager.get_experiments_by_label("weighted psk"))
-        print(singular_manager.get_experiments_by_label("original"))
-        print(singular_manager.get_experiments_by_label("pra"))
+        # not possible to run correctly without loadmanager, yet. src-mics eksik kalıyor
 
-        single_visualizer = ExperimentVisualizer(singular_manager)
-        single_visualizer.show(port=1990)
+        # if run_single_experiments:
+        #     single_visualizer = ExperimentVisualizer(single_manager)
+        #     single_visualizer.show(port=1990)
+        #
+        if run_batch_experiments:
+            batch_visualizer = ExperimentVisualizer(batch_manager)
+            batch_visualizer.show(port=1980)
+
+        # import sdn_experiment_visualizer as sev
+        # import importlib
+        # importlib.reload(sev)
+        # single_visualizer = sev.ExperimentVisualizer(singular_manager)
+        # single_visualizer.show(port=1983)
+
+        # import sdn_experiment_visualizer as sev
+        # import importlib
+        # importlib.reload(sev)
+        # batch_visualizer = ExperimentVisualizer(batch_manager)
+        # batch_visualizer.show(port=1983)
