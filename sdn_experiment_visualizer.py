@@ -49,6 +49,8 @@ class ExperimentVisualizer:
         self.use_on_demand_calculations = False
         # Flag to control whether to include bongo convolution
         self.include_bongo = True
+        # Flag to track if convolution has been precomputed
+        self.convolution_precomputed = False
         
         # Import analysis modules and store them as class attributes
         # This makes them accessible in callback functions via self
@@ -238,7 +240,7 @@ class ExperimentVisualizer:
                 ),
                 customdata=[[i, 'receiver'] for i in range(len(mic_positions))],
                 hoverinfo='text',
-                hovertext=[f"Receiver {i+1}: ({pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f})" 
+                hovertext=[f"Receiver {i+1}: ({pos[0]:.2f}, {pos[1]:.1f}, {pos[2]:.1f})" 
                           for i, pos in enumerate(mic_positions)],
                 name='All Microphones',
                 showlegend=False
@@ -351,6 +353,7 @@ class ExperimentVisualizer:
         """
         self.use_on_demand_calculations = use_on_demand_calculations
         self.include_bongo = include_bongo
+        self.convolution_precomputed = False
         
         if use_on_demand_calculations:
             print("\nUsing ON-DEMAND calculations for EDC and NED (may affect UI responsiveness).")
@@ -465,6 +468,30 @@ class ExperimentVisualizer:
                         'display': 'inline-block',
                         'verticalAlign': 'middle'
                     }),
+                    # Add bongo precompute button
+                    html.Button(
+                        '🥁 Convolve with Bongo',
+                        id='precompute-bongo-button',
+                        style={
+                            'fontSize': 14,
+                            'marginRight': '20px',
+                            'backgroundColor': '#404080',  # Slightly different color
+                            'color': dark_theme['button_text'],
+                            'border': 'none',
+                            'borderRadius': '4px',
+                            'padding': '2px 10px',
+                            'cursor': 'pointer',
+                            'display': 'inline-block' if self.include_bongo else 'none',  # Only show if bongo is enabled
+                            'verticalAlign': 'middle'
+                        }
+                    ),
+                    # Add loading spinner that shows when bongo is being computed
+                    dcc.Loading(
+                        id="bongo-loading",
+                        type="circle",
+                        color="#61dafb",
+                        children=html.Div(id="bongo-loading-output", style={'display': 'inline-block'}),
+                    ),
                     html.H3(
                         id='rt-header',
                         style={
@@ -480,7 +507,8 @@ class ExperimentVisualizer:
                     'alignItems': 'center',
                     'justifyContent': 'center'
                 }),
-                dcc.Store(id='current-room-idx', data=current_room_idx)
+                dcc.Store(id='current-room-idx', data=current_room_idx),
+                dcc.Store(id='convolution-status', data={'status': 'not_started', 'completed': 0, 'total': 0})
             ], style={
                 'textAlign': 'center',
                 'margin': '2px',  # Reduce margin
@@ -894,6 +922,17 @@ class ExperimentVisualizer:
                     .play-button:hover {
                         background-color: #505050;
                     }
+                    /* Bongo status indicator */
+                    .bongo-status {
+                        display: inline-block;
+                        margin-left: 10px;
+                        font-size: 14px;
+                        color: #e0e0e0;
+                    }
+                    /* Override the bongo button hover color */
+                    #precompute-bongo-button:hover {
+                        background-color: #5050A0 !important;
+                    }
                     /* Table styles */
                     .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner td {
                         background-color: #282c34 !important;
@@ -940,6 +979,12 @@ class ExperimentVisualizer:
                         max-height: none !important;
                         overflow: visible !important;
                     }
+                    
+                    /* Disabled play button style */
+                    .play-button-disabled {
+                        opacity: 0.5;
+                        cursor: not-allowed;
+                    }
                 </style>
                 <script>
                     // Function to handle play button clicks
@@ -949,6 +994,7 @@ class ExperimentVisualizer:
                         const UPDATE_INTERVAL = 16; // 60fps
                         let currentPlot = null;
                         let currentTraceIndex = -1;
+                        let convolutionInProgress = false;
 
                         // Function to find RIR plot and time bar trace
                         function findRIRPlotAndTimeBar() {
@@ -985,6 +1031,13 @@ class ExperimentVisualizer:
                         // Use event delegation for dynamically added buttons
                         document.body.addEventListener('click', function(e) {
                             if (e.target && e.target.id && e.target.id.startsWith('play-button-')) {
+                                // Check if this is a convolved audio button that hasn't been processed yet
+                                if (e.target.id.startsWith('play-button-conv_') && 
+                                    e.target.classList.contains('play-button-disabled')) {
+                                    alert('Please click "Convolve with Bongo" button first to generate all bongo samples.');
+                                    return;
+                                }
+                                
                                 // Extract experiment ID from button ID
                                 const experimentId = e.target.id.replace('play-button-', '');
                                 
@@ -1097,6 +1150,36 @@ class ExperimentVisualizer:
                             const experimentId = window.location.hash.replace('#play-', '');
                             playAudio(experimentId);
                         }
+                        
+                        // Handle convolution status changes
+                        window.updateConvolutionStatus = function(status, completed, total) {
+                            const bongoButtons = document.querySelectorAll('[id^="play-button-conv_"]');
+                            
+                            // Update all bongo play buttons based on status
+                            if (status === 'not_started' || status === 'in_progress') {
+                                bongoButtons.forEach(button => {
+                                    button.classList.add('play-button-disabled');
+                                });
+                                convolutionInProgress = (status === 'in_progress');
+                            } else if (status === 'completed') {
+                                bongoButtons.forEach(button => {
+                                    button.classList.remove('play-button-disabled');
+                                });
+                                convolutionInProgress = false;
+                            }
+                            
+                            // Update the precompute button text
+                            const precomputeButton = document.getElementById('precompute-bongo-button');
+                            if (precomputeButton) {
+                                if (status === 'not_started') {
+                                    precomputeButton.textContent = '🥁 Convolve with Bongo';
+                                } else if (status === 'in_progress') {
+                                    precomputeButton.textContent = `🥁 Processing... ${completed}/${total}`;
+                                } else if (status === 'completed') {
+                                    precomputeButton.textContent = '🥁 Bongo Audio Ready';
+                                }
+                            }
+                        };
                     });
                 </script>
             </head>
@@ -1461,6 +1544,10 @@ class ExperimentVisualizer:
                         
                         if self.include_bongo:
                             table_data[-1]['play_convolved'] = f'<button id="play-button-conv_{exp.experiment_id}" class="play-button">▶</button>'
+                        
+                        if self.convolution_precomputed:
+                            disabled_class = "play-button-disabled"
+                            table_data[-1]['play_convolved'] = f'<button id="play-button-conv_{exp.experiment_id}" class="play-button {disabled_class}">▶</button>'
             else:
                 # Just populate table with experiment info, no error calculations
                 for idx, exp in enumerate(sorted_experiments, 1):
@@ -1477,7 +1564,8 @@ class ExperimentVisualizer:
                     })
                     
                     if self.include_bongo:
-                        table_data[-1]['play_convolved'] = f'<button id="play-button-conv_{exp.experiment_id}" class="play-button">▶</button>'
+                        disabled_class = "play-button-disabled" if not self.convolution_precomputed else ""
+                        table_data[-1]['play_convolved'] = f'<button id="play-button-conv_{exp.experiment_id}" class="play-button {disabled_class}">▶</button>'
 
             # Create room visualization without error contour
             room_plot = self.create_room_visualization([room], highlight_pos_idx=pos_idx)
@@ -1534,9 +1622,13 @@ class ExperimentVisualizer:
                     )
                 )
                 
-                # Add convolved audio only if enabled
+                # Add empty convolved audio placeholder if bongo is enabled but not yet computed
                 if self.include_bongo:
-                    convolved_audio_data = self.generate_convolved_audio_data(exp.rir, exp.fs, experiment_id)
+                    # Only compute convolution if precomputed flag is True
+                    if self.convolution_precomputed:
+                        convolved_audio_data = self.generate_convolved_audio_data(exp.rir, exp.fs, experiment_id)
+                    else:
+                        convolved_audio_data = ""
                     
                     # Create hidden convolved audio component
                     audio_components.append(
@@ -1767,6 +1859,85 @@ class ExperimentVisualizer:
         print("=" * 70)
         # Run the app
         app.run_server(debug=True, port=port)
+
+        # Update room plot colors to match original implementation
+        @app.callback(
+            [Output("bongo-loading-output", "children"), 
+             Output("convolution-status", "data")],
+            [Input("precompute-bongo-button", "n_clicks")],
+            [State("experiment-table", "data"),
+             State("convolution-status", "data"),
+             State("current-room-idx", "data")]
+        )
+        def precompute_bongo(n_clicks, table_data, conv_status, room_idx):
+            if not n_clicks or not self.include_bongo:
+                return dash.no_update, dash.no_update
+
+            ctx = dash.callback_context
+            if not ctx.triggered:
+                return dash.no_update, dash.no_update
+            
+            # Check if already completed
+            if conv_status.get('status') == 'completed':
+                return "", conv_status
+            
+            if not table_data:
+                return "", {'status': 'not_started', 'completed': 0, 'total': 0}
+            
+            # Get all experiment IDs from the table
+            experiment_ids = []
+            for row in table_data:
+                # Extract ID from the play button HTML
+                play_button = row.get('play', '')
+                if 'play-button-' in play_button:
+                    start_idx = play_button.find('play-button-') + len('play-button-')
+                    end_idx = play_button.find('"', start_idx)
+                    if start_idx > 0 and end_idx > start_idx:
+                        experiment_ids.append(play_button[start_idx:end_idx])
+            
+            if not experiment_ids:
+                return "", {'status': 'not_started', 'completed': 0, 'total': 0}
+            
+            # Set status to in_progress
+            status = {'status': 'in_progress', 'completed': 0, 'total': len(experiment_ids)}
+            
+            # Start background convolution for all experiments
+            for i, exp_id in enumerate(experiment_ids):
+                room_name = room_names[room_idx]
+                room = self.manager.projects[room_name]
+                
+                # Find experiment by ID
+                for exp in room.experiments.values():
+                    if exp.experiment_id == exp_id:
+                        # Generate convolved audio
+                        self.generate_convolved_audio_data(exp.rir, exp.fs, exp_id)
+                        status['completed'] = i + 1
+                        break
+            
+            # Set completed status
+            self.convolution_precomputed = True
+            status['status'] = 'completed'
+            
+            # Return empty div and updated status
+            return "", status
+        
+        # Add client-side callback to update UI when convolution status changes
+        app.clientside_callback(
+            """
+            function(convStatus) {
+                if (window.updateConvolutionStatus) {
+                    window.updateConvolutionStatus(
+                        convStatus.status, 
+                        convStatus.completed, 
+                        convStatus.total
+                    );
+                }
+                return window.dash_clientside.no_update;
+            }
+            """,
+            Output("bongo-loading-output", "style"),
+            [Input("convolution-status", "data")]
+        )
 
     def generate_audio_data(self, rir, fs, experiment_id):
         """

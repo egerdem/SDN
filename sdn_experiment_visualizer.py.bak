@@ -13,7 +13,6 @@ import plot_room as pp
 import EchoDensity as ned
 import plotly.express as px
 import time
-import flask
 
 class ExperimentVisualizer:
     print("visualizer started")
@@ -48,6 +47,10 @@ class ExperimentVisualizer:
         self.metrics_cache = {}
         # Flag to control whether to use on-demand calculations
         self.use_on_demand_calculations = False
+        # Flag to control whether to include bongo convolution
+        self.include_bongo = True
+        # Dictionary to track which experiments have been convolved
+        self.convolved_experiments = {}
         
         # Import analysis modules and store them as class attributes
         # This makes them accessible in callback functions via self
@@ -237,7 +240,7 @@ class ExperimentVisualizer:
                 ),
                 customdata=[[i, 'receiver'] for i in range(len(mic_positions))],
                 hoverinfo='text',
-                hovertext=[f"Receiver {i+1}: ({pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f})" 
+                hovertext=[f"Receiver {i+1}: ({pos[0]:.2f}, {pos[1]:.1f}, {pos[2]:.1f})" 
                           for i, pos in enumerate(mic_positions)],
                 name='All Microphones',
                 showlegend=False
@@ -338,7 +341,7 @@ class ExperimentVisualizer:
         
         return fig
 
-    def show(self, is_batch=True, port=9050, use_on_demand_calculations=False):
+    def show(self, is_batch=True, port=9050, use_on_demand_calculations=False, include_bongo=True):
         """
         Launch the visualization dashboard.
         
@@ -346,12 +349,18 @@ class ExperimentVisualizer:
             is_batch (bool): Whether to use batch mode
             port (int): Port number for the Dash server
             use_on_demand_calculations (bool): If True, calculate metrics on demand in the visualizer
+            include_bongo (bool): If True, include bongo convolution feature
         """
         self.use_on_demand_calculations = use_on_demand_calculations
+        self.include_bongo = include_bongo
+        
         if use_on_demand_calculations:
             print("\nUsing ON-DEMAND calculations for EDC and NED (may affect UI responsiveness).")
             print("This mode is useful for testing algorithm changes without reloading data.\n")
             
+        if not include_bongo:
+            print("\nBongo convolution feature is disabled.\n")
+
         # Get the appropriate manager if not provided
         if self.manager is None:
             self.manager = get_batch_manager() if is_batch else get_singular_manager()
@@ -368,30 +377,6 @@ class ExperimentVisualizer:
         def add_header(response):
             response.headers["ngrok-skip-browser-warning"] = "true"
             return response
-            
-        # Add route for on-demand convolved audio
-        @app.server.route('/get-convolved-audio')
-        def get_convolved_audio():
-            experiment_id = flask.request.args.get('id')
-            if not experiment_id:
-                return flask.jsonify({'error': 'No experiment ID provided'}), 400
-                
-            # Find the experiment in the manager
-            experiment = None
-            for room_name, room in self.manager.projects.items():
-                for exp in room.experiments.values():
-                    if exp.experiment_id == experiment_id:
-                        experiment = exp
-                        break
-                if experiment:
-                    break
-                    
-            if not experiment:
-                return flask.jsonify({'error': 'Experiment not found'}), 404
-                
-            # Generate convolved audio
-            convolved_audio = self.generate_convolved_audio_data(experiment.rir, experiment.fs, experiment_id)
-            return flask.jsonify({'audio': convolved_audio})
 
         # Dark theme colors
         dark_theme = {
@@ -497,7 +482,8 @@ class ExperimentVisualizer:
                     'alignItems': 'center',
                     'justifyContent': 'center'
                 }),
-                dcc.Store(id='current-room-idx', data=current_room_idx)
+                dcc.Store(id='current-room-idx', data=current_room_idx),
+                dcc.Store(id='convolution-progress', data={'status': 'idle', 'id': None})
             ], style={
                 'textAlign': 'center',
                 'margin': '2px',  # Reduce margin
@@ -711,16 +697,7 @@ class ExperimentVisualizer:
                                     markdown_options={'html': True},
                                     columns=[
                                         {'name': 'Play', 'id': 'play', 'presentation': 'markdown'},
-                                        {'name': 'Bongo', 'id': 'play_convolved', 'presentation': 'markdown'},  # New column for convolved audio
-                                        {'name': 'ID', 'id': 'id'},
-                                        {'name': 'Method', 'id': 'method'},
-                                        {'name': 'Label', 'id': 'label'},
-                                        {'name': 'RT60', 'id': 'rt60'},
-                                        {'name': 'Total Energy', 'id': 'total_energy'},
-                                        {'name': f'{self.ERROR_METRICS[0]["label"]} [50ms]', 'id': 'error_50ms'},
-                                        {'name': f'{self.ERROR_METRICS[0]["label"]} [500ms]', 'id': 'error_500ms'}
-                                    ],
-                                    data=[]  # Will be populated in callback
+                                    ]
                                 ),
                             ], style={'flex': '3'}),
                             # Mean error table
@@ -920,6 +897,15 @@ class ExperimentVisualizer:
                     .play-button:hover {
                         background-color: #505050;
                     }
+                    /* Loading state for play button */
+                    .play-button-loading {
+                        font-size: 10px;
+                        animation: spin 1.5s linear infinite;
+                    }
+                    @keyframes spin {
+                        0% { transform: rotate(0deg); }
+                        100% { transform: rotate(360deg); }
+                    }
                     /* Table styles */
                     .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner td {
                         background-color: #282c34 !important;
@@ -1021,47 +1007,40 @@ class ExperimentVisualizer:
                                 
                                 const audioElement = document.getElementById(audioId);
                                 
-                                if (audioElement) {
-                                    // Check if audio is already playing
-                                    if (!audioElement.paused) {
-                                        // Pause the audio
-                                        audioElement.pause();
-                                        e.target.textContent = '▶';
-                                        return;
-                                    }
+                                // For convolved buttons, check if audio data exists
+                                if (isConvolved && audioElement && (!audioElement.src || audioElement.src === 'data:audio/wav;base64,')) {
+                                    // If no audio data, start convolution process
+                                    console.log('Starting convolution for experiment:', actualId);
                                     
-                                    // For convolved audio, check if we need to generate it
-                                    if (isConvolved && !audioElement.src) {
-                                        e.target.textContent = '⏳';  // Show loading indicator
-                                        
-                                        // Make an AJAX call to get the convolved audio
-                                        const xhr = new XMLHttpRequest();
-                                        xhr.open('GET', '/get-convolved-audio?id=' + actualId, true);
-                                        xhr.responseType = 'json';
-                                        
-                                        xhr.onload = function() {
-                                            if (xhr.status === 200) {
-                                                // Set the audio source and play
-                                                audioElement.src = 'data:audio/wav;base64,' + xhr.response.audio;
-                                                playAudio(experimentId, e.target);
-                                            } else {
-                                                console.error('Failed to get convolved audio');
-                                                e.target.textContent = '▶';
-                                            }
-                                        };
-                                        
-                                        xhr.onerror = function() {
-                                            console.error('Error in AJAX request for convolved audio');
-                                            e.target.textContent = '▶';
-                                        };
-                                        
-                                        xhr.send();
-                                        return;
-                                    }
+                                    // Show loading state
+                                    e.target.innerHTML = '⌛';
+                                    e.target.classList.add('play-button-loading');
                                     
-                                    // Otherwise play the audio
-                                    playAudio(experimentId, e.target);
+                                    // Set a clickable attribute to prevent additional clicks during processing
+                                    e.target.setAttribute('data-processing', 'true');
+                                    
+                                    // Trigger server-side convolution through clientside callback
+                                    window.dash_clientside.trigger_callback(
+                                        'update-convolution-progress',
+                                        'convolution-progress',
+                                        'data',
+                                        { 'status': 'processing', 'id': actualId }
+                                    );
+                                    
+                                    // Return early - don't play audio yet
+                                    return;
                                 }
+                                
+                                // If audio is already playing, pause it
+                                if (audioElement && !audioElement.paused) {
+                                    // Pause the audio
+                                    audioElement.pause();
+                                    e.target.textContent = '▶';
+                                    return;
+                                }
+                                
+                                // Otherwise play the audio
+                                playAudio(experimentId, e.target);
                             }
                         });
                         
@@ -1086,6 +1065,7 @@ class ExperimentVisualizer:
                                         const otherButton = document.getElementById(otherButtonId);
                                         if (otherButton) {
                                             otherButton.textContent = '▶';
+                                            otherButton.classList.remove('play-button-loading');
                                         }
                                     }
                                 });
@@ -1109,6 +1089,7 @@ class ExperimentVisualizer:
                                 // Update button text
                                 if (buttonElement) {
                                     buttonElement.textContent = '⏸';
+                                    buttonElement.classList.remove('play-button-loading');
                                     
                                     // Add event listener for when audio ends
                                     audioElement.onended = function() {
@@ -1137,6 +1118,27 @@ class ExperimentVisualizer:
                                 };
                             }
                         }
+                        
+                        // Function to update audio element with new data
+                        window.updateAudioElement = function(experimentId, audioData) {
+                            const audioElement = document.getElementById('audio-conv_' + experimentId);
+                            if (audioElement) {
+                                audioElement.src = 'data:audio/wav;base64,' + audioData;
+                                
+                                // Find and update the button
+                                const buttonElement = document.getElementById('play-button-conv_' + experimentId);
+                                if (buttonElement) {
+                                    buttonElement.textContent = '▶';
+                                    buttonElement.classList.remove('play-button-loading');
+                                    buttonElement.removeAttribute('data-processing');
+                                    
+                                    // Auto-play the audio
+                                    setTimeout(() => {
+                                        playAudio('conv_' + experimentId, buttonElement);
+                                    }, 100);
+                                }
+                            }
+                        };
                         
                         // Check for hash changes to trigger audio playback
                         window.addEventListener('hashchange', function() {
@@ -1339,15 +1341,20 @@ class ExperimentVisualizer:
             # Prepare table columns
             columns = [
                 {'name': 'Play', 'id': 'play', 'presentation': 'markdown'},
-                {'name': 'Bongo', 'id': 'play_convolved', 'presentation': 'markdown'},  # New column for convolved audio
+            ]
+            
+            if self.include_bongo:
+                columns.append({'name': 'Bongo', 'id': 'play_convolved', 'presentation': 'markdown'})
+                
+            columns.extend([
                 {'name': 'ID', 'id': 'id'},
                 {'name': 'Method', 'id': 'method'},
                 {'name': 'Label', 'id': 'label'},
                 {'name': 'RT60', 'id': 'rt60'},
                 {'name': 'Total Energy', 'id': 'total_energy'},
-                {'name': f'{self.ERROR_METRICS[0]["label"]} [50ms]', 'id': 'error_50ms'},
-                {'name': f'{self.ERROR_METRICS[0]["label"]} [500ms]', 'id': 'error_500ms'}
-            ]
+                {'name': f'{error_metric.upper()} [50ms]', 'id': 'error_50ms'},
+                {'name': f'{error_metric.upper()} [500ms]', 'id': 'error_500ms'}
+            ])
 
             # Prepare table data
             table_data = []
@@ -1365,7 +1372,6 @@ class ExperimentVisualizer:
                         experiment_id = exp.experiment_id
                         row = {
                             'play': f'<button id="play-button-{experiment_id}" class="play-button">▶</button>',
-                            'play_convolved': f'<button id="play-button-conv_{experiment_id}" class="play-button">▶</button>',
                             'id': idx,
                             'method': exp.config.get('method', 'Unknown'),
                             'label': label_dict['label'],
@@ -1375,6 +1381,9 @@ class ExperimentVisualizer:
                             'error_500ms': 'N/A'
                         }
                         
+                        if self.include_bongo:
+                            row['play_convolved'] = f'<button id="play-button-conv_{experiment_id}" class="play-button">▶</button>'
+
                         # Slice to appropriate time ranges
                         samples_50ms = int(0.05 * ref_exp.fs)
                         samples_500ms = int(0.5 * ref_exp.fs)
@@ -1498,7 +1507,6 @@ class ExperimentVisualizer:
                         label_dict = exp.get_label()
                         table_data.append({
                             'play': f'<button id="play-button-{exp.experiment_id}" class="play-button">▶</button>',
-                            'play_convolved': f'<button id="play-button-conv_{exp.experiment_id}" class="play-button">▶</button>',
                             'id': idx,
                             'method': exp.config.get('method', 'Unknown'),
                             'label': label_dict['label'],
@@ -1507,13 +1515,14 @@ class ExperimentVisualizer:
                             'error_50ms': 'N/A',
                             'error_500ms': 'N/A'
                         })
+                        
+                        if self.include_bongo:
             else:
                 # Just populate table with experiment info, no error calculations
                 for idx, exp in enumerate(sorted_experiments, 1):
                     label_dict = exp.get_label()
                     table_data.append({
                         'play': f'<button id="play-button-{exp.experiment_id}" class="play-button">▶</button>',
-                        'play_convolved': f'<button id="play-button-conv_{exp.experiment_id}" class="play-button">▶</button>',
                         'id': idx,
                         'method': exp.config.get('method', 'Unknown'),
                         'label': label_dict['label'],
@@ -1522,6 +1531,9 @@ class ExperimentVisualizer:
                         'error_50ms': 'N/A',
                         'error_500ms': 'N/A'
                     })
+                    
+                    if self.include_bongo:
+                        table_data[-1]['play_convolved'] = f'<button id="play-button-conv_{exp.experiment_id}" class="play-button">▶</button>'
 
             # Create room visualization without error contour
             room_plot = self.create_room_visualization([room], highlight_pos_idx=pos_idx)
@@ -1567,8 +1579,6 @@ class ExperimentVisualizer:
                 
                 # Generate audio data for this experiment
                 audio_data = self.generate_audio_data(exp.rir, exp.fs, experiment_id)
-                # DO NOT generate convolved audio yet - we'll do it on demand
-                # convolved_audio_data = self.generate_convolved_audio_data(exp.rir, exp.fs, experiment_id)
                 
                 # Create hidden audio component
                 audio_components.append(
@@ -1580,16 +1590,22 @@ class ExperimentVisualizer:
                     )
                 )
                 
-                # Create empty convolved audio component - we'll set the source on demand
-                audio_components.append(
-                    html.Audio(
-                        id=f'audio-conv_{experiment_id}',
-                        src='',
-                        controls=True,
-                        style={'display': 'none'},
-                        **{'data-experiment-id': experiment_id}  # Store experiment ID for later
+                # Add empty placeholder for convolved audio if bongo is enabled
+                if self.include_bongo:
+                    # Check if this experiment has already been convolved
+                    convolved_audio_data = ""
+                    if experiment_id in self.convolved_experiments:
+                        convolved_audio_data = self.convolved_experiments[experiment_id]
+                    
+                    # Create hidden convolved audio component
+                    audio_components.append(
+                        html.Audio(
+                            id=f'audio-conv_{experiment_id}',
+                            src=f'data:audio/wav;base64,{convolved_audio_data}',
+                            controls=True,
+                            style={'display': 'none'}
+                        )
                     )
-                )
 
                 """ MONITOR """
                 # Get data for plotting
@@ -1811,6 +1827,132 @@ class ExperimentVisualizer:
         # Run the app
         app.run_server(debug=True, port=port)
 
+        # Update room plot colors to match original implementation
+        @app.callback(
+            [Output("bongo-loading-output", "children"), 
+             Output("convolution-status", "data")],
+            [Input("precompute-bongo-button", "n_clicks")],
+            [State("experiment-table", "data"),
+             State("convolution-status", "data"),
+             State("current-room-idx", "data")]
+        )
+        def precompute_bongo(n_clicks, table_data, conv_status, room_idx):
+            if not n_clicks or not self.include_bongo:
+                return dash.no_update, dash.no_update
+
+            ctx = dash.callback_context
+            if not ctx.triggered:
+                return dash.no_update, dash.no_update
+            
+            # Check if already completed
+            if conv_status.get('status') == 'completed':
+                return "", conv_status
+            
+            if not table_data:
+                return "", {'status': 'not_started', 'completed': 0, 'total': 0}
+            
+            # Get all experiment IDs from the table
+            experiment_ids = []
+            for row in table_data:
+                # Extract ID from the play button HTML
+                play_button = row.get('play', '')
+                if 'play-button-' in play_button:
+                    start_idx = play_button.find('play-button-') + len('play-button-')
+                    end_idx = play_button.find('"', start_idx)
+                    if start_idx > 0 and end_idx > start_idx:
+                        experiment_ids.append(play_button[start_idx:end_idx])
+            
+            if not experiment_ids:
+                return "", {'status': 'not_started', 'completed': 0, 'total': 0}
+            
+            # Set status to in_progress
+            status = {'status': 'in_progress', 'completed': 0, 'total': len(experiment_ids)}
+            
+            # Start background convolution for all experiments
+            for i, exp_id in enumerate(experiment_ids):
+                room_name = room_names[room_idx]
+                room = self.manager.projects[room_name]
+                
+                # Find experiment by ID
+                for exp in room.experiments.values():
+                    if exp.experiment_id == exp_id:
+                        # Generate convolved audio
+                        self.generate_convolved_audio_data(exp.rir, exp.fs, exp_id)
+                        status['completed'] = i + 1
+                        break
+            
+            # Set completed status
+            self.convolution_precomputed = True
+            status['status'] = 'completed'
+            
+            # Return empty div and updated status
+            return "", status
+        
+        # Add client-side callback to update UI when convolution status changes
+        app.clientside_callback(
+            """
+            function(convStatus) {
+                if (window.updateConvolutionStatus) {
+                    window.updateConvolutionStatus(
+                        convStatus.status, 
+                        convStatus.completed, 
+                        convStatus.total
+                    );
+                }
+                return window.dash_clientside.no_update;
+            }
+            """,
+            Output("bongo-loading-output", "style"),
+            [Input("convolution-status", "data")]
+        )
+
+        # Add callback for convolution processing
+        if self.include_bongo:
+            @app.callback(
+                Output("convolution-progress", "data"),
+                Input("convolution-progress", "data"),
+                prevent_initial_call=True
+            )
+            def process_convolution(data):
+                if not data or data.get('status') != 'processing' or not data.get('id'):
+                    return dash.no_update
+                
+                experiment_id = data.get('id')
+                
+                # Find the experiment
+                for room_name in room_names:
+                    room = self.manager.projects[room_name]
+                    for exp in room.experiments.values():
+                        if exp.experiment_id == experiment_id:
+                            # Generate convolved audio
+                            audio_data = self.generate_convolved_audio_data(exp.rir, exp.fs, experiment_id)
+                            
+                            # Store in cache
+                            self.convolved_experiments[experiment_id] = audio_data
+                            
+                            # Return completed status
+                            return {'status': 'completed', 'id': experiment_id, 'audio_data': audio_data}
+                
+                # If experiment not found
+                return {'status': 'error', 'id': experiment_id, 'message': 'Experiment not found'}
+            
+            # Client-side callback to update audio element when convolution is complete
+            app.clientside_callback(
+                """
+                function(data) {
+                    if (data && data.status === 'completed' && data.id && data.audio_data) {
+                        if (window.updateAudioElement) {
+                            window.updateAudioElement(data.id, data.audio_data);
+                        }
+                    }
+                    return data;
+                }
+                """,
+                Output("convolution-progress", "data", allow_duplicate=True),
+                Input("convolution-progress", "data"),
+                prevent_initial_call=True
+            )
+
     def generate_audio_data(self, rir, fs, experiment_id):
         """
         Generate audio data from RIR and return as base64 encoded string.
@@ -1918,40 +2060,3 @@ class ExperimentVisualizer:
         # Keep the method, but it doesn't do anything in this class
         # since metrics are calculated on a per-experiment basis
         return None
-
-    # Add a new dash callback for serving convolved audio on demand
-    @app.callback(
-        Output('dummy-output-audio', 'children'),
-        [Input('url', 'pathname')],
-        [State('url', 'search')]
-    )
-    def serve_convolved_audio(self, pathname, search):
-        if pathname == '/get-convolved-audio':
-            # This is just a placeholder - the actual implementation will need adjustments
-            # due to the need for proper Flask routes instead of using Dash callbacks
-            return dash.no_update
-
-    # Add a Flask route to serve convolved audio
-    @app.server.route('/get-convolved-audio')
-    def get_convolved_audio(self):
-        experiment_id = flask.request.args.get('experiment_id', '')
-        if not experiment_id:
-            return flask.jsonify({'error': 'No experiment ID provided'}), 400
-        
-        # Find the experiment by ID
-        experiment = None
-        for room in self.manager.projects.values():
-            for exp in room.experiments.values():
-                if exp.experiment_id == experiment_id:
-                    experiment = exp
-                    break
-            if experiment:
-                break
-        
-        if not experiment:
-            return flask.jsonify({'error': 'Experiment not found'}), 404
-        
-        # Generate the convolved audio
-        convolved_audio_data = self.generate_convolved_audio_data(experiment.rir, experiment.fs, experiment_id)
-        
-        return flask.jsonify({'audio_data': convolved_audio_data})

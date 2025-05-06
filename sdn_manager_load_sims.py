@@ -830,7 +830,7 @@ if __name__ == "__main__":
         import importlib
         importlib.reload(sev)
         single_visualizer = sev.ExperimentVisualizer(singular_manager)
-        single_visualizer.show(port=1991, include_bongo=False)
+        single_visualizer.show(port=1991, include_bongo=True)
 
 
     elif IS_BATCH: # Batch processing
