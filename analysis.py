@@ -677,3 +677,27 @@ def calculate_err(rir: np.ndarray, early_range: int = 50, Fs: int = 44100) -> fl
     ERR = np.sum(rir[:early_samples]**2) / np.sum(rir**2)
     
     return early_energy, energy, ERR
+
+
+def calculate_rt60_theoretical(room_dim, absorption):
+    """Calculate theoretical RT60 using Sabine and Eyring formulas.
+
+    Args:
+        room_dim: Room dimensions [width, depth, height] in meters
+        absorption: Average absorption coefficient
+
+    Returns:
+        rt60_sabine: Reverberation time using Sabine's formula
+        rt60_eyring: Reverberation time using Eyring's formula
+    """
+    # Room volume and surface area
+    V = room_dim[0] * room_dim[1] * room_dim[2]  # Volume
+    S = 2 * (room_dim[0] * room_dim[1] + room_dim[1] * room_dim[2] + room_dim[0] * room_dim[2])  # Surface area
+
+    # Sabine's formula
+    rt60_sabine = 0.161 * V / (S * absorption)
+
+    # Eyring's formula
+    rt60_eyring = 0.161 * V / (-S * np.log(1 - absorption))
+
+    return rt60_sabine, rt60_eyring

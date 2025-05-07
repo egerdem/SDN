@@ -56,10 +56,9 @@ from datetime import datetime
 import hashlib
 
 # Import modules from the main codebase
-import plot_room as pp
 import EchoDensity as ned
 import analysis as an
-from sdn_experiment_manager import Room
+from sdn_experiment_manager_pythonANY import Room
 
 
 class SDNExperiment:
@@ -244,7 +243,7 @@ class SDNExperiment:
         # Add method-specific details
         if method == 'ISM':
             if 'max_order' in self.config:
-                label += f" order={self.config['max_order']}"
+                label += f"PRA order={self.config['max_order']}"
         elif method == 'SDN':
             # Add SDN-specific flags that affect the simulation
             if 'flags' in self.config:
@@ -835,6 +834,7 @@ if __name__ == "__main__":
 
     elif IS_BATCH: # Batch processing
 
+
         # Example 3: Load multiple specific batch projects
         #get list of categorized projects
         aes_projects = batch_category.get('aes', [])
@@ -852,10 +852,8 @@ if __name__ == "__main__":
             # batch_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=True)
 
             # Example 2: Load a single specific batch project
-            # batch_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=True,
-            #                                         project_names="aes_quartergrid_new")
             batch_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=True,
-                                                     project_names=["aes_NEW_SINGULAR_FORMAT"])
+                                                    project_names="aes_quartergrid_new")
 
         from sdn_experiment_visualizer import ExperimentVisualizer
         batch_visualizer = ExperimentVisualizer(batch_manager)

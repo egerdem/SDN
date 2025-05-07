@@ -12,7 +12,7 @@ import geometry
 import plot_room as pp
 import EchoDensity as ned
 import analysis as an
-from sdn_core import DelayNetwork
+#from sdn_core import DelayNetwork
 
 # Set matplotlib backend to match main script
 import matplotlib
@@ -1070,44 +1070,78 @@ class SDNExperimentManager:
             project_name (str): Name of the project/experiment group (e.g. 'aes_abs20_comparison')
         """
         if not self.is_batch_manager:
-            # Save using the old singular format - flat structure in room_singulars
-            room_dir = self._get_room_dir(project_name)
-            os.makedirs(room_dir, exist_ok=True)
+            # SINGULAR EXPERIMENT SAVING (TRANSFORMING TO BATCH FORMAT)
             
-            # Generate descriptive filename based on experiment parameters
-            method = experiment.config.get('method')
-            filename = self._generate_param_set_name(experiment.config)
-            print(filename, method)
-            # Add method prefix for singular case
-            if method == 'SDN':
-                filename = f"sdn_{filename}"
-            elif method == 'HO-SDN':
-                # For HO-SDN, use the param_set name directly without adding method prefix
-                # The param_set name already includes "ho-sdn" and the order
-                filename = filename
-            elif method == 'RIMPY':
-                # For RIMPY, add the method prefix and the reflection sign
-                filename = f"rimpy_{filename}"
-            elif method == 'ISM':
-                # For ISM, add the method prefix and order
-                filename = f"ism_{filename}"
-                if 'max_order' in experiment.config:
-                    filename += f"_order{experiment.config['max_order']}"
-                    if experiment.config.get('use_rt'):
-                        filename += '_rt'
-            else:
-                # For other methods (TREBLE), use simpler naming
-                filename = f"{method.lower()}"
-                    
+            # Extract data from the experiment object (which holds the singular-style config)
+            # experiment.config here is the 'inner' config object from the original sdn_sw2.json style.
+            inner_config = experiment.config 
+            room_params_from_inner = inner_config.get('room_parameters', {})
 
-            # Save metadata with descriptive filename
-            metadata_path = os.path.join(room_dir, f"{filename}.json")
-            with open(metadata_path, 'w') as f:
-                json.dump(experiment.to_dict(), f, indent=2)
+            src_x = room_params_from_inner.get('source x', 0)
+            src_y = room_params_from_inner.get('source y', 0)
+            src_z = room_params_from_inner.get('source z', 0)
+            # Generate a source label, e.g., from coordinates or a default
+            source_label = f"src_{src_x:.1f}_{src_y:.1f}_{src_z:.1f}" 
+
+            mic_x = room_params_from_inner.get('mic x', 0)
+            mic_y = room_params_from_inner.get('mic y', 0)
+            mic_z = room_params_from_inner.get('mic z', 0)
+
+            method = inner_config.get('method', 'unknown_method')
+            # Use inner_config to generate param_set_name as it contains the relevant flags/params
+            param_set_name = self._generate_param_set_name(inner_config) 
+
+            # Define the new path structure
+            # results_dir/rooms/project_name/source_label/method/param_set_name/
+            base_room_dir = os.path.join(self.results_dir, 'rooms', project_name)
+            source_dir_path = os.path.join(base_room_dir, source_label)
+            method_dir_path = os.path.join(source_dir_path, method)
+            simulation_dir_path = os.path.join(method_dir_path, param_set_name)
             
-            # Save RIR
-            rir_path = os.path.join(room_dir, f"{filename}.npy")
-            np.save(rir_path, experiment.rir)
+            os.makedirs(simulation_dir_path, exist_ok=True)
+
+            # Construct the content for the new config.json (batch-style)
+            # The experiment.experiment_id is the unique ID for this singular simulation
+            batch_style_config_content = {
+                "method": inner_config.get('method'),
+                "label": inner_config.get('label', ''),
+                "info": inner_config.get('info', ''),
+                "flags": inner_config.get('flags', {}),
+                
+                "room_parameters": {
+                    "width": room_params_from_inner.get('width'),
+                    "depth": room_params_from_inner.get('depth'),
+                    "height": room_params_from_inner.get('height'),
+                    "absorption": room_params_from_inner.get('absorption'),
+                },
+                "duration": experiment.duration, 
+                "fs": experiment.fs,             
+
+                "source": {
+                    "position": [src_x, src_y, src_z],
+                    "label": source_label 
+                },
+                "receivers": [ 
+                    {
+                        "position": [mic_x, mic_y, mic_z],
+                        "experiment_id": experiment.experiment_id 
+                    }
+                ]
+            }
+            
+            for key in ['max_order', 'ray_tracing', 'use_rand_ism', 'order', 'source_signal', 'reflection_sign']:
+                if key in inner_config:
+                    batch_style_config_content[key] = inner_config[key]
+            
+            config_json_path = os.path.join(simulation_dir_path, "config.json")
+            with open(config_json_path, 'w') as f:
+                json.dump(batch_style_config_content, f, indent=2)
+            
+            rir_path = os.path.join(simulation_dir_path, "rirs.npy")
+            np.save(rir_path, np.array([experiment.rir])) 
+
+            print(f"Saved singular experiment {experiment.experiment_id} (transformed to batch format) to: {config_json_path}")
+
         else:
             # Get source and mic positions from config
             room_params = experiment.config.get('room_parameters', {})
@@ -1268,13 +1302,13 @@ def get_experiment_manager(is_batch=False, results_dir='results', dont_check_dup
 
 if __name__ == "__main__":
 
-    run_single_experiments = False
+    run_single_experiments = True
     run_batch_experiments = not run_single_experiments
 
     show_experiments = False
     project_name = "journal_absorptioncoeffs"
-    project_name = "debug_aes_skipmetrics"
-    duration = 1
+    project_name = "aes_NEW_SINGULAR_FORMAT"
+    duration = 0.1
 
     # Use this as a parent directory for the results (optional)
     results_dir = 'results'
@@ -1309,42 +1343,42 @@ if __name__ == "__main__":
     configs = []
 
     # ISM experiment
-    # configs.append({
-    #     'method': 'ISM',
-    #     'label': 'pra',
-    #     'info': '',
-    #     'max_order': 100,
-    #     'ray_tracing': False
-    # })
-
-    # Original SDN experiment
     configs.append({
-        'method': 'SDN',
-        'label': 'original',
+        'method': 'ISM',
+        'label': 'pra',
         'info': '',
-        'flags': {
-        }
+        'max_order': 100,
+        'ray_tracing': False
     })
 
+    # Original SDN experiment
+    # configs.append({
+    #     'method': 'SDN',
+    #     'label': 'original',
+    #     'info': '',
+    #     'flags': {
+    #     }
+    # })
+
     # SDN experiments with different weightings
-    # for weighting in [2, 4, 5]:
-    #     configs.append({
-    #         'method': 'SDN',
-    #         'label': 'weighted psk',
-    #         'info': '',
-    #         'flags': {
-    #             'specular_source_injection': True,
-    #             'source_weighting': weighting,
-    #         }
-    #     })
+    for weighting in [2, 4, 5]:
+        configs.append({
+            'method': 'SDN',
+            'label': 'weighted psk',
+            'info': '',
+            'flags': {
+                'specular_source_injection': True,
+                'source_weighting': weighting,
+            }
+        })
 
     # # RIMPY experiments
-    # configs.append({
-    #     'method': 'RIMPY',
-    #     'label': 'posRef',
-    #     'info': '',
-    #     'reflection_sign': 1
-    # })
+    configs.append({
+        'method': 'RIMPY',
+        'label': 'posRef',
+        'info': '',
+        'reflection_sign': 1
+    })
     
     # configs.append({
     #     'method': 'RIMPY',
@@ -1365,7 +1399,7 @@ if __name__ == "__main__":
 
     # SINGLE EXPERIMENTS
     if run_single_experiments:
-        print(f"Singular experiments saved in: {single_manager._get_room_dir(project_name)}")
+        # print(f"Singular experiments saved in: {single_manager._get_room_dir(project_name)}")
 
         # Run single experiments with the defined configs
         # No source_positions/receiver_positions needed - uses defaults from room dict
@@ -1400,8 +1434,6 @@ if __name__ == "__main__":
                 source_positions=source_positions,
                 receiver_positions=receiver_positions
             )
-
-
 
     # VISUALIZE RESULTS
     if show_experiments:

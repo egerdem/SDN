@@ -1,0 +1,6 @@
+
+dash==2.18.2
+plotly==6.0.0
+numpy==1.25.2
+scipy==1.9.3
+soundfile==0.12.1

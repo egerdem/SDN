@@ -117,7 +117,7 @@ def calculate_pra_rir(room_parameters, duration, Fs, max_order=100):
     # Normalize
     # rir = rir / np.max(np.abs(rir))
     
-    return rir, 'ISM-pra'
+    return rir, 'ISM'
 
 def calculate_rimpy_rir(room_parameters, duration, Fs, reflection_sign):
     """
