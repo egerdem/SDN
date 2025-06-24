@@ -63,7 +63,7 @@ def pad_zeros_to_rir(rir, num_samples):
         rir = rir[:num_samples]
     return rir
 
-def calculate_pra_rir(room_parameters, duration, Fs, max_order=100):
+def calculate_pra_rir(room_parameters, duration, Fs, use_rand_ism=False, max_rand_disp=0.1, max_order=100):
     """
     Calculate RIR using PRA (PyRoomAcoustics) with ISM.
     
@@ -85,7 +85,7 @@ def calculate_pra_rir(room_parameters, duration, Fs, max_order=100):
         pra_room = pra.ShoeBox(room_dim, fs=Fs,
                                 materials=pra.Material(energy_absorption = room_parameters['absorption']),
                                 max_order=max_order,
-                                air_absorption=False, ray_tracing=False, use_rand_ism=False)
+                                air_absorption=False, ray_tracing=False,use_rand_ism=use_rand_ism, max_rand_disp=max_rand_disp)
     else:
         print("air absorption True")
         pra_room = pra.ShoeBox(room_dim, fs=Fs,
@@ -117,9 +117,14 @@ def calculate_pra_rir(room_parameters, duration, Fs, max_order=100):
     # Normalize
     # rir = rir / np.max(np.abs(rir))
     
-    return rir, 'ISM'
+    if use_rand_ism and max_rand_disp == 0.1:
+        label = 'ISM-pra-rand10'
+    elif use_rand_ism == False:
+        label = 'ISM'
+    
+    return rir, label
 
-def calculate_rimpy_rir(room_parameters, duration, Fs, reflection_sign):
+def calculate_rimpy_rir(room_parameters, duration, Fs, reflection_sign, tw_fractional_delay_length=0, randDist=0.0):
     """
     Calculate RIR using rimPy ISM.
     
@@ -154,11 +159,18 @@ def calculate_rimpy_rir(room_parameters, duration, Fs, reflection_sign):
     
     # Set reflection coefficients
     reflection = room_parameters['reflection']
-    if reflection_sign < 0:
-        label = 'ISM-rimpy-negREF'
+    if reflection_sign < 0 and randDist == 0.1:
+        label = 'ISM (rimpy-neg10)'
         reflection = -reflection
+
+    elif reflection_sign < 0:
+        label = 'ISM (rimpy-neg)'
+        reflection = -reflection
+
+    elif reflection_sign > 0 and randDist == 0.1:
+        label = 'ISM (rimpy-pos10)'
     else:
-        label = 'ISM-rimpy_posREF'
+        label = 'ISM-(rimpy-pos)'
 
     # Run rimPy calculation
     beta = reflection * np.ones((2, 3))
@@ -169,8 +181,8 @@ def calculate_rimpy_rir(room_parameters, duration, Fs, reflection_sign):
         beta=beta,
         rirDuration=rirDuration,  # duration divided by 2 for faster computation
         fs=Fs,
-        randDist=0,  # 0.1,
-        tw=0,  # =0 for no fractional delay
+        randDist=randDist,  # 0.1 --- 0.0 for standard image source method
+        tw=tw_fractional_delay_length,  # =0 for no fractional delay
         fc=None,
         c=343
     )
@@ -196,7 +208,7 @@ def calculate_sdn_rir(room_parameters, test_name, room, duration, Fs, config):
         tuple: (normalized RIR, room object)
     """
     # Create room object
-    print("Running SDN test:", test_name)
+    # print("Running", test_name, "with:")
     if 'absorption' in config:
     # Override absorption
         room_parameters['absorption'] = config['absorption']

@@ -8,36 +8,11 @@ from plotting_utils import (
     load_data, 
     get_display_name, 
     get_linestyle, 
-    PLOT_CONFIG
+    get_color,
+    PLOT_CONFIG,
+    DISPLAY_NAME_MAP,
+    plot_reflection_vertical_lines
 )
-
-def _plot_reflection_vertical_lines(ax, reflection_times):
-    """Helper to draw vertical lines for reflection arrival times."""
-    if not reflection_times:
-        return
-
-    colors = ['#d62728', '#2ca02c', '#1f77b4']  # More distinct colors
-    order_map = {
-        'first_order': 1,
-        'second_order': 2,
-        'third_order': 3
-    }
-    
-    for order_name, time in reflection_times.items():
-        if time is not None:
-            order_num = order_map.get(order_name)
-            if order_num is not None and order_num <= len(colors):
-                color = colors[order_num - 1]
-                
-                # Add vertical line with a label for the legend
-                ax.axvline(x=time, color=color, linestyle='--', alpha=0.6, 
-                           label=f'ISM N={order_num}' if ax.get_label() != '_nolegend_' else None)
-                
-                # Add text annotation just above the x-axis
-                ax.text(time, ax.get_ylim()[0], f'N={order_num}',
-                        color=color, alpha=0.8,
-                        ha='center', va='bottom', backgroundcolor='white',
-                        fontsize='small', bbox=dict(facecolor='white', alpha=0.5, edgecolor='none', pad=0.1))
 
 def plot_edc_with_inset(data: dict, receiver_index: int, output_path: str, 
                         excluded_methods: list = None, focus_on_early: bool = True,
@@ -56,29 +31,39 @@ def plot_edc_with_inset(data: dict, receiver_index: int, output_path: str,
     duration = data['duration']
     method_configs = data['method_configs']
     
-    fig, ax = plt.subplots(figsize=[6, 5])
+    plt.style.use('seaborn-v0_8-paper')
+    # Use the same figure size as paper_figures_ned.py for consistency
+    fig, ax = plt.subplots(figsize=(7, 6))
     
     print(f"Plotting EDCs for receiver position {receiver_index}...")
     
+
+    plotted_methods = []
+    for method_key in name_map.keys():
+        if method_key in data['edcs'] and method_key not in excluded_methods:
+            plotted_methods.append(method_key)
+            config_info = method_configs.get(method_key, {}).get('info', 'N/A')
+            display_name = get_display_name(method_key, method_configs, name_map)
+
+    
     # --- PLOTTING LOOPS ---
-    for method in name_map.keys():
-        if method in excluded_methods or method not in data['edcs']:
-            continue
-            
+    for method in plotted_methods:
         edcs = data['edcs'][method]
         if receiver_index < len(edcs):
             edc = edcs[receiver_index]
             time_axis = np.arange(len(edc)) / Fs
             label = get_display_name(method, method_configs, name_map)
             linestyle = get_linestyle(method)
-            ax.plot(time_axis, edc, label=label, linestyle=linestyle)
+            color = get_color(method, name_map)
+            ax.plot(time_axis, edc, label=label, linestyle=linestyle, color=color)
 
     # Add reflection order lines to the main plot
     if reflection_times:
-        _plot_reflection_vertical_lines(ax, reflection_times)
+        plot_reflection_vertical_lines(ax, reflection_times)
 
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Energy (dB)")
+    ax.set_xlabel("Time (s)", fontsize=10)
+    ax.set_ylabel("Energy (dB)", fontsize=10)
+    ax.tick_params(axis='both', which='major', labelsize=10)
     
     # Use parameters from the plot_config dictionary
     inset_rect = plot_config.get('inset_rect')
@@ -105,52 +90,49 @@ def plot_edc_with_inset(data: dict, receiver_index: int, output_path: str,
         # Inset shows the zoomed-in part
         axins_xlim, axins_ylim = inset_xlim, inset_ylim
 
-    ax.grid(True, linestyle='--', alpha=0.6)
+    ax.grid(True, linestyle='--', alpha=0.6,  linewidth=0.5)
     ax.xaxis.set_major_formatter(FormatStrFormatter('%.2f'))
     
     # --- Inset Creation ---
-    axins = ax.inset_axes(inset_rect)
-    for method in name_map.keys():
-        if method in excluded_methods or method not in data['edcs']:
-            continue
-        edcs = data['edcs'][method]
-        if receiver_index < len(edcs):
-            edc = edcs[receiver_index]
-            time_axis = np.arange(len(edc)) / Fs
-            linestyle = get_linestyle(method)
-            axins.plot(time_axis, edc, linestyle=linestyle)
-            
-    # Add reflection order lines to the inset plot
-    if reflection_times:
-        _plot_reflection_vertical_lines(axins, reflection_times)
+    if inset_rect and inset_xlim and inset_ylim:
+        axins = ax.inset_axes(inset_rect)
+        for method in plotted_methods:
+            edcs = data['edcs'][method]
+            if receiver_index < len(edcs):
+                edc = edcs[receiver_index]
+                time_axis = np.arange(len(edc)) / Fs
+                linestyle = get_linestyle(method)
+                color = get_color(method, name_map)
+                axins.plot(time_axis, edc, linestyle=linestyle, linewidth=1, color=color) #linewidth of inset
+                
+        # Add reflection order lines to the inset plot
+        # if reflection_times:
+        #     plot_reflection_vertical_lines(axins, reflection_times)
 
-    axins.set_xlim(axins_xlim)
-    axins.set_ylim(axins_ylim)
-    axins.grid(True, linestyle='--', alpha=0.6)
-    
-    # Restore tick formatting for the inset for better readability
-    axins.tick_params(axis='x', labelsize=8)
-    axins.tick_params(axis='y', labelsize=8)
+        axins.set_xlim(axins_xlim)
+        axins.set_ylim(axins_ylim)
+        axins.grid(True, linestyle='--', alpha=0.6, linewidth=0.5) # linewidth of inset grid
+        
+        # Restore tick formatting for the inset for better readability
+        axins.tick_params(axis='x', labelsize=8)
+        axins.tick_params(axis='y', labelsize=8)
 
-    if focus_on_early:
-        # When main plot is focused, inset shows the full view.
-        # Set y-ticks to be every 20 dB for a cleaner look.
-        axins.yaxis.set_major_locator(plt.MultipleLocator(20))
-        axins.xaxis.set_major_formatter(FormatStrFormatter('%.1f'))
-    else:
-        # When main plot is the full view, inset is zoomed-in.
-        # Use a smaller tick interval for the focused view.
-        axins.yaxis.set_major_locator(plt.MultipleLocator(2))
-        axins.xaxis.set_major_formatter(FormatStrFormatter('%.3f'))
+        if focus_on_early:
+            axins.yaxis.set_major_locator(plt.MultipleLocator(20))
+            axins.xaxis.set_major_formatter(FormatStrFormatter('%.1f'))
+        else:
+            axins.yaxis.set_major_locator(plt.MultipleLocator(2))
+            axins.xaxis.set_major_formatter(FormatStrFormatter('%.3f'))
 
-    if not focus_on_early:
-        ax.indicate_inset_zoom(axins, edgecolor="black")
+        if not focus_on_early:
+            ax.indicate_inset_zoom(axins, edgecolor="black")
 
-    # --- Legend Placement ---
+    # --- Legend and Layout (adopted from paper_figures_ned.py) ---
     box = ax.get_position()
-    ax.set_position([box.x0, box.y0 + box.height * 0.2, box.width, box.height * 0.8])
-    ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.15),
-              fancybox=True, shadow=True, ncol=3, fontsize='small')
+    ax.set_position([box.x0, box.y0 + box.height * 0.1, box.width, box.height * 0.9])
+    ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.1),
+              fancybox=True, shadow=True, ncol=4, fontsize=8.5) # fontsize of legend
+    fig.tight_layout(rect=[0, 0.05, 1, 1])
 
     # --- Save Figure ---
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
@@ -161,14 +143,23 @@ def plot_edc_with_inset(data: dict, receiver_index: int, output_path: str,
 if __name__ == "__main__":
     # --- FIGURE GENERATION SETUP ---
     PROCESS_ALL_FILES = True
-    specific_files_to_process = ["aes_room_spatial_edc_data.npz"]
+    # specific_files_to_process = ["aes_room_spatial_edc_data.npz"]
 
     data_dir = "results/paper_data"
     output_dir = "results/paper_figures"
     os.makedirs(output_dir, exist_ok=True)
     
+    # Load the pre-calculated reflection times for all rooms
+    reflection_times_path = os.path.join(data_dir, "reflection_times.npz")
+    try:
+        all_reflection_times = np.load(reflection_times_path, allow_pickle=True)['all_room_data'].item()
+    except FileNotFoundError:
+        print("Warning: reflection_times.npz not found. Reflection time lines will not be plotted.")
+        all_reflection_times = {}
+
     if PROCESS_ALL_FILES:
-        files_to_run = [f for f in os.listdir(data_dir) if f.endswith('.npz')]
+        # Filter out the reflection_times.npz file from the processing list
+        files_to_run = [f for f in os.listdir(data_dir) if f.endswith('.npz') and f != 'reflection_times.npz']
     else:
         files_to_run = specific_files_to_process
 
@@ -184,40 +175,24 @@ if __name__ == "__main__":
             print(f"  Error: {e}. Skipping.")
             continue
 
-        room_name = simulation_data['room_params'].get('display_name', 'unknown_room')
+        room_params = simulation_data['room_params']
+        if isinstance(room_params, np.ndarray): # Handle case where it's stored as a numpy array
+            room_params = room_params.item()
+            
+        room_name = room_params.get('display_name', 'unknown_room')
         output_filename = f"fig_edc_inset_comparison_{room_name.lower().replace(' ', '_')}.png"
         output_path = os.path.join(output_dir, output_filename)
 
         print(f"Generating plot for room: '{room_name}'")
         
         # --- PLOT CONFIGURATION ---
-        display_name_and_order = {
-            'ISM': 'ISM (PRA)',
-            'RIMPY-neg': 'ISM (randomized )',
-            'SDN-Test1': 'SDN Original (c=1)',
-            'SDN-Test_3': 'SW-SDN (c=-3)',
-            'SDN-Test_2': 'SW-SDN (c=-2)',
-            'SDN-Test2': 'SW-SDN (c=2)',
-            'SDN-Test3': 'SW-SDN (c=3)',
-            'SDN-Test4': 'SW-SDN (c=4)',
-            'SDN-Test5': 'SW-SDN (c=5)',
-            'SDN-Test6': 'SW-SDN (c=6)',
-            'SDN-Test7': 'SW-SDN (c=7)',
-            'HO-SDN-N2': 'HO-SDN (N=2)',
-            'HO-SDN-N3': 'HO-SDN (N=3)',
-        }
-        
         methods_to_exclude = []
         
         # Get the specific plot settings for this room from our central config
         room_plot_config = PLOT_CONFIG.get(room_name, {}).get('edc', {})
         
-        # Extract reflection times, making sure it's a dictionary
-        reflection_times_data = simulation_data.get('reflection_times')
-        if reflection_times_data is not None:
-            reflection_times = reflection_times_data.item()
-        else:
-            reflection_times = None
+        # Get reflection times for the current room from the data loaded earlier
+        reflection_times = all_reflection_times.get(room_name, {}).get('reflection_times')
 
         plot_edc_with_inset(
             data=simulation_data, 
@@ -225,7 +200,7 @@ if __name__ == "__main__":
             output_path=output_path,
             excluded_methods=methods_to_exclude,
             focus_on_early=True, # You can still toggle this mode
-            name_map=display_name_and_order,
+            name_map=DISPLAY_NAME_MAP,
             plot_config=room_plot_config,
             reflection_times=reflection_times
         )

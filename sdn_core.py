@@ -1,12 +1,31 @@
 from collections import deque
 import numpy as np
 from typing import Dict, List, Optional
-from geometry import Room, Point, build_angle_mappings, get_best_reflection_target, get_best_reflection_targets, build_specular_matrices_from_angles
+from geometry import Room, get_best_node2node_targets, get_best_reflection_targets, build_specular_matrices_from_angles, get_image_sources
 from path_logger import PathLogger, PressurePacket, deque_plotter
 import matplotlib.pyplot as plt
-import path_logger as pl
 import specular_scattering_matrix as ssm
 import random
+
+def random_wall_mapping(walls):
+    """
+    Given a list of unique wall‐IDs, return a dict that maps each wall
+    to a different one, with no wall mapped to itself.
+
+    >>> walls = ["e", "w", "s", "f", "n", "c"]
+    >>> random_wall_mapping(walls)
+    {'e': 'n', 'w': 'c', 's': 'e', 'f': 'w', 'n': 's', 'c': 'f'}
+    """
+    if len(set(walls)) != len(walls):
+        raise ValueError("Wall IDs must be unique")
+
+    while True:
+        shuffled = walls[:]        # copy
+        random.shuffle(shuffled)   # in-place random permutation
+
+        # keep the permutation only if nothing stayed in place
+        if all(orig != new for orig, new in zip(walls, shuffled)):
+            return dict(zip(walls, shuffled))
 
 def scattering_matrix_crate(increase_coef=0.2):
     """Create a modified scattering matrix with adjusted diagonal and off-diagonal elements.
@@ -32,6 +51,13 @@ def scattering_matrix_crate(increase_coef=0.2):
     adjusted_matrix[off_diagonal_mask] += (c / 4)
     return adjusted_matrix
 
+
+def swap(s, j, k):
+    """Swap two rows in a matrix."""
+    s_jk = s.copy()
+    s_jk[[j, k]] = s_jk[[k, j]]
+    return s_jk
+
 class DelayNetwork:
     """Core SDN implementation focusing on sample-based processing with accessible delay lines."""
 
@@ -39,9 +65,13 @@ class DelayNetwork:
                  coef: float = 2.0/5,
                  source_weighting: float = 1,
                  injection_c_vector: List[float] = None,
+                 injection_vector: List[float] = None,
                  use_identity_scattering: bool = False,
                  specular_scattering: bool = False,
+                 specular_increase_coef: float = 0.0,
                  specular_source_injection: bool = False,
+                 specular_source_injection_random: bool = False,
+                 specular_node_pressure: bool = False,
                  ignore_wall_absorption: bool = False,
                  ignore_src_node_atten: bool = False,
                  ignore_node_mic_atten: bool = False,
@@ -51,7 +81,9 @@ class DelayNetwork:
                  more_absorption: bool = False,
                  print_mic_pressures: bool = False,
                  print_parameter_summary: bool = False,
+                 print_weighted_psk: bool = False,
                  normalize_to_first_impulse: bool = False,
+                 ho_sdn_order: Optional[int] = None,
                  label: str = ""):
         """Initialize SDN with test flags.
         
@@ -65,8 +97,9 @@ class DelayNetwork:
             ignore_wall_absorption: If True, set wall reflection coefficients to 1 (default: False)
             ignore_src_node_atten: If True, set source-to-node gains to 1 (default: False)
             ignore_node_mic_atten: If True, set node-to-mic gains to 1 (default: False)
-            enable_path_logging: If True, enable detailed path logging (default: False)
             scattering_matrix_update_coef: If not None, use modified scattering matrix with this coefficient
+            specular_increase_coef: Coefficient for build_specular_matrices_from_angles if specular_scattering is True.
+            ho_sdn_order: If not None, specifies the order for HO-SDN, activating the model (default: None).
         """
         self.room = room
         self.Fs = Fs
@@ -75,28 +108,38 @@ class DelayNetwork:
         self.coef = coef
         self.source_weighting = source_weighting
         self.injection_c_vector = injection_c_vector
+        self.injection_vector = injection_vector
         # Test flags
         self.use_identity_scattering = use_identity_scattering
         self.specular_scattering = specular_scattering
         self.specular_source_injection = specular_source_injection
+        self.specular_source_injection_random = specular_source_injection_random
+        self.specular_node_pressure = specular_node_pressure
         self.ignore_wall_absorption = ignore_wall_absorption
         self.ignore_src_node_atten = ignore_src_node_atten
         self.ignore_node_mic_atten = ignore_node_mic_atten
         self.more_absorption = more_absorption
-        self.source_trial_injection = source_trial_injection
         self.scattering_matrix_update_coef = scattering_matrix_update_coef
         self.print_mic_pressures = print_mic_pressures
         self.print_parameter_summary = print_parameter_summary
+        self.print_weighted_psk = print_weighted_psk
+        self.specular_increase_coef = specular_increase_coef
+        self.ho_sdn_order = ho_sdn_order
+        self.source_trial_injection = source_trial_injection
         # Override wall attenuation if ignore_wall_absorption is True
         if self.ignore_wall_absorption:
             self.room.wallAttenuation = [1.0] * len(self.room.wallAttenuation)
 
-        # Initialize path logger if enabled
-        self.enable_path_logging = enable_path_logging
-        self.path_logger = PathLogger() if enable_path_logging else None
         self.label = label
         self.injection_index = 0
         self.total_injection_count = 6
+        self.non_dominant_index = 1  # Track which index to use for non-dominant nodes
+
+        if self.specular_source_injection_random:
+            self.random_target_map = random_wall_mapping(list(self.room.walls.keys()))
+            print("Random wall mapping created:")
+            print(self.random_target_map)
+
         # Print parameter summary
         if self.print_parameter_summary:
             self._print_parameter_summary()
@@ -112,10 +155,26 @@ class DelayNetwork:
         self.source_to_nodes = {}  # Format: "src_to_{wall_id}"
         self.node_to_mic = {}  # Format: "{wall_id}_to_mic"
         self.node_to_node = {}  # Format: "{wall1_id}_to_{wall2_id}"
+
+        if self.ho_sdn_order is not None:
+            print(f"--- Initializing HO-SDN of order {self.ho_sdn_order} ---")
+            all_image_sources = get_image_sources(self.room, self.ho_sdn_order)
+            print("all_image_sources:", len(all_image_sources))
+            # Early reflections (order < N) are handled as direct paths to the mic
+            self.early_reflection_paths = [img for img in all_image_sources if img['order'] < self.ho_sdn_order and img['order'] > 0]
+            self.early_reflection_lines = {} # "path_idx" -> deque
+            
+            # Order-N reflections feed the SDN network
+            self.sdn_feeding_paths = [img for img in all_image_sources if img['order'] == self.ho_sdn_order]
+            self.ho_source_to_nodes = {}  # Format: "src_img_{img_idx}_to_{wall_id}"
+        else:
+            self.early_reflection_paths = []
+            self.sdn_feeding_paths = []
+            self.ho_source_to_nodes = None
+
         self._setup_delay_lines()
 
         # Initialize attenuation factors with matching keys
-        # self.source_to_mic_gain is added inside the _calculate_attenuations() function
         self.source_to_node_gains = {}  # g_sk, Format: "src_to_{wall_id}"
         self.node_to_mic_gains = {}  # g_km, Format: "{wall_id}_to_mic"
         self._calculate_attenuations()
@@ -178,7 +237,10 @@ class DelayNetwork:
 
         # Source Injection Mode
         if self.specular_source_injection:
-            non_default_params.append("• Using Specular Source Injection")
+            if self.specular_source_injection_random:
+                non_default_params.append("• Using Random Specular Source Injection")
+            else:
+                non_default_params.append("• Using Specular Source Injection")
             if self.source_weighting != defaults['source_weighting']:
                 non_default_params.append(f"  - Source Weighting Factor: {self.source_weighting}")
             
@@ -198,10 +260,6 @@ class DelayNetwork:
             non_default_params.append("• Source-Node Attenuation Ignored")
         if self.ignore_node_mic_atten:
             non_default_params.append("• Node-Mic Attenuation Ignored")
-
-        # Path Logging
-        if self.enable_path_logging:
-            non_default_params.append("• Path Logging Enabled")
 
         # Print all non-default parameters
         if non_default_params:
@@ -230,11 +288,13 @@ class DelayNetwork:
         if self.use_identity_scattering:
             return np.eye(size)
         elif self.specular_scattering:
-            return build_specular_matrices_from_angles(self.room)
+            print(f"Specular scattering matrix with fixed angles,increase_coef:{self.specular_increase_coef}\n")
+            return build_specular_matrices_from_angles(self.room, increase_coef=self.specular_increase_coef)
         elif self.scattering_matrix_update_coef is not None:
             print(scattering_matrix_crate(self.scattering_matrix_update_coef))
             return scattering_matrix_crate(self.scattering_matrix_update_coef)
         else:
+            # print("Default diffuse scattering matrix is used\n")
             # Default diffuse, original scattering
             return (2 / size) * np.ones((size, size)) - np.eye(size)
 
@@ -254,66 +314,56 @@ class DelayNetwork:
         src_mic_distance = self.room.source.srcPos.getDistance(self.room.micPos)
         self.direct_sound_delay = int(np.ceil(((self.Fs * src_mic_distance) / self.c)))
 
+        self.source_to_mic[key] = deque([0.0] * self.direct_sound_delay, maxlen=self.direct_sound_delay)
 
-        if self.enable_path_logging == False: # NO LOG CASE - REF
-            self.source_to_mic[key] = deque([0.0] * self.direct_sound_delay, maxlen=self.direct_sound_delay)
+        # Setup based on whether HO-SDN is active
+        if self.ho_sdn_order is not None:
+            # HO-SDN Case
+            # 1. Setup early reflection paths (order < N) as direct source-mic lines
+            for i, path_info in enumerate(self.early_reflection_paths):
+                dist = path_info['position'].getDistance(self.room.micPos)
+                delay = round((self.Fs * dist) / self.c)
+                key = f"early_path_{i}"
+                self.early_reflection_lines[key] = deque([0.0] * delay, maxlen=delay)
 
-        ###############################################
-        else: # LOG CASE
-            initial_packet = PressurePacket(
-                value=0.0, 
-                val_history=[0.0],  # Initialize with current value
-                path_history=['src', 'mic'], 
-                timestamps=[0],  # Initialize with current timestamp
-                birth_sample=0,
-                delay=self.direct_sound_delay)
-            self.source_to_mic[key] = deque([initial_packet] * self.direct_sound_delay, maxlen=initial_packet.delay)
-            # deque_plotter(self.source_to_mic[key])
-        ###############################################
+            # 2. Setup Order-N reflection paths to feed the SDN nodes
+            for i, img_info in enumerate(self.sdn_feeding_paths):
+                last_wall_id = img_info['path'][-1]
+                wall = self.room.walls[last_wall_id]
+                
+                # Correct delay calculation for the source-to-node path (alpha_k)
+                # alpha_k = delta_true - beta_k
+                delta_true = img_info['position'].getDistance(self.room.micPos)
+                beta_k = wall.node_positions.getDistance(self.room.micPos)
+                alpha_k_dist = delta_true - beta_k
 
-        # SOURCE to NODE and NODE to MIC DELAY LINES
-        for wall_id, wall in self.room.walls.items():
+                # Ensure delay is not negative due to geometric/numerical precision issues
+                if alpha_k_dist < 0:
+                    alpha_k_dist = 0
+                
+                delay = round((self.Fs * alpha_k_dist) / self.c)
+                key = f"sdn_feed_path_{i}_to_{last_wall_id}"
+                self.ho_source_to_nodes[key] = deque([0.0] * delay, maxlen=delay)
+                setattr(self, f'{key}_delay', delay)
 
-            # Source to nodes
-            key = f"src_to_{wall_id}"
-            dist = wall.node_positions.getDistance(self.room.source.srcPos)
-            delay_src2node = round((self.Fs * dist) / self.c)
-            setattr(self, f'src_to_{wall_id}_delay', delay_src2node)
+        else:
+            # Standard SDN Case: Source to nodes (1st order)
+            for wall_id, wall in self.room.walls.items():
+                key = f"src_to_{wall_id}"
+                dist = wall.node_positions.getDistance(self.room.source.srcPos)
+                delay_src2node = round((self.Fs * dist) / self.c)
+                setattr(self, f'src_to_{wall_id}_delay', delay_src2node)
 
-            ###############################################
-            if self.enable_path_logging:
-                initial_packet = PressurePacket(
-                    value=0.0, 
-                    val_history=[0.0],  # Initialize with current value
-                    path_history=['src', wall_id], 
-                    timestamps=[0],  # Initialize with current timestamp
-                    birth_sample=0,
-                    delay=delay_src2node)
-                self.source_to_nodes[key] = deque([initial_packet] * delay_src2node, maxlen=delay_src2node)
-            ###############################################
-            else:
                 self.source_to_nodes[key] = deque([0.0] * delay_src2node, maxlen=delay_src2node)
 
-            # Nodes to microphone
+        # Nodes to microphone (common for both standard and HO-SDN)
+        for wall_id, wall in self.room.walls.items():
             key = f"{wall_id}_to_mic"
             dist = wall.node_positions.getDistance(self.room.micPos)
             delay_w2mic = round((self.Fs * dist) / self.c)
             setattr(self, f'{wall_id}_to_mic_delay', delay_w2mic)
 
-            ###############################################
-            if self.enable_path_logging:
-                initial_packet = PressurePacket(
-                    value=0.0, 
-                    val_history=[0.0],  # Initialize with current value
-                    path_history=[wall_id, 'mic'], 
-                    timestamps=[0],  # Initialize with current timestamp
-                    birth_sample=0,
-                    delay=delay_w2mic)
-                self.node_to_mic[key] = deque([initial_packet] * delay_w2mic, maxlen=delay_w2mic)
-            ###############################################
-
-            else:
-                self.node_to_mic[key] = deque([0.0] * delay_w2mic, maxlen=delay_w2mic)
+            self.node_to_mic[key] = deque([0.0] * delay_w2mic, maxlen=delay_w2mic)
 
         # NODE to NODE DELAY LINES
         for wall1_id, wall1 in self.room.walls.items():
@@ -323,20 +373,8 @@ class DelayNetwork:
                     dist = wall1.node_positions.getDistance(wall2.node_positions)
                     delay_samples = round((self.Fs * dist) / self.c)
 
-                    if self.enable_path_logging:
-                        initial_packet = PressurePacket(
-                            value=0.0, 
-                            val_history=[0.0],  # Initialize with current value
-                            path_history=[wall1_id, wall2_id], 
-                            timestamps=[0],  # Initialize with current timestamp
-                            birth_sample=0, 
-                            delay=delay_samples)
-                        self.node_to_node[wall1_id][wall2_id] = deque([initial_packet] * delay_samples, maxlen=delay_samples)
-                        setattr(self, f'{wall1_id}_to_{wall2_id}_delay', delay_samples)
-
-                    else:  # NO LOG CASE - REF
-                        self.node_to_node[wall1_id][wall2_id] = deque([0.0] * delay_samples, maxlen=delay_samples)
-                        setattr(self, f'{wall1_id}_to_{wall2_id}_delay', delay_samples)
+                    self.node_to_node[wall1_id][wall2_id] = deque([0.0] * delay_samples, maxlen=delay_samples)
+                    setattr(self, f'{wall1_id}_to_{wall2_id}_delay', delay_samples)
 
     def get_delay_by_path(self, path):
         """
@@ -394,171 +432,116 @@ class DelayNetwork:
         # Step 0a : propagate the DIRECT SOUND to source_to_mic delay line
         direct_sound = input_sample * self.source_to_mic_gain
 
-        if self.enable_path_logging == False:  # NO LOG CASE - REF
-            self.source_to_mic["src_to_mic"].append(direct_sound)
-            output_sample += self.source_to_mic["src_to_mic"][0]
+        self.source_to_mic["src_to_mic"].append(direct_sound)
+        output_sample += self.source_to_mic["src_to_mic"][0]
 
-        ###############################################
-        else:  # LOG CASE
-            direct_packet = PressurePacket(
-                value=direct_sound,
-                val_history=[direct_sound],  # Initialize with current value
-                path_history=['src', 'mic'],
-                timestamps=[n],  # Initialize with current timestamp
-                birth_sample=n,
-                delay=self.direct_sound_delay)
-            self.source_to_mic["src_to_mic"].append(direct_packet)
-            output_sample += self.source_to_mic["src_to_mic"][0].value
+        # Step 1: Distribute source signal
+        if self.ho_sdn_order is not None:
+            # a) Inject into early reflection delay lines (direct to mic)
+            for key, gain in self.early_reflection_gains.items():
+                early_pressure = input_sample * gain
+                self.early_reflection_lines[key].append(early_pressure)
 
-            if abs(direct_sound) > 1e-10:
-                self.path_logger.log_packet(direct_packet)
-        ###############################################
-
-
-        # Step 1: Distribute source to nodes with gains
-        for wall_id in self.room.walls:
-            src_key = f"src_to_{wall_id}"
-            source_pressure = input_sample * self.source_to_node_gains[src_key] #input sample is the source signal 1,0,0... at n
-
-            if self.enable_path_logging == False: # NO LOG CASE - REF
+            # b) Inject into SDN-feeding delay lines (order N)
+            for key, gain in self.ho_source_to_node_gains.items():
+                source_pressure = input_sample * gain
+                self.ho_source_to_nodes[key].append(source_pressure)
+        else:
+            # Standard SDN: Inject into first-order source-to-node lines
+            for wall_id in self.room.walls:
+                src_key = f"src_to_{wall_id}"
+                source_pressure = input_sample * self.source_to_node_gains[src_key]
                 self.source_to_nodes[src_key].append(source_pressure)
 
-            ###############################################
-            else: # LOG CASE
-                # Create the packet for the delay line
-                packet = PressurePacket(
-                    value=source_pressure,
-                    val_history=[source_pressure],  # Initialize with current value
-                    path_history=[""],  # REMOVE
-                    timestamps=[n],  # Initialize with current timestamp
-                    birth_sample=n,
-                    delay= 0
-                )
-                self.source_to_nodes[src_key].append(packet)
-            ###############################################
-
+        # Step 1b: Collect output from early reflection lines
+        if self.ho_sdn_order is not None:
+            for key in self.early_reflection_lines:
+                output_sample += self.early_reflection_lines[key][0]
 
         # Step 2: Process each node
-
         for wall_id in self.room.walls:
-            src_key = f"src_to_{wall_id}"
-
-            # Step 2a: Read arriving source pressure from source_to_node delay line
-            if self.enable_path_logging == False: # NO LOG CASE - REF
+            # Step 2a: Read arriving source pressure from source_to_node delay line(s)
+            source_pressure_at_wall = 0.0
+            if self.ho_sdn_order is not None:
+                 # Sum pressure from all order-N paths arriving at this wall
+                 for i, img_info in enumerate(self.sdn_feeding_paths):
+                     if img_info['path'][-1] == wall_id:
+                         key = f"sdn_feed_path_{i}_to_{wall_id}"
+                         source_pressure_at_wall += self.ho_source_to_nodes[key][0]
+            else:
+                # Standard SDN: Read from single first-order path
+                src_key = f"src_to_{wall_id}"
                 source_pressure_at_wall = self.source_to_nodes[src_key][0]
-
-            ###############################################
-            else: # LOG CASE
-                source_pressure_at_wall = self.source_to_nodes[src_key][0].value
-            ###############################################
 
             # Collect incoming wave variables
             incoming_waves = []
             other_nodes = []
-            incoming_packets = []  # Store packets for path tracking
-            outgoing_packets = []  # Store packets for path tracking
-            source_contribution_packets = []  # Store packets for direct source contributions
-
             psk = self.source_pressure_injection_coeff * source_pressure_at_wall  # source pressure arriving at any (all) nodes (mostly zero except impulse sample)
-
-            ###############################################
-            # If there's a direct source contribution to this node, create a packet for it
-            if self.enable_path_logging and source_pressure_at_wall != 0.0:
-
-                path = ['src', wall_id]
-                src_key = f"src_to_{wall_id}"
-
-                source_packet = PressurePacket(
-                    value=psk,
-                    val_history=[psk],  # Initialize with current value
-                    path_history=path,
-                    timestamps=[n],  # Initialize with current timestamp
-                    birth_sample=n,
-                    delay=0
-                )
-                # source_contribution_packets.append(source_packet) # REMOVE
-            ###############################################
-
 
             # Get both best and second-best targets
             targets = get_best_reflection_targets(wall_id, self.room.angle_mappings, num_targets=2)
             best_target = targets[0]
+            if self.specular_source_injection_random:
+                best_target = self.random_target_map[wall_id]
+                # print(f"Best target for wall {wall_id} is randomly mapped to: {best_target}")
             second_best_target = targets[1]
             # target = get_best_reflection_target(wall_id, self.room.angle_mappings) # old
             iter = 1
+            psk_in = []  # Initialize pin for each wall_id
             for other_id in self.room.walls:
                 if other_id != wall_id:
                     other_nodes.append(other_id)  # Add this line to collect other_nodes
                     # Read from delay line and add half of source pressure
 
-                    if self.enable_path_logging == False:
-                        pki_pressure = self.node_to_node[other_id][wall_id][0]  # incoming wave from other node at n
+                    pki_pressure = self.node_to_node[other_id][wall_id][0]  # incoming wave from other node at n
 
-                    ###############################################
-                    else:  # LOG CASE
-                        pki_packet = self.node_to_node[other_id][wall_id][0]
-                        pki_pressure = pki_packet.value
-                        p_tilde = pki_pressure + psk  # if p_tilde is zero, no pressure at the node
-
-                        if p_tilde != 0.0:  # if there's pressure at the node, we need to log it
-                            if abs(psk) != 0.0: # There is SOURCE ARRIVAL: EARlY source packet.
-                                print(f"source packet arrived {source_packet.path_history} at n={n} or {source_packet.birth_sample}")
-                                # do nothing as we are already set src to wall_id
-                                # incoming_packets.append(self.node_to_node[other_id][wall_id][0])  # Use the original packet without extending # REMOVe
-                                # source_packet.extend_path(node = other_id)
-                                path_ = source_packet.path_history.copy()
-
-                            elif psk == 0.0 and pki_pressure != 0: # No source arrival, but there's pressure from other nodes
-                                # Extend the incoming wave from other_id which is already in its path histroy, with arrived wall_id
-                                # pki_packet.path_history.append(wall_id)
-                                # pki_packet.new_val = p_tilde
-                                path_ = pki_packet.path_history.copy()
-
-                            packet = PressurePacket(
-                                value=p_tilde,
-                                val_history=[p_tilde],  #
-                                path_history=path_,  #
-                                timestamps=[n],  #
-                                birth_sample=n,
-                                delay=0
-                            )
-                        incoming_packets.append(pki_packet)
-
-                        ###############################################
-
-                    # p_tilde = pki_pressure + psk  # if p_tilde is zero, no pressure at the node
-
-
-                    if self.specular_source_injection:
+                    if self.specular_source_injection or self.specular_source_injection_random:
                         if psk != 0.0: # change the source injection distribution. new approach.
 
                             if self.injection_c_vector is not None:
                                 c = self.injection_c_vector[self.injection_index]
+                            elif self.injection_vector is not None:
+                                c = self.injection_vector[0]  # First element always for dominant node
                             else:
                                 c = self.source_weighting
 
                             # print("wall_id:", wall_id, "other_id:", other_id)
                             if other_id == best_target:
-                                print(iter, "dom:", c)
+                                # print(iter, "dom:", c)
+                                if self.print_weighted_psk:
+                                    print("best_target:", best_target)
+                                psk_in.append(c)
                                 p_tilde = pki_pressure + c*psk
 
-                                if iter == self.total_injection_count-1:
-
-                                    self.injection_index += 1
                             else:
-                                print(iter, "nondom:", (5 - c) / 4)
-                                cf = (5 - c) / 4
-                                # cf = 1.25
-                                p_tilde = pki_pressure + cf * psk # or pki_pressure + 0 * psk
-                                if iter == self.total_injection_count-1:
-                                    self.injection_index += 1
-
+                                # Only calculate cn = (5-c)/4 if we're not using injection_vector
+                                if self.injection_vector is not None:
+                                    # Use non_dominant_index to get values from the injection vector
+                                    if self.non_dominant_index < len(self.injection_vector):
+                                        cn = self.injection_vector[self.non_dominant_index]
+                                        self.non_dominant_index += 1  # Increment for next non-dominant node
+                                else:
+                                    # Original calculation only used when no injection_vector
+                                    cn = (5 - c) / 4
+                                
+                                psk_in.append(cn)
+                                p_tilde = pki_pressure + cn * psk # or pki_pressure + 0 * psk
+                            
+                            # Check total injection count at the end of the loop
+                            # only used if there is injection_vector?
+                            if iter == self.total_injection_count-1:
+                                self.injection_index += 1
+                                self.non_dominant_index = 1  # Reset for next round of source injection
+                                if self.print_weighted_psk:
+                                    print("weighted psk vector", psk_in)
+                            
                             iter += 1
 
                         else: # if source pressure = 0, no need to adjust source injection
                             p_tilde = pki_pressure # since psk=0
 
                         incoming_waves.append(p_tilde) # p_tilde is calculated according to above if-else's.
+
                     elif self.source_trial_injection is not None:
                         p_tilde = pki_pressure + self.source_trial_injection * psk
                         incoming_waves.append(p_tilde)
@@ -571,63 +554,41 @@ class DelayNetwork:
             if self.specular_scattering:
                 self.instant_outgoing_waves = np.dot(self.scattering_matrix[wall_id], incoming_waves)
                 
-            else:
-                # Use default scattering matrix (identity or diffuse)
+            elif self.specular_node_pressure:
                 
+                # if there is one abs(max) pressure in incoming_waves, find the index of it
+                max_incoming_node_index = np.argmax(np.abs(incoming_waves))
+                max_incoming_node_id = other_nodes[max_incoming_node_index]
+                targets = get_best_node2node_targets(wall_id, max_incoming_node_id, self.room.angle_mappings,
+                                                        num_targets=2)
+                best_specular_node_target = targets[0]
+                #take the index of other_nodes[best_specular_node_target]
+                best_specular_node_target_index = other_nodes.index(best_specular_node_target)
+                if max_incoming_node_index != best_specular_node_target_index:
+                    self.scattering_matrix = swap(self.scattering_matrix, max_incoming_node_index,
+                                                    best_specular_node_target_index)
+
+                    self.instant_outgoing_waves = np.dot(self.scattering_matrix, incoming_waves)
+                    # Swap back to restore the original matrix state
+                    self.scattering_matrix = swap(self.scattering_matrix, max_incoming_node_index, best_specular_node_target_index)
+                else:
+                    self.instant_outgoing_waves = np.dot(self.scattering_matrix, incoming_waves)
+
+            else: # Use default scattering matrix (identity or diffuse)
                 self.instant_outgoing_waves = np.dot(self.scattering_matrix, incoming_waves)
-                # Create diagonal attenuation matrix with wall-specific attenuation values
-                attenuation_values = [self.room.wallAttenuation[self.room.walls[other_id].wall_index] for other_id in other_nodes]
-                att = np.diag(attenuation_values)
-                # Apply attenuation matrix to the scattered waves
-                self.instant_outgoing_waves = np.dot(att, self.instant_outgoing_waves)
+
+            # Create diagonal attenuation matrix with wall-specific attenuation values
+            attenuation_values = [self.room.wallAttenuation[self.room.walls[other_id].wall_index] for other_id in other_nodes]
+            att = np.diag(attenuation_values)
+            # Apply attenuation matrix to the scattered waves
+            self.instant_outgoing_waves = np.dot(att, self.instant_outgoing_waves)
 
             all_zero = all(element == 0 for element in self.instant_outgoing_waves)
 
             # Store outgoing waves for each connection
             for idx, other_id in enumerate(other_nodes):
 
-                if self.enable_path_logging == False:  # NO LOG CASE - REF
-                    self.outgoing_waves[wall_id][other_id] = self.instant_outgoing_waves[idx]
-
-                ###############################################
-                else: # LOG CASE
-                    if all_zero == False:  # if there are outgoing pressures at the node, we should store
-                        val = self.instant_outgoing_waves[idx]
-                        
-                        # Get the corresponding incoming packet
-                        if idx < len(incoming_packets):
-                            incoming_packet = incoming_packets[idx]
-                            
-                            # Create a new packet with the path extended to include the current wall_id
-                            path = incoming_packet.path_history.copy()
-                            path.append(other_id)
-
-                            # Create the outgoing packet
-                            outgoing_packet = PressurePacket(
-                                value=val,
-                                val_history=incoming_packet.val_history + [val],
-                                path_history=path,
-                                timestamps=incoming_packet.timestamps + [n],
-                                birth_sample=n,
-                                delay=0
-                            )
-                            
-                            # Store the outgoing packet
-                            self.outgoing_waves[wall_id][other_id] = outgoing_packet
-
-                    else:
-                        empty_packet = PressurePacket(
-                            value=0.0,
-                            val_history=[0.0],  # Initialize with current value
-                            path_history=[],  # Empty path for zero pressure
-                            timestamps=[n],  # Initialize with current timestamp
-                            birth_sample=n,
-                            delay=0
-                        )
-
-                        self.outgoing_waves[wall_id][other_id] = empty_packet
-                        assert all_zero, f"outgoingler 0 olmalıydı"  # there should be no pressure at the node
-                ###############################################
+                self.outgoing_waves[wall_id][other_id] = self.instant_outgoing_waves[idx]
 
             # Calculate node pressure : p_k(n) =  2/(N-1) * Σ p_ki^+(n)+ p_Sk(n)/2
             node_pressure = self.coef * sum(self.instant_outgoing_waves)
@@ -646,69 +607,9 @@ class DelayNetwork:
                 if mic_pressure != 0.0:  # print when mic pressure is nonzero
                     print("mic_pressure:", mic_pressure*5/2)
 
-            if self.enable_path_logging == False: # NO LOG CASE - REF
-                self.node_to_mic[mic_key].append(mic_pressure)
+            self.node_to_mic[mic_key].append(mic_pressure)
 
-            ###############################################
-            else: # LOG CASE
-                # For each node, we need to track the complete path from source to mic
-                # First, check if there's any non-zero pressure at this node
-                if abs(node_pressure) != 0.0:
-                    # Create packets for the microphone based on incoming packets
-                    for packet in incoming_packets:
-                        if abs(packet.value) > 1e-10 and packet.path_history:
-                            # Get the path history from the incoming packet
-                            path = packet.path_history.copy() 
-
-                            # Add 'mic' to the path if it's not already there
-                            if path and path[-1] != 'mic':
-                                path.append('mic') 
-                            
-                            # Create a packet for the microphone
-                            mic_packet = PressurePacket(
-                                value=mic_pressure,
-                                val_history=packet.val_history + [mic_pressure],
-                                path_history=path,
-                                timestamps=packet.timestamps + [n],
-                                birth_sample=packet.birth_sample,
-                                delay=packet.delay + getattr(self, f'{wall_id}_to_mic_delay', 0)
-                            )
-
-                            self.path_logger.log_packet(mic_packet)
-
-                    # If there's a direct source contribution, create a packet for it
-                    if abs(psk) > 0:
-                        # Create a packet for the microphone with the path from the source
-                        mic_packet = PressurePacket(
-                            value=mic_pressure, 
-                            val_history=[psk, mic_pressure],
-                            path_history=['src', wall_id, 'mic'],
-                            timestamps=[n, n],
-                            birth_sample=n,
-                            delay=getattr(self, f'{wall_id}_to_mic_delay', 0)
-                        )
-
-                        # Log the complete path
-                        if abs(mic_pressure) > 1e-10:
-                            self.path_logger.log_packet(mic_packet)
-                
-                # Always append something to the delay line - but don't log this
-                # This is just for the delay line, not for path tracking
-                default_packet = PressurePacket(
-                    value=mic_pressure,
-                    val_history=[mic_pressure],
-                    path_history=[""],
-                    timestamps=[n],
-                    birth_sample=n,
-                    delay=getattr(self, f'{wall_id}_to_mic_delay', 0)
-                )
-                self.node_to_mic[mic_key].append(default_packet if abs(mic_pressure) > 1e-10 else 0.0)
-
-            if not isinstance(self.node_to_mic[mic_key][0], PressurePacket):
-                output_sample += self.node_to_mic[mic_key][0]
-            else:
-                output_sample += self.node_to_mic[mic_key][0].value
-            ###############################################
+            output_sample += self.node_to_mic[mic_key][0]
 
         # Step 3: Update node-to-node connections using stored outgoing waves
         for wall_id in self.room.walls:
@@ -716,50 +617,12 @@ class DelayNetwork:
                 if wall_id != other_id:
                     # Get outgoing wave and apply wall attenuations
                     outgoing_wave = self.outgoing_waves[wall_id][other_id]
-                    sending_wall_atten = self.room.wallAttenuation[self.room.walls[wall_id].wall_index]
+                    # sending_wall_atten = self.room.wallAttenuation[self.room.walls[wall_id].wall_index]
 
-                    if self.enable_path_logging == False: # NO LOG CASE - REF
-                        # attenuated_wave = outgoing_wave * sending_wall_atten
-                        attenuated_wave = outgoing_wave
+                    # attenuated_wave = outgoing_wave * sending_wall_atten
+                    attenuated_wave = outgoing_wave
 
-                        self.node_to_node[wall_id][other_id].append(attenuated_wave)
-
-                    ###############################################
-                    else: # LOG CASE
-                        if isinstance(outgoing_wave, PressurePacket):
-                            # Get the attenuated value
-                            # attenuated_value = outgoing_wave.value * sending_wall_atten
-                            attenuated_value = outgoing_wave.value
-                            # Get the path history from the outgoing wave
-                            path = outgoing_wave.path_history.copy()
-                            
-                            # Add the target node (other_id) to the path
-                            # Only add if it's not already the last node
-                            # if path and path[-1] != other_id:
-                            #     path.append(other_id)
-                            
-                            # Create a new packet with the attenuated value and updated path
-                            attenuated_packet = PressurePacket(
-                                value=attenuated_value,
-                                val_history=outgoing_wave.val_history + [attenuated_value],
-                                path_history=path,
-                                timestamps=outgoing_wave.timestamps + [n],
-                                birth_sample=outgoing_wave.birth_sample,
-                                delay=outgoing_wave.delay + getattr(self, f'{wall_id}_to_{other_id}_delay', 0)
-                            )
-                            
-                            # Append to the delay line
-                            self.node_to_node[wall_id][other_id].append(attenuated_packet)
-                        else:
-                            # Handle the case where outgoing_wave is not a PressurePacket (should be 0.0)
-                            zero_packet = PressurePacket(
-                                value=0.0,
-                                val_history=[0.0],
-                                path_history=[],
-                                timestamps=[n],
-                                birth_sample=n,
-                                delay=0)
-
+                    self.node_to_node[wall_id][other_id].append(attenuated_wave)
 
         return output_sample
 
@@ -771,19 +634,59 @@ class DelayNetwork:
         src_mic_distance = self.room.source.srcPos.getDistance(self.room.micPos)
         self.source_to_mic_gain = G / src_mic_distance if not self.ignore_src_node_atten else 1.0
 
-        for wall_id, wall in self.room.walls.items():
-            node_pos = wall.node_positions
-            src_dist = node_pos.getDistance(self.room.source.srcPos)
-            mic_dist = node_pos.getDistance(self.room.micPos)
+        if self.ho_sdn_order is not None:
+            # --- HO-SDN Attenuation Scheme ---
+            self.ho_source_to_node_gains = {}
+            self.node_to_mic_gains = {}
+            self.early_reflection_gains = {}
 
-            # Source to node: g_sk = G/||x_S - x_k||
-            src_key = f"src_to_{wall_id}"
-            self.source_to_node_gains[src_key] = G / src_dist if not self.ignore_src_node_atten else 1.0
+            # 1. Attenuation for early reflections (order < N), direct to mic
+            # Gain is 1/distance
+            for i, path_info in enumerate(self.early_reflection_paths):
+                dist = path_info['position'].getDistance(self.room.micPos)
+                key = f"early_path_{i}"
+                self.early_reflection_gains[key] = (G / dist) if not self.ignore_src_node_atten else 1.0
 
-            # Node to mic: g_km = 1/(1 + ||x_k - x_M||/||x_S - x_k||)
-            mic_key = f"{wall_id}_to_mic"
-            self.node_to_mic_gains[mic_key] = 1.0 / (
-                        1.0 + mic_dist / src_dist) if not self.ignore_node_mic_atten else 1.0
+
+            # 2. Attenuation for SDN-feeding paths (order N)
+            for i, img_info in enumerate(self.sdn_feeding_paths):
+                last_wall_id = img_info['path'][-1]
+                node_pos = self.room.walls[last_wall_id].node_positions
+                
+                alpha = node_pos.getDistance(img_info['position'])
+                beta = node_pos.getDistance(self.room.micPos)
+
+                key = f"sdn_feed_path_{i}_to_{last_wall_id}"
+                # Formula from analysis of Simulation_HO_SDN_centroid.py
+                # Total gain = G / (alpha + beta).
+                # Here we use the g_sk = 1/(1+alpha/beta) split from the paper, but multiply by G
+                # to match the reference implementation's spherical spreading loss model.
+                self.ho_source_to_node_gains[key] = (G / (1.0 + alpha / beta)) if not self.ignore_src_node_atten else 1.0
+
+            # 3. Node-to-mic gain (one per node), g_kr = 1/beta
+            # The reference code uses 1/beta, not G/beta. We follow that.
+            for wall_id, wall in self.room.walls.items():
+                mic_key = f"{wall_id}_to_mic"
+                beta = wall.node_positions.getDistance(self.room.micPos)
+                self.node_to_mic_gains[mic_key] = (1.0 / beta) if not self.ignore_node_mic_atten else 1.0
+
+        else:
+            # --- Standard SDN Attenuation Scheme ---
+            self.source_to_node_gains = {}
+            self.node_to_mic_gains = {}
+            for wall_id, wall in self.room.walls.items():
+                node_pos = wall.node_positions
+                src_dist = node_pos.getDistance(self.room.source.srcPos)
+                mic_dist = node_pos.getDistance(self.room.micPos)
+
+                # Source to node: g_sk = G/||x_S - x_k||
+                src_key = f"src_to_{wall_id}"
+                self.source_to_node_gains[src_key] = G / src_dist if not self.ignore_src_node_atten else 1.0
+
+                # Node to mic: g_km = 1/(1 + ||x_k - x_M||/||x_S - x_k||)
+                mic_key = f"{wall_id}_to_mic"
+                self.node_to_mic_gains[mic_key] = 1.0 / (
+                            1.0 + mic_dist / src_dist) if not self.ignore_node_mic_atten else 1.0
 
     def calculate_rir(self, duration):
         """Calculate room impulse response for a given duration."""
@@ -794,27 +697,6 @@ class DelayNetwork:
             rir[n] = self.process_sample(self.room.source.signal[n], n)
 
         return rir
-
-    def get_path_summary(self, path_key: Optional[str] = None):
-        """Get summary of logged paths."""
-        if not self.enable_path_logging:
-            return "Path logging is not enabled. Initialize DelayNetwork with enable_path_logging=True"
-
-        self.path_logger.print_path_summary(path_key)
-
-    def get_paths_through_node(self, node_id: str):
-        """Get all paths passing through a specific node."""
-        if not self.enable_path_logging:
-            return "Path logging is not enabled. Initialize DelayNetwork with enable_path_logging=True"
-
-        return self.path_logger.get_paths_through_node(node_id)
-
-    def get_active_paths_at_sample(self, sample_idx: int):
-        """Get all active paths at a specific sample index."""
-        if not self.enable_path_logging:
-            return "Path logging is not enabled. Initialize DelayNetwork with enable_path_logging=True"
-
-        return self.path_logger.get_active_paths_at_sample(sample_idx)
 
     def plot_wall_incoming_sums(self):
         """Plot incoming pressure sums for each wall."""

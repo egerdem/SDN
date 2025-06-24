@@ -356,20 +356,71 @@ def calculate_rms_envelope(signal: np.ndarray,
 
     return rms_values
 
-def compute_RMS(sig1: np.ndarray, sig2: np.ndarray, range: int = None, Fs: int = 44100, method = "rmse") -> float:
-    """Compare two energy decay curves or smoothed RIRs and compute difference using various metrics."""
+def compute_RMS(sig1: np.ndarray, sig2: np.ndarray, range: int = None, Fs: int = 44100, method = "rmse", skip_initial_zeros: bool = False, normalize_by_active_length: bool = False) -> float:
+    """
+    Computes the difference between two signals using specified method.
+
+    Args:
+        sig1 (np.ndarray): First signal
+        sig2 (np.ndarray): Second signal
+        range (int, optional): Time range in milliseconds to analyze (default: None)
+        Fs (int): Sampling frequency
+        method (str): Method for computing the difference
+        skip_initial_zeros (bool): Whether to skip initial zeros in the error calculation
+        normalize_by_active_length (bool): Whether to normalize by the active length of the signals
+
+    Returns:
+        float: Computed difference
+    """
+    # Check if inputs are valid
+    if sig1 is None or sig2 is None:
+        print("WARNING: Null signal received in compute_RMS")
+        return 0.0
+        
     # Calculate samples for range (e.g., 50ms)
     # only trim if range is not None
     if range is not None:
         samples_range = int(range/1000 * Fs)  # Convert ms to samples
         # print("trimming signals for error calculation"
 
-        # Trim signals to specified range
-        sig1_early = sig1[:samples_range]
-        sig2_early = sig2[:samples_range]
+        # Trim signals to specified range if length is larger than range
+        if len(sig1) > samples_range and len(sig2) > samples_range:
+            sig1_early = sig1[:samples_range]
+            sig2_early = sig2[:samples_range]
+        else:
+            # If range is larger than either signal length, trim both to the length of the shorter signal
+            min_length = min(len(sig1), len(sig2))
+            sig1_early = sig1[:min_length]
+            sig2_early = sig2[:min_length]
     else:
-        sig1_early = sig1
+        # If no range specified, ensure signals are the same length by trimming to the shorter one
+        #min_length = min(len(sig1), len(sig2))
+        #sig1_early = sig1[:min_length]
+        #sig2_early = sig2[:min_length]
+        sig1_early = sig1   
         sig2_early = sig2
+    
+    if skip_initial_zeros:
+        # Get indices of non-zero samples with a small threshold
+        threshold = 1e-10
+        sig1_nonzeros = np.where(np.abs(sig1_early) > threshold)[0]
+        sig2_nonzeros = np.where(np.abs(sig2_early) > threshold)[0]
+        
+        # If either signal has non-zero samples, find the earlier first non-zero sample
+        if len(sig1_nonzeros) > 0 and len(sig2_nonzeros) > 0:
+            # print("Skipping initial zeros in edc for rmse calc:", sig1_nonzeros[0], sig2_nonzeros[0])
+            first_nonzero = min(sig1_nonzeros[0], sig2_nonzeros[0])
+            # Trim both signals to start from the first non-zero sample
+            sig1_early = sig1_early[first_nonzero:]
+            sig2_early = sig2_early[first_nonzero:]
+        elif len(sig1_nonzeros) > 0:
+            # Only sig1 has non-zero samples
+            sig1_early = sig1_early[sig1_nonzeros[0]:]
+            sig2_early = sig2_early[sig1_nonzeros[0]:]
+        elif len(sig2_nonzeros) > 0:
+            # Only sig2 has non-zero samples
+            sig1_early = sig1_early[sig2_nonzeros[0]:]
+            sig2_early = sig2_early[sig2_nonzeros[0]:]
 
     # Calculate difference based on method
     if method == "rmse":
@@ -384,22 +435,39 @@ def compute_RMS(sig1: np.ndarray, sig2: np.ndarray, range: int = None, Fs: int =
         # Sum of actual differences (total accumulated error)
         diff = np.sum(sig1_early - sig2_early)
 
-    elif method == "mae":
-        # Mean Absolute Error (for linear scale)
-        diff = np.mean(np.abs(sig1_early - sig2_early))
+    # Ensure signals have the same length after all processing
+    if len(sig1_early) != len(sig2_early):
+        print(f"Warning: Signals have different lengths after processing ({len(sig1_early)} vs {len(sig2_early)}). Truncating to shorter length.")
+        min_len = min(len(sig1_early), len(sig2_early))
+        sig1_early = sig1_early[:min_len]
+        sig2_early = sig2_early[:min_len]
+        
+    diff = sig1_early - sig2_early
+    
+    N = len(diff)
+    if normalize_by_active_length:
+        # Find first index where the reference signal is not equal to its first value.
+        # This marks the end of the initial plateau for an EDC.
+        onset_idx = np.where(sig1_early != sig1_early[0])[0]
+        if len(onset_idx) > 0:
+            num_initial_zeros = onset_idx[0]
+            # Adjust the normalization factor
+            N = len(diff) - num_initial_zeros
+            # print("num_initial_zeros:", num_initial_zeros)
+        if N <= 0: # Avoid division by zero
+            N = 1 
 
+    if method == "rmse":
+        # print("before, now", np.sqrt(np.sum(np.square(diff)) / len(diff)), np.sqrt(np.sum(np.square(diff)) / N))
+        return np.sqrt(np.sum(np.square(diff)) / N)
+    elif method == "mae":
+        return np.sum(np.abs(diff)) / N
     elif method == "median":
-        # Median of absolute differences
-        diff = np.median(np.abs(sig1_early - sig2_early))
-        
-    elif method == "lsd":
-        # Logarithmic Spectral Distance
-        diff = compute_LSD(sig1_early, sig2_early, Fs)
-        
+        return np.median(np.abs(diff))
+    elif method == "sum":
+        return np.sum(np.abs(diff))
     else:
         raise ValueError(f"Unknown method: {method}")
-    
-    return diff
 
 def plot_edc_comparison(edc1: np.ndarray, edc2: np.ndarray, Fs: int = 44100, 
                        label1: str = "EDC 1", label2: str = "EDC 2"):

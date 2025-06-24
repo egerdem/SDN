@@ -149,14 +149,23 @@ class ExperimentVisualizer:
             # Calculate or get from cache
             metrics = self.calculate_metrics_for_experiment(experiment)
             return {
-                'edc': metrics['edc'],
-                'ned': metrics['ned'],
-                'time_axis': metrics['time_axis'],
-                'ned_time_axis': metrics['ned_time_axis'],
-                'edc_time_axis': metrics['edc_time_axis']
+                'edc': metrics.get('edc', np.array([])),
+                'ned': metrics.get('ned', np.array([])),
+                'time_axis': metrics.get('time_axis', np.array([])),
+                'ned_time_axis': metrics.get('ned_time_axis', np.array([])),
+                'edc_time_axis': metrics.get('edc_time_axis', np.array([]))
             }
         else:
-            # Use pre-calculated values from the experiment
+            # Rely on metrics being on the experiment object itself.
+            # If they weren't calculated during experiment's init (e.g. skip_metrics=True),
+            # or if calculation wasn't completed (e.g. empty RIR), ensure they are processed.
+            if not experiment._metrics_calculated:
+                print(f"Visualizer (get_plot_data): Exp {experiment.experiment_id} metrics not pre-calculated or incomplete. Ensuring calculation...")
+                experiment.ensure_metrics_calculated() # This populates experiment.edc, .ned, etc.
+                                                      # and sets experiment._metrics_calculated = True.
+                                                      # Handles empty RIR by setting attributes to empty arrays.
+            
+            # After ensure_metrics_calculated, attributes should exist.
             return {
                 'edc': experiment.edc,
                 'ned': experiment.ned,
@@ -825,9 +834,9 @@ class ExperimentVisualizer:
                             ], style={'flex': '3'}),
                             # Mean error table
                             html.Div([
-                                html.H4(f'Mean {self.ERROR_METRICS[0]["label"]} (all positions)',
+                                html.H4(f'Mean {self.ERROR_METRICS[0]["label"]} (all mic positions per the active source)',
                                        style={
-                                           'textAlign': 'center', 
+                                           'textAlign': 'left', 
                                            'margin': '0', 
                                            'marginBottom': '4px', 
                                            'color': dark_theme['text'],
@@ -941,7 +950,7 @@ class ExperimentVisualizer:
                             'width': '25px'  # Reduced width
                         })
                     ], style={'textAlign': 'center', 'marginTop': '2px', 'width': '100%'})
-                ], style={'width': '20%', 'display': 'inline-block', 'verticalAlign': 'top', 'paddingLeft': '20px'})
+                ], style={'width': '30%', 'display': 'inline-block', 'verticalAlign': 'top', 'paddingLeft': '20px'})
             ], style={'display': 'flex', 'alignItems': 'flex-start'})
         ], style={
             'backgroundColor': dark_theme['background'],
@@ -1594,7 +1603,7 @@ class ExperimentVisualizer:
             else:
                 button_id = ctx.triggered[0]['prop_id'].split('.')[0]
 
-            # Handle room navigation
+            # Handle room navigation first, which resets pos_idx
             if button_id == 'prev-room':
                 room_idx = (room_idx - 1) % len(room_names)
                 pos_idx = 0
@@ -1604,14 +1613,73 @@ class ExperimentVisualizer:
             elif button_id == 'room-selector':
                 room_idx = room_selector_value
                 pos_idx = 0
-            elif button_id == 'prev-pos':
-                room = self.manager.projects[room_names[room_idx]]
+            
+            room = self.manager.projects[room_names[room_idx]]
+
+            # Handle empty room
+            if not room.source_mic_pairs:
+                empty_fig = go.Figure()
+                empty_fig.update_layout(
+                    plot_bgcolor=dark_theme['plot_bg'],
+                    paper_bgcolor=dark_theme['paper_bg'],
+                    font={'color': dark_theme['text']}
+                )
+                return (room_idx, 0, self.create_room_visualization([room]), "Room has no experiments", "",
+                        [], [], None, None, room_idx, [], [], [], None,
+                        empty_fig, empty_fig, empty_fig, empty_fig, empty_fig, empty_fig,
+                        [], [])
+
+            # Then, handle position changes within the selected room
+            if button_id == 'prev-pos':
                 pos_idx = (pos_idx - 1) % len(room.source_mic_pairs)
             elif button_id == 'next-pos':
-                room = self.manager.projects[room_names[room_idx]]
                 pos_idx = (pos_idx + 1) % len(room.source_mic_pairs)
+            elif button_id == 'source-selector' and source_value:
+                # When source dropdown changes, find the first pair that matches the new source
+                for i, (s_pos, r_pos) in enumerate(room.source_mic_pairs):
+                    s_key = f"({s_pos[0]:.1f}, {s_pos[1]:.1f}, {s_pos[2]:.1f})"
+                    if s_key == source_value:
+                        pos_idx = i
+                        break  # Stop at the first match
+            elif button_id == 'receiver-selector' and receiver_value:
+                # When receiver dropdown changes, find the pair with that receiver for the CURRENT source
+                current_source_pos, _ = room.source_mic_pairs[pos_idx]
+                for i, (s_pos, r_pos) in enumerate(room.source_mic_pairs):
+                    r_key = f"({r_pos[0]:.1f}, {r_pos[1]:.1f}, {r_pos[2]:.1f})"
+                    if np.array_equal(s_pos, current_source_pos) and r_key == receiver_value:
+                        pos_idx = i
+                        break
+            elif button_id == 'room-plot' and click_data and 'points' in click_data and click_data['points']:
+                point_data = click_data['points'][0]
+                if 'customdata' in point_data:
+                    point_idx, point_type = point_data['customdata']
+                    
+                    # Recreate the unique lists exactly as they were made for the plot
+                    unique_sources_list = []
+                    unique_mics_list = []
+                    for s, m in room.source_mic_pairs:
+                        if not any(np.array_equal(s, us) for us in unique_sources_list):
+                            unique_sources_list.append(s)
+                        if not any(np.array_equal(m, um) for um in unique_mics_list):
+                            unique_mics_list.append(m)
 
-            room = self.manager.projects[room_names[room_idx]]
+                    if point_type == 'source' and point_idx < len(unique_sources_list):
+                        selected_source_pos = unique_sources_list[point_idx]
+                        # Find the first pair with this source
+                        for i, (s_pos, r_pos) in enumerate(room.source_mic_pairs):
+                            if np.array_equal(s_pos, selected_source_pos):
+                                pos_idx = i
+                                break
+                    elif point_type == 'receiver' and point_idx < len(unique_mics_list):
+                        selected_mic_pos = unique_mics_list[point_idx]
+                        current_source_pos, _ = room.source_mic_pairs[pos_idx]
+                        # Find the pair with this receiver for the current source
+                        for i, (s_pos, r_pos) in enumerate(room.source_mic_pairs):
+                            if np.array_equal(s_pos, current_source_pos) and np.array_equal(r_pos, selected_mic_pos):
+                                pos_idx = i
+                                break
+
+            # Now that pos_idx is correctly determined, proceed with the rest of the function
             experiments = room.get_experiments_for_position(pos_idx)
             
             # Get unique sources and receivers for dropdown menus
@@ -1751,8 +1819,11 @@ class ExperimentVisualizer:
                         # Get signals based on comparison type
                         if comparison_type == 'edc':
                             # Calculate full EDC first
-                            sig1_full = ref_exp.edc
-                            sig2_full = exp.edc
+                            # Use get_experiment_plot_data to ensure metrics are handled correctly
+                            ref_exp_plot_data = self.get_experiment_plot_data(ref_exp)
+                            exp_plot_data = self.get_experiment_plot_data(exp)
+                            sig1_full = ref_exp_plot_data['edc']
+                            sig2_full = exp_plot_data['edc']
                                                 
                         elif comparison_type == 'smoothed_energy':
                             # Calculate full smoothed energy once
@@ -1772,8 +1843,14 @@ class ExperimentVisualizer:
                         sig2_500ms = sig2_full[:samples_500ms]
                         
                         # Calculate errors for current position
-                        error_50ms = self.an.compute_RMS(sig1_50ms, sig2_50ms, Fs=ref_exp.fs, method=error_metric)
-                        error_500ms = self.an.compute_RMS(sig1_500ms, sig2_500ms, Fs=ref_exp.fs, method=error_metric)
+                        if comparison_type == 'edc':
+                            error_50ms = self.an.compute_RMS(sig1_50ms, sig2_50ms, Fs=ref_exp.fs, method=error_metric, 
+                                                    skip_initial_zeros=False, normalize_by_active_length=True)
+                            error_500ms = self.an.compute_RMS(sig1_500ms, sig2_500ms, Fs=ref_exp.fs, method=error_metric,
+                                                     skip_initial_zeros=False, normalize_by_active_length=True)
+                        else:
+                            error_50ms = self.an.compute_RMS(sig1_50ms, sig2_50ms, Fs=ref_exp.fs, method=error_metric)
+                            error_500ms = self.an.compute_RMS(sig1_500ms, sig2_500ms, Fs=ref_exp.fs, method=error_metric)
                         row['error_50ms'] = f"{error_50ms:.6f}"
                         row['error_500ms'] = f"{error_500ms:.6f}"
                         table_data.append(row)
@@ -1811,8 +1888,11 @@ class ExperimentVisualizer:
                                 # Get signals and calculate errors
                                 if comparison_type == 'edc':
                                     # Calculate full EDC first
-                                    sig1_full = pos_ref.edc
-                                    sig2_full = pos_exp.edc
+                                    # Use get_experiment_plot_data to ensure metrics are handled correctly
+                                    pos_ref_plot_data = self.get_experiment_plot_data(pos_ref)
+                                    pos_exp_plot_data = self.get_experiment_plot_data(pos_exp)
+                                    sig1_full = pos_ref_plot_data['edc']
+                                    sig2_full = pos_exp_plot_data['edc']
                                     
                                 elif comparison_type == 'smoothed_energy':
                                     # Calculate full smoothed energy once
@@ -1830,8 +1910,14 @@ class ExperimentVisualizer:
                                 sig1_500ms = sig1_full[:samples_500ms]
                                 sig2_500ms = sig2_full[:samples_500ms]
 
-                                error_50ms = self.an.compute_RMS(sig1_50ms, sig2_50ms, Fs=pos_ref.fs, method=error_metric)
-                                error_500ms = self.an.compute_RMS(sig1_500ms, sig2_500ms, Fs=pos_ref.fs, method=error_metric)
+                                if comparison_type == 'edc':
+                                    error_50ms = self.an.compute_RMS(sig1_50ms, sig2_50ms, Fs=pos_ref.fs, method=error_metric,
+                                                             skip_initial_zeros=False, normalize_by_active_length=True)
+                                    error_500ms = self.an.compute_RMS(sig1_500ms, sig2_500ms, Fs=pos_ref.fs, method=error_metric,
+                                                             skip_initial_zeros=False, normalize_by_active_length=True)
+                                else:
+                                    error_50ms = self.an.compute_RMS(sig1_50ms, sig2_50ms, Fs=pos_ref.fs, method=error_metric)
+                                    error_500ms = self.an.compute_RMS(sig1_500ms, sig2_500ms, Fs=pos_ref.fs, method=error_metric)
                                 
                                 all_errors_50ms.append(error_50ms)
                                 all_errors_500ms.append(error_500ms)
@@ -2068,8 +2154,8 @@ class ExperimentVisualizer:
                     fig.update_yaxes(range=[-10, 2])
 
                 # Set y-axis ranges
-                #if fig == ned_fig_monitor and (time_range == 0.05 or time_range == '0.05'):
-                #    fig.update_xaxes(range=[0, 0.2])
+                elif fig == ned_fig_monitor and (time_range == 0.05 or time_range == '0.05'):
+                   fig.update_yaxes(range=[0, 0.6])
                 
             
             # Update plot layouts for laptop view
@@ -2096,6 +2182,9 @@ class ExperimentVisualizer:
                     a = 4
                 elif fig == edc_fig_laptop and (time_range == 0.05 or time_range == '0.05'):
                     fig.update_yaxes(range=[-10, 2])
+
+                elif fig == ned_fig_laptop and (time_range == 0.05 or time_range == '0.05'):
+                    fig.update_yaxes(range=[0, 0.6])
             
             # Add unified legend for all plots
             legend_config = dict(

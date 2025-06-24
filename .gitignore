@@ -28,5 +28,6 @@ tsdk-onboarding-notebook/
 results/
 experiments/
 audio/
+out/
 SDN-Simplest_Hybrid_HO-SDN/
 ```

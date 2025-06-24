@@ -1,49 +1,43 @@
 import numpy as np
 
 
-def scattering_matrix_crate(increase_coef=0.2):
-    """Create a modified scattering matrix with adjusted diagonal and off-diagonal elements.
-
-    Args:
-        increase_coef (float): Coefficient to adjust the matrix elements
-
-    Returns:
-        np.ndarray: Modified scattering matrix
-    """
-    c = increase_coef
-    original_matrix = (2 / 5) * np.ones((5, 5)) - np.eye(5)
-    adjusted_matrix = np.copy(original_matrix)
-
-    # Decrease diagonal elements by c
-    np.fill_diagonal(adjusted_matrix, adjusted_matrix.diagonal() - c)
-
-    # Increase only off-diagonal elements by c/4
-    off_diagonal_mask = np.ones(adjusted_matrix.shape, dtype=bool)
-    np.fill_diagonal(off_diagonal_mask, False)
-
-    # Add c/4 to only the off-diagonal elements
-    adjusted_matrix[off_diagonal_mask] += (c / 4)
-    return adjusted_matrix
+def injection_vec(c, source_pressure_injection_coef=1/2):
+    K = 5
+    cn = (5 - c) / 4.0 # Use float division
+    psk = cn * source_pressure_injection_coef * np.ones(K)
+    psk[0] = c * source_pressure_injection_coef
+    return psk
 
 size = 5
 S = (2 / size) * np.ones((size, size)) - np.eye(size)
 K = size
-c = (2 / 5) * np.ones((1,K))
-b = (1 / 2) * np.ones((K,1))
-# c = np.ones((1,K))
-# b = np.ones((K,1))
+b = (2 / 5) * np.ones((1,K))
+c = (1 / 2) * np.ones((K,1))
 
 # d: Direct source-to-microphone transfer
-d = np.array([[1]])
+d0 = np.array([[1]])
+d1 = np.array([[0]])
+
+def unify(c, d, S = S):
+
+    u = np.block([[S, c],
+              [b, d]])
+    return u
+
 # Construct the full scattering matrix
-S_extended = np.block([[S, b],
-                       [c, d]])
+S_extended0  = np.block([[S, c],
+                       [b, d0]])
+
+S_extended1 = np.block([[S, c],
+                       [b, d1]])
 # print(S)
 # print("6x6")
 # print(S_extended)
-# svd = np.linalg.svd(S_extended)
-# print(svd)
+svd = np.linalg.svd(S_extended0)
+print(np.round(svd.S,3))
 
+svd1 = np.linalg.svd(S_extended1)
+print(np.round(svd1.S,3))
 
 # np.set_printoptions(precision=3, suppress=True)
 #
@@ -67,11 +61,8 @@ S_extended = np.block([[S, b],
     print(f"svd = {singular}\n")
     print(svd)"""
 
-import numpy as np
-
+"""
 # Example scattering matrix for the SDN sub-network (for K = 5 nodes)
-size = 5
-S = (2 / size) * np.ones((size, size)) - np.eye(size)
 
 # ---- Approach 1: Approximately Unitary with Fixed d = 1 ----
 # In this approach, we fix the direct path gain d = 1.
@@ -130,4 +121,4 @@ print(S_extended_exact)
 print("Frobenius norm difference from unitary condition (exact):", np.linalg.norm(S_extended_exact.T @ S_extended_exact - np.eye(size+1)))
 
 def is_unitary(S):
-    return np.allclose(S.T @ S, np.eye(S.shape[0]))
+    return np.allclose(S.T @ S, np.eye(S.shape[0]))"""

@@ -7,7 +7,9 @@ from sdn_base import calculate_sdn_base_rir
 import pyroomacoustics as pra
 from scipy import signal
 # import seaborn as sns
-from analysis import calculate_smoothed_energy, calculate_error_metric, plot_smoothing_comparison, compute_RMS, compute_edc
+import analysis as an
+from rir_calculators import calculate_pra_rir, calculate_rimpy_rir, calculate_sdn_rir, rir_normalisation
+from plotting_utils import DISPLAY_NAME_MAP
 
 def generate_receiver_grid_old(room_width: float, room_depth: float, margin = 1, n_points: int = 50) -> List[Tuple[float, float]]:
     """Generate a grid of receiver positions within the room.
@@ -45,6 +47,7 @@ def generate_receiver_grid_tr(room_width: float, room_depth: float, margin=1, n_
     x = np.linspace(margin, room_width - margin_from_center, int(np.sqrt(n_points)))
     y = np.linspace(margin, room_depth - margin_from_center, int(np.sqrt(n_points)))
     X, Y = np.meshgrid(x, y)
+    print(f"Receiver grid: {X.shape} positions, margin={margin}, center margin={margin_from_center}")
     return list(zip(X.flatten(), Y.flatten()))
 
 
@@ -124,9 +127,11 @@ def plot_rirs(rir_methods: Dict, receiver_positions: List[Tuple[float, float]],
 
 def spatial_error_analysis(room_params: dict, source_pos: Tuple[float, float, float],
                            receiver_positions: List[Tuple[float, float]],
-                         duration: float, Fs: int, methods: List[str], 
+                         duration: float, Fs: int, err_duration_ms: float,
+                         methods: List[str],
                          method_configs: Dict,
-                         comparison_type: str = "smoothed_energy",
+                         reference_method: str = 'ISM',
+                         comparison_type: str = "edc",
                          error_metric: str = None) -> Dict:
     """Perform spatial error analysis between different RIR calculation methods.
 
@@ -137,6 +142,7 @@ def spatial_error_analysis(room_params: dict, source_pos: Tuple[float, float, fl
         Fs (int): Sampling frequency
         methods (List[str]): List of methods to compare
         method_configs (Dict): Configuration dictionary for each method
+        reference_method (str): The method to use as the reference for comparison.
         comparison_type (str): Type of comparison to perform:
             - "smoothed_energy": Compare smoothed energy (default)
             - "energy": Compare raw energy
@@ -151,17 +157,17 @@ def spatial_error_analysis(room_params: dict, source_pos: Tuple[float, float, fl
         Dict: Dictionary containing error maps for each method comparison
     """
     # Generate receiver positions -- first version no margin
-    # receiver_positions = generate_receiver_grid(room_params['width'], room_params['depth'])
+    # receiver_positions = generate_receiver_grid_tr(room_params['width'], room_params['depth'])
 
     # Initialize room and the source signal
     room = geometry.Room(room_params['width'], room_params['depth'], room_params['height'])
     num_samples = int(Fs * duration)
-    duration_in_ms = duration * 1000
     impulse = geometry.Source.generate_signal('dirac', num_samples)
     room.set_source(*source_pos, signal=impulse['signal'], Fs=Fs)
 
     # Calculate reflection coefficient
     room.wallAttenuation = [np.sqrt(1 - room_params['absorption'])] * 6
+    room_parameters['reflection'] = np.sqrt(1 - room_parameters['absorption'])
 
     # Initialize error maps
     error_maps = {}
@@ -177,45 +183,29 @@ def spatial_error_analysis(room_params: dict, source_pos: Tuple[float, float, fl
 
     # Calculate RIRs for each method and position
     for method in methods:
+        print(f"Calculating RIRs for method: {method}")
+        print(f"Method config: {method_configs[method]}")
         rir_methods[method] = []
-        config = method_configs[method]['params']
+        config = method_configs[method]
         
         for rx, ry in receiver_positions:
             room.set_microphone(rx, ry, room_params['mic z'])
 
+            # This geom_room is needed for normalization later
+            geom_room = geometry.Room(room_params['width'], room_params['depth'], room_params['height'])
+            geom_room.set_microphone(rx, ry, room_params['mic z'])
+            geom_room.set_source(source_pos[0], source_pos[1], source_pos[2])
+
             if method == 'ISM':
-                # Setup PRA room
-                pra_room = pra.ShoeBox(room_dim, fs=Fs,
-                                     materials=pra.Material(room_params['absorption']),
-                                     max_order=config.get('max_order'),
-                                     air_absorption=False,
-                                     ray_tracing=config.get('ray_tracing', False),
-                                     use_rand_ism=config.get('use_rand_ism', False))
-                pra_room.set_sound_speed(343)
-
-                # Add source and receiver
-                source_loc = np.array([source_pos[0], source_pos[1], source_pos[2]])
-                mic_loc = np.array([rx, ry, room_params['mic z']])
-                pra_room.add_source(source_loc)
-                pra_room.add_microphone(mic_loc)
-
-                # Compute RIR
-                pra_room.compute_rir()
-                pra_rir = pra_room.rir[0][0]
-
-                # Process the RIR
-                global_delay = pra.constants.get("frac_delay_length") // 2
-                pra_rir = pra_rir[global_delay:]  # Shift left by removing the initial delay
-                pra_rir = np.pad(pra_rir, (0, global_delay))  # Pad with zeros at the end to maintain length
-                if len(pra_rir) < num_samples:
-                    # Pad with zeros to reach num_samples
-                    rir = np.pad(pra_rir, (0, num_samples - len(pra_rir)))
-                else:
-                    # Truncate if longer
-                    rir = pra_rir[:num_samples]
-
-                # Normalize
-                rir = rir / np.max(np.abs(rir))
+                # Create a copy of room parameters with current mic position
+                current_params = room_params.copy()
+                current_params.update({
+                    'mic x': rx,
+                    'mic y': ry
+                })
+                max_order = config.get('max_order')
+                # Calculate RIR using the unified function from rir_calculators
+                rir, _ = calculate_pra_rir(current_params, duration, Fs, max_order)
 
             elif method == 'SDN-Base':
                 # Create a copy of room parameters with current mic position
@@ -226,56 +216,109 @@ def spatial_error_analysis(room_params: dict, source_pos: Tuple[float, float, fl
                 })
                 rir = calculate_sdn_base_rir(current_params, duration, Fs)
 
-            elif method.startswith('SDN-Test'):
-                sdn = DelayNetwork(room, Fs=Fs, label=method, **config)
-                rir = sdn.calculate_rir(duration)
-                rir = rir / np.max(np.abs(rir))
+            elif method.startswith('SDN-'):
+                # Handle all SDN methods (including SDN-Test and SDN-Original)
+                _, rir, _, _ = calculate_sdn_rir(room_parameters, method, room, duration, Fs, config)
+            else:
+                print(f"Warning: Unknown method {method}, skipping")
+                continue
+
+            # Normalize RIR for all methods consistently, mirroring sdn_experiment_manager
+            rir = rir_normalisation(rir, geom_room, Fs, normalize_to_first_impulse=True)['single_rir']
 
             rir_methods[method].append(rir)
 
-    # Calculate error maps for each method comparison
-    mean_errors = {}  # Dictionary to store mean errors
-    
-    # Assuming 'ISM' is one of the methods
-    if 'ISM' not in methods:
-        raise ValueError("ISM must be one of the methods for comparison")
-    print("error for duration: {} ms".format(duration_in_ms))
+    # Calculate error maps for each method comparison and print tables
+    grid_size = int(np.sqrt(len(receiver_positions)))
+    X = np.array([pos[0] for pos in receiver_positions]).reshape(grid_size, grid_size)
+    Y = np.array([pos[1] for pos in receiver_positions]).reshape(grid_size, grid_size)
+    error_maps = {}
+    mean_errors = {}
 
-    # Only compare other methods with ISM
+    # Initialize error_maps structure
     for method in methods:
-        if method != 'ISM':
-            errors = []
-            for rir1, rir2 in zip(rir_methods['ISM'], rir_methods[method]):
-                # Process signals based on comparison type
-                if comparison_type == "smoothed_energy":
-                    _, sig1 = calculate_smoothed_energy(rir1, window_length=30, range=duration_in_ms, Fs=Fs)
-                    _, sig2 = calculate_smoothed_energy(rir2, window_length=30, range=duration_in_ms, Fs=Fs)
-                elif comparison_type == "energy":
-                    sig1, _ = calculate_smoothed_energy(rir1, window_length=30, range=duration_in_ms, Fs=Fs)
-                    sig2, _ = calculate_smoothed_energy(rir2, window_length=30, range=duration_in_ms, Fs=Fs)
-                elif comparison_type == "edc":
-                    sig1 = compute_edc(rir1, Fs, plot=False)
-                    sig2 = compute_edc(rir2, Fs, plot=False)
-                else:
-                    raise ValueError(f"Unknown comparison type: {comparison_type}")
-                # print("length of ", len(sig1), len(sig2))
-                # Compute error using specified metric
-                error = compute_RMS(sig1, sig2, range=500, Fs=Fs, method=error_metric)
-                errors.append(error)
+        if method != reference_method:
+            comparison_key = f'{reference_method}_vs_{method}'
+            error_maps[comparison_key] = {'X': X, 'Y': Y, 'errors': []}
+
+    for pos_idx, (rx, ry) in enumerate(receiver_positions):
+        print(f"\n--- Results for Receiver Position {pos_idx}: ({rx:.2f}m, {ry:.2f}m) ---")
+        table_data = []
+        ref_rir = rir_methods[reference_method][pos_idx]
+
+        for method in methods:
+            rir = rir_methods[method][pos_idx]
+
+            # Calculate metrics for the table
+            rt60 = an.calculate_rt60_from_rir(rir, Fs, plot=False) if duration > 0.7 else 'N/A'
+            _, energy, _ = an.calculate_err(rir, Fs=Fs)
+            total_energy = np.sum(energy)
+
+            # Calculate error for the specified duration
+            err_samples = int(err_duration_ms / 1000 * Fs)
+            if comparison_type == "smoothed_energy":
+                sig1_full = an.calculate_smoothed_energy(ref_rir, window_length=30, Fs=Fs)
+                sig2_full = an.calculate_smoothed_energy(rir, window_length=30, Fs=Fs)
+                sig1, sig2 = sig1_full[:err_samples], sig2_full[:err_samples]
+            elif comparison_type == "energy":
+                sig1_full, _, _ = an.calculate_err(ref_rir, Fs=Fs)
+                sig2_full, _, _ = an.calculate_err(rir, Fs=Fs)
+                sig1, sig2 = sig1_full[:err_samples], sig2_full[:err_samples]
+            elif comparison_type == "edc":
+                sig1_full, _, _ = an.compute_edc(ref_rir, Fs, plot=False)
+                sig2_full, _, _ = an.compute_edc(rir, Fs, plot=False)
+                sig1, sig2 = sig1_full[:err_samples], sig2_full[:err_samples]
+            else:
+                raise ValueError(f"Unknown comparison type: {comparison_type}")
+
+            if comparison_type == 'edc':
+                error = an.compute_RMS(
+                    sig1, 
+                    sig2, 
+                    range=int(err_duration_ms),
+                    Fs=Fs,
+                    skip_initial_zeros=False,
+                    normalize_by_active_length=True
+                )
+            else: # rir
+                error = an.compute_RMS(
+                    sig1, 
+                    sig2, 
+                    range=int(err_duration_ms),
+                    Fs=Fs
+                )
+
+            if method == reference_method:
+                error = 0.0
             
-            error_map = np.array(errors).reshape(grid_size, grid_size)
-            comparison_key = f'ISM_vs_{method}'
-            error_maps[comparison_key] = {
-                'X': X,
-                'Y': Y,
-                'errors': error_map
-            }
-            
-            # Calculate and store mean error
-            mean_errors[comparison_key] = np.mean(errors)
-    
+            if method != reference_method:
+                comparison_key = f'{reference_method}_vs_{method}'
+                error_maps[comparison_key]['errors'].append(error)
+
+            # Get display name from plotting_utils
+            display_name = DISPLAY_NAME_MAP.get(method, method)
+            table_data.append({
+                'Method': display_name,
+                'RT60': f"{rt60:.2f}" if isinstance(rt60, float) else rt60,
+                'Total Energy': f"{total_energy:.6f}",
+                f'RMSE [{err_duration_ms}ms]': f"{error:.6f}"
+            })
+        
+        # Print the table for the current position
+        header = f"{'Method':<30} {'RT60':>10} {'Total Energy':>18} {f'RMSE [{err_duration_ms}ms]':>18}"
+        print(header)
+        print("-" * len(header))
+        for row in table_data:
+            rmse_key = f'RMSE [{err_duration_ms}ms]'
+            print(f"{row['Method']:<30} {row['RT60']:>10} {row['Total Energy']:>18} {row[rmse_key]:>18}")
+
+    # Finalize error maps by reshaping the lists of errors into grids
+    for key in error_maps:
+        error_maps[key]['errors'] = np.array(error_maps[key]['errors']).reshape(grid_size, grid_size)
+        mean_errors[key] = np.mean(error_maps[key]['errors'])
+
     # Print mean errors
-    print("\nMean Errors:")
+    print("\nMean Errors Across All Positions:")
     print("-" * 80)
     print(f"{'Method Comparison':<30} {error_metric.upper():>15}{' ':>5}{'Info':>20}")
     print("-" * 80)
@@ -293,7 +336,7 @@ def spatial_error_analysis(room_params: dict, source_pos: Tuple[float, float, fl
     return error_maps, rir_methods
 
 def plot_error_maps(error_maps: Dict, room_params: dict, source_pos: Tuple[float, float, float], 
-                   interpolated: bool = True, comparison_type: str = "smoothed_energy", error_metric: str = "rmse"):
+                   interpolated: bool = True, comparison_type: str = "edc", error_metric: str = "rmse", reference_method: str = 'ISM'):
     """Plot error maps with room layout.
     
     Args:
@@ -303,24 +346,25 @@ def plot_error_maps(error_maps: Dict, room_params: dict, source_pos: Tuple[float
         interpolated (bool): Whether to use interpolation in the plot (default: True)
         comparison_type (str): Type of comparison used
         error_metric (str): Error metric used
+        reference_method (str): The method used as the reference for comparison.
     """
-    # Filter for only ISM comparisons
-    ism_comparisons = {k: v for k, v in error_maps.items() if k.startswith('ISM_')}
+    # Filter for only reference method comparisons
+    ref_comparisons = {k: v for k, v in error_maps.items() if k.startswith(f'{reference_method}_')}
     
-    if not ism_comparisons:
-        print("No ISM comparisons found in error maps.")
+    if not ref_comparisons:
+        print(f"No comparisons with reference method '{reference_method}' found in error maps.")
         return
         
-    n_comparisons = len(ism_comparisons)
+    n_comparisons = len(ref_comparisons)
     fig, axes = plt.subplots(n_comparisons, 1, figsize=(10, 5*n_comparisons))
     if n_comparisons == 1:
         axes = [axes]
     
     # Find global min and max for consistent colormap across subplots
-    all_errors = np.concatenate([data['errors'].flatten() for data in ism_comparisons.values()])
+    all_errors = np.concatenate([data['errors'].flatten() for data in ref_comparisons.values()])
     vmin, vmax = np.min(all_errors), np.max(all_errors)
     
-    for ax, (comparison, data) in zip(axes, ism_comparisons.items()):
+    for ax, (comparison, data) in zip(axes, ref_comparisons.items()):
         # Plot error map
         if interpolated:
             # Interpolated contour plot
@@ -355,87 +399,138 @@ def plot_error_maps(error_maps: Dict, room_params: dict, source_pos: Tuple[float
         ax.set_ylabel('Room Depth (m)')
         ax.legend()
         ax.grid(True)
+        ax.set_aspect('equal', adjustable='box')
     
     plt.tight_layout()
     plt.show()
 
 if __name__ == "__main__":
     # Example usage
-    room_sdn_original = {
+    room_aes = {
+        'display_name': 'AES Room',
         'width': 9, 'depth': 7, 'height': 4,
         'source x': 4.5, 'source y': 3.5, 'source z': 2,
         'mic z': 1.5,
         'absorption': 0.2,
+        # 'air': {'humidity': 50,
+        #        'temperature': 20,
+        #        'pressure': 100},
     }
 
-    room = room_sdn_original
-    room_parameters = room_sdn_original
+    room = room_aes
+    room_parameters = room_aes
+    ENABLED = False  # Set to True to enable all methods
 
     # Method configurations
     method_configs = {
         'ISM': {
-            'enabled': True,
-            'params': {
+            'enabled': ENABLED,
                 'max_order': 100,
-                'ray_tracing': False,
-                'use_rand_ism': False
-            },
             'info': ''  # Empty info for ISM
         },
-        'SDN-Original': {
-            'enabled': True,
-            'params': {},  # No additional parameters needed
-            'info': 'original implementation'
-        },
         'SDN-Test1': {
-            'enabled': True,
-            'params': {
-                'specular_source_injection': True,
-                'source_weighting': 3
-            },
-            'info': 'source weight 3'
+            'enabled': ENABLED,
+                'label': "",
+                'flags': {
+                    'specular_source_injection': True,
+                    'source_weighting': 1
+                },
+            'info': 'c1 original'
         },
-        'SDN-Test2': {
-            'enabled': True,
-            'params': {
+        'SDN-Test5': {
+            'enabled': ENABLED,
+            'info': "c5",
+            'flags': {
                 'specular_source_injection': True,
-                'source_weighting': 4
+                'source_weighting': 5,
             },
-            'info': 'source weight 4'
+            'label': "SDN Test 5"
         },
-        'SDN-Test3': {
-            'enabled': True,
-            'params': {
+        'SDN-Test6': {
+            'enabled': ENABLED,
+            'info': "c6",
+            'flags': {
                 'specular_source_injection': True,
-                'source_weighting': 5
+                'source_weighting': 6,
             },
-            'info': 'source weight 5'
+            'label': "SDN Test 6"
+        },
+        'SDN-Test7': {
+            'enabled': ENABLED,
+            'info': "c7",
+            'flags': {
+                'specular_source_injection': True,
+                'source_weighting': 7,
+            },
+            'label': "SDN Test 7"
         }
+
     }
 
     # Get list of enabled methods
     enabled_methods = [method for method, config in method_configs.items() 
                       if config['enabled']]
+    
+    # Define the reference method for comparison
+    reference_method = 'ISM'
 
 
     source_position = (room_parameters['source x'], 
                       room_parameters['source y'], 
                       room_parameters['source z'])
-    
+
     # Analysis parameters
     USE_INTERPOLATION = False  # Set to False for discrete visualization
     
     # Example of different comparison types
     comparison_configs = [
-        {"type": "smoothed_energy", "metric": "median"},
+        # {"type": "smoothed_energy", "metric": "median"},
         # {"type": "smoothed_energy", "metric": "sum"},
         {"type": "edc", "metric": "rmse"},
         # {"type": "edc", "metric": "sum"}
     ]
 
-    receiver_positions = generate_receiver_grid(room['width'] / 2, room['depth'] / 2, n_points=16,
-                                                   margin=0.5)  # room aes
-    # source_positions = generate_source_positions(room)
+    receiver_positions = generate_receiver_grid_old(room['width'] / 2, room['depth'] / 2, n_points=16,
+                                                  margin=0.5)  # room aes
+
+    # Print and visualize the receiver grid
+    print("\nReceiver Grid Coordinates:")
+    grid_size = int(np.sqrt(len(receiver_positions)))
+    for i, (rx, ry) in enumerate(receiver_positions):
+        print(f"Position {i:2d}: ({rx:.2f}, {ry:.2f}), grid index: row={i//grid_size}, col={i%grid_size}")
+    
+    # Visualize the receiver grid
+    plt.figure(figsize=(10, 8))
+    rx_values = [pos[0] for pos in receiver_positions]
+    ry_values = [pos[1] for pos in receiver_positions]
+    plt.scatter(rx_values, ry_values, c='blue', s=100, alpha=0.7)
+    
+    # Add position indices
+    for i, (rx, ry) in enumerate(receiver_positions):
+        plt.text(rx, ry, f"{i}", fontsize=9, ha='center', va='center')
+    
+    # Add grid indices
+    for i, (rx, ry) in enumerate(receiver_positions):
+        row, col = i // grid_size, i % grid_size
+        plt.text(rx, ry+0.2, f"({row},{col})", fontsize=8, ha='center', va='center', color='red')
+    
+    # Add source position
+    plt.plot(source_position[0], source_position[1], 'r*', markersize=15, label='Source')
+    
+    # Add room boundaries
+    plt.plot([0, room['width']], [0, 0], 'k-', linewidth=2)
+    plt.plot([0, room['width']], [room['depth'], room['depth']], 'k-', linewidth=2)
+    plt.plot([0, 0], [0, room['depth']], 'k-', linewidth=2)
+    plt.plot([room['width'], room['width']], [0, room['depth']], 'k-', linewidth=2)
+    
+    plt.title('Receiver Grid Positions')
+    plt.xlabel('Room Width (m)')
+    plt.ylabel('Room Depth (m)')
+    plt.grid(True, alpha=0.3)
+    plt.gca().set_aspect('equal', adjustable='box')
+    plt.legend()
+    plt.savefig('receiver_grid_positions.png')
+    plt.close()
 
     # Run analysis for each configuration
     for config in comparison_configs:
@@ -444,10 +539,12 @@ if __name__ == "__main__":
             room_parameters,
             source_position,
             receiver_positions,
-            duration=0.05,
+            duration= 1,
+            err_duration_ms=50,
             Fs=44100,
             methods=enabled_methods,
             method_configs=method_configs,  # Pass method configurations
+            reference_method=reference_method,
             comparison_type=config['type'],
             error_metric=config['metric']
         )
@@ -456,7 +553,8 @@ if __name__ == "__main__":
         plot_error_maps(error_maps, room_parameters, source_position, 
                        interpolated=USE_INTERPOLATION,
                        comparison_type=config['type'],
-                       error_metric=config['metric'])
+                       error_metric=config['metric'],
+                       reference_method=reference_method)
         
         # Plot RIRs for first 4 receiver positions
-        # plot_rirs(rir_methods, receiver_positions, selected_positions=[0, 1, 2, 3])
+        plot_rirs(rir_methods, receiver_positions, selected_positions=[0, 1, 2, 3])

@@ -321,15 +321,16 @@ class SDNExperiment:
         # Add method-specific details
         if method == 'ISM':
             if 'max_order' in self.config:
-                label += f" order={self.config['max_order']}"
+                label += f" {self.config['max_order']}"
         elif method == 'SDN':
             # Add SDN-specific flags that affect the simulation
             if 'flags' in self.config:
                 flags = self.config['flags']
-                if flags.get('source_weighting'):
-                    label += f" {flags['source_weighting']}"
                 if flags.get('specular_source_injection'):
-                    label += " specular"
+                    label += f"c{flags['source_weighting']}"
+                # if flags.get('source_weighting'):
+                    # label += f" {flags['source_weighting']}"
+
                 if 'source_pressure_injection_coeff' in flags:
                     label += f" src constant coef={flags['source_pressure_injection_coeff']}"
                 if 'scattering_matrix_update_coef' in flags:
@@ -518,7 +519,7 @@ class SDNExperimentManager:
         method = config.get('method')
         param_set = ""
         
-        if method == 'SDN':
+        if method == 'SDN' or method == 'SW-SDN':
             # Include key SDN parameters in the name
             flags = config.get('flags', {})
             #if flags.get('specular_source_injection', False):
@@ -583,7 +584,7 @@ class SDNExperimentManager:
         ```python
         config = {
             'method': 'SDN',
-            'label': 'weighted psk',
+            'label': 'sw',
             'info': '',
             'flags': {
                 'specular_source_injection': True,
@@ -638,7 +639,6 @@ class SDNExperimentManager:
                 config['reflection_sign'] = params['reflection_sign']
                 
         return config
-
 
 
     def run_experiment(self, config, room_parameters, duration, fs=44100,
@@ -991,7 +991,7 @@ class SDNExperimentManager:
             geom_room.source.signal = impulse_dirac['signal']
             
             # Calculate RIR based on method
-            if method == 'SDN':
+            if method == 'SDN' or method == 'SW-SDN':
                 # Import the calculate_sdn_rir function from rir_calculators
                 from rir_calculators import calculate_sdn_rir
                 
@@ -1306,9 +1306,16 @@ if __name__ == "__main__":
     run_batch_experiments = not run_single_experiments
 
     show_experiments = False
-    project_name = "journal_absorptioncoeffs"
-    project_name = "aes_NEW_SINGULAR_FORMAT"
-    duration = 0.1
+    # project_name = "journal_absorptioncoeffs"
+    # project_name = "aes_MULTI"
+    project_name = "journal_SINGLE"
+    # project_name = "aes_quartergrid_new"
+    # project_name = "aes_MULTI_qgrid_tr43"
+    # project_name = "waspaa_MULTI"
+    # project_name = "aes_SINGLE"
+    # project_name = "waspaa_SINGLE"
+
+    duration = 1.
 
     # Use this as a parent directory for the results (optional)
     results_dir = 'results'
@@ -1332,8 +1339,9 @@ if __name__ == "__main__":
                     'absorption': 0.1,
                     }
 
-    room = room_aes
+    room = room_journal
     # room = room_aes
+    # room = room_waspaa
 
     # Create managers if needed
     batch_manager = get_experiment_manager(is_batch=True, results_dir=results_dir, dont_check_duplicates=False) if run_batch_experiments else None
@@ -1343,42 +1351,53 @@ if __name__ == "__main__":
     configs = []
 
     # ISM experiment
+    # configs.append({
+    #     'method': 'ISM',
+    #     'label': 'PRA',
+    #     'info': '',
+    #     'max_order': 100,
+    #     'ray_tracing': False
+    # })
+
     configs.append({
         'method': 'ISM',
-        'label': 'pra',
-        'info': '',
+        'label': 'pra10',
+        'info': 'pra-rand10',
         'max_order': 100,
-        'ray_tracing': False
+        'use_rand_ism': True,
+        'max_rand_disp': 0.1
     })
+
 
     # Original SDN experiment
     # configs.append({
     #     'method': 'SDN',
-    #     'label': 'original',
-    #     'info': '',
+    #     'label': 'orig',
+    #     'info': '(c1)',
     #     'flags': {
     #     }
     # })
 
     # SDN experiments with different weightings
-    for weighting in [2, 4, 5]:
-        configs.append({
-            'method': 'SDN',
-            'label': 'weighted psk',
-            'info': '',
-            'flags': {
-                'specular_source_injection': True,
-                'source_weighting': weighting,
-            }
-        })
+    # for weighting in [-3, -2, -1, 0, 2, 3, 4, 5, 6, 7]:
+    # # for weighting in [-3]:
+    #     configs.append({
+    #         'method': 'SDN',
+    #         'label': 'SW',
+    #         'info': f'c{weighting}',
+    #         'flags': {
+    #             'specular_source_injection': True,
+    #             'source_weighting': weighting,
+    #         }
+    #     })
 
     # # RIMPY experiments
-    configs.append({
-        'method': 'RIMPY',
-        'label': 'posRef',
-        'info': '',
-        'reflection_sign': 1
-    })
+    # configs.append({
+    #     'method': 'RIMPY',
+    #     'label': 'posRef',
+    #     'info': '',
+    #     'reflection_sign': 1
+    # })
     
     # configs.append({
     #     'method': 'RIMPY',
@@ -1388,14 +1407,14 @@ if __name__ == "__main__":
     # })
     
     # HO-SDN experiments
-    for order in [2,3]:
-        configs.append({
-            'method': 'HO-SDN',
-            'label': f'N{order}',
-            'info': '',
-            'source_signal': 'dirac',
-            'order': order
-        })
+    # for order in [2,3]:
+    #     configs.append({
+    #         'method': 'HO-SDN',
+    #         'label': f'N{order}',
+    #         'info': '',
+    #         'source_signal': 'dirac',
+    #         'order': order
+    #     })
 
     # SINGLE EXPERIMENTS
     if run_single_experiments:
@@ -1416,10 +1435,9 @@ if __name__ == "__main__":
     # BATCH EXPERIMENTS
     if run_batch_experiments:
         # Generate source & receiver positions for batch processing
-        # receiver_positions = sa.generate_receiver_grid_old(room['width'] / 2, room['depth'] / 2, n_points=16, margin=0.5)
-        receiver_positions = sa.generate_receiver_grid_tr(room['width'] / 2, room['depth'] / 2, n_points=16, margin=0.5)
+        receiver_positions = sa.generate_receiver_grid_old(room['width'] / 2, room['depth'] / 2, n_points=16, margin=0.5)
+        # receiver_positions = sa.generate_receiver_grid_tr(room['width'] / 2, room['depth'] / 2, n_points=16, margin=0.5)
         source_positions = sa.generate_source_positions(room)
-
         print(f"Batch experiments saved in: {batch_manager._get_room_dir(project_name)}")
         
         # Run batch experiments with the defined configs
@@ -1444,7 +1462,7 @@ if __name__ == "__main__":
         if run_batch_experiments:
             batch_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=True,
                                                     project_names=project_name)
-            print(batch_manager.get_experiments_by_label("weighted psk"))
+            print(batch_manager.get_experiments_by_label("sw"))
             print(batch_manager.get_experiments_by_label("original"))
             print(batch_manager.get_experiments_by_label("pra"))
             
@@ -1452,7 +1470,7 @@ if __name__ == "__main__":
 
             singular_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=False,
                                                    project_names=project_name)
-            print(singular_manager.get_experiments_by_label("weighted psk"))
+            print(singular_manager.get_experiments_by_label("sw"))
             print(singular_manager.get_experiments_by_label("original"))
             print(singular_manager.get_experiments_by_label("pra"))"""
 

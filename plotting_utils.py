@@ -68,6 +68,32 @@ PLOT_CONFIG = {
     },
 }
 
+# --- Display Name Mapping ---
+# Central source for publication-ready names for different simulation methods.
+DISPLAY_NAME_MAP = {
+    'ISM-pra': 'ISM (PRA)',
+    'ISM-pra-rand10' : {'name': 'ISM (PRA-10)', 'color': 'tab:blue'},
+    'RIMPY-neg': 'ISM (rimpy-neg)',
+    'RIMPY-neg10' : {'name':'ISM (neg10)', 'color': 'tab:blue'},
+    'ISM (rimpy-neg10)' : {'name': 'ISM (rimpy-neg10)', 'color': 'tab:blue'},
+    'ISM (rimpy-neg)' : {'name': 'ISM (rimpy-neg)', 'color': 'tab:blue'},
+    'ISM (rimpy-pos)' : {'name': 'ISM (rimpy-pos)', 'color': 'tab:blue'},
+    'SDN-Test1': {'name': 'SDN Original (c=1)', 'color': 'red'},
+    'SDN-Test1n': {'name':'SDN Original, no loss', 'color': 'red'},
+    'SDN-Test_3': 'SW-SDN (c=-3)',
+    'SDN-Test_2': 'SW-SDN (c=-2)',
+    'SDN-Test_1': 'SW-SDN (c=-1)',
+    'SDN-Test_0': 'SW-SDN (c=0)',
+    'SDN-Test2': 'SW-SDN (c=2)',
+    'SDN-Test3': 'SW-SDN (c=3)',
+    'SDN-Test4': 'SW-SDN (c=4)',
+    'SDN-Test5': 'SW-SDN (c=5)',
+    'SDN-Test6': 'SW-SDN (c=6)',
+    'SDN-Test7': 'SW-SDN (c=7)',
+    'HO-SDN-N2': 'HO-SDN (N=2)',
+    'HO-SDN-N3': 'HO-SDN (N=3)',
+}
+
 def get_display_name(method_key: str, method_configs: dict, name_map: dict) -> str:
     """
     Generate a publication-ready display name for a given method.
@@ -75,7 +101,22 @@ def get_display_name(method_key: str, method_configs: dict, name_map: dict) -> s
     """
     config = method_configs.get(method_key, {})
     info = config.get('info', method_key) # Default to key if no info
-    return name_map.get(method_key, info)
+    
+    entry = name_map.get(method_key, info)
+    
+    if isinstance(entry, dict):
+        return entry.get('name', info)
+        
+    return entry
+
+def get_color(method_key: str, name_map: dict) -> str | None:
+    """
+    Get a specific color for a method if defined in the style map.
+    """
+    entry = name_map.get(method_key)
+    if isinstance(entry, dict):
+        return entry.get('color')
+    return None
 
 def get_linestyle(method_key: str) -> str:
     """
@@ -123,4 +164,35 @@ def load_data(data_path: str) -> dict:
             method = key.replace('neds_', '')
             results['neds'][method] = data[key]
             
-    return results 
+    return results
+
+def plot_reflection_vertical_lines(ax, reflection_times):
+    """Helper to draw vertical lines for reflection arrival times on a given axis."""
+    if not reflection_times:
+        return
+
+    colors = ['#d62728', '#2ca02c', '#1f77b4']  # More distinct colors
+    order_map = {
+        'first_order': 1,
+        'second_order': 2,
+        'third_order': 3
+    }
+    
+    # Check if there are any existing lines to decide on legend entries
+    has_existing_labels = bool(ax.get_legend_handles_labels()[1])
+    
+    for order_name, time in reflection_times.items():
+        if time is not None:
+            order_num = order_map.get(order_name)
+            if order_num is not None and order_num <= len(colors):
+                color = colors[order_num - 1]
+                color = "red"
+                
+                ax.axvline(x=time, color=color, linestyle='-', alpha=0.3, linewidth=1,)
+                
+                # Add text annotation just above the x-axis
+                ax.text(time, ax.get_ylim()[-1], "", # Added space for padding
+                        color=color, alpha=0.9,
+                        ha='center', va='bottom', backgroundcolor=(1,1,1,0.6),
+                        fontsize='x-small',
+                        bbox=dict(facecolor='white', alpha=0.5, edgecolor='none', pad=0.1))

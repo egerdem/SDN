@@ -7,7 +7,7 @@ import analysis as an
 import EchoDensity as ned
 from rir_calculators import calculate_pra_rir, calculate_sdn_rir, calculate_ho_sdn_rir, calculate_rimpy_rir
 import pyroomacoustics as pra
-from spatial_analysis import generate_receiver_grid_old
+from spatial_analysis import generate_receiver_grid_old, generate_source_positions
 
 def calculate_and_save_data(room_params: dict, source_pos: Tuple[float, float, float],
                               receiver_positions: List[Tuple[float, float]],
@@ -26,6 +26,7 @@ def calculate_and_save_data(room_params: dict, source_pos: Tuple[float, float, f
     all_rirs = {}
     all_edcs = {}
     all_neds = {}
+    all_rt60s = {}
     final_method_configs = method_configs.copy()
 
     if update_mode and os.path.exists(output_path):
@@ -42,6 +43,9 @@ def calculate_and_save_data(room_params: dict, source_pos: Tuple[float, float, f
                 elif key.startswith('neds_'):
                     method = key.replace('neds_', '')
                     all_neds[method] = loaded_data[key]
+                elif key.startswith('rt60s_'):
+                    method = key.replace('rt60s_', '')
+                    all_rt60s[method] = loaded_data[key]
             
             # Load the existing method configurations and merge them
             if 'method_configs' in loaded_data:
@@ -90,23 +94,19 @@ def calculate_and_save_data(room_params: dict, source_pos: Tuple[float, float, f
                     'source z': source_pos[2],
                 })
 
-                if method == 'ISM':
-                    max_order = config.get('max_order', 100)
-                    rir, _ = calculate_pra_rir(current_params_for_calc, duration, Fs, max_order)
-                
+                calculator = config.get('calculator')
+
+                if calculator == 'pra':
+                    rir, _ = calculate_pra_rir(current_params_for_calc, duration, Fs, **config.get('params', {}))
+                elif calculator == 'rimpy':
+                    rir, _ = calculate_rimpy_rir(current_params_for_calc, duration, Fs, **config.get('params', {}))
                 elif method.startswith('SDN-'):
                     room.set_microphone(rx, ry, room_params['mic z'])
                     _, rir, _, _ = calculate_sdn_rir(room_parameters, method, room, duration, Fs, config)
-
                 elif method.startswith('HO-SDN'):
                     source_signal = config.get('source_signal', 'dirac')
                     order = config.get('order', 2)
                     rir, _ = calculate_ho_sdn_rir(current_params_for_calc, Fs, duration, source_signal, order=order)
-
-                elif method.startswith('RIMPY'):
-                    reflection_sign = config.get('reflection_sign')
-                    rir, _ = calculate_rimpy_rir(current_params_for_calc, duration, Fs, reflection_sign=reflection_sign)
-
                 else:
                     print(f"    Warning: Unknown or unsupported method {method}, skipping.")
                     continue
@@ -115,8 +115,9 @@ def calculate_and_save_data(room_params: dict, source_pos: Tuple[float, float, f
                     rir = rir / np.max(np.abs(rir))
                     
                 current_method_rirs.append(rir)
-            
+                print(f"  {len(rir)}, Calculated {len(current_method_rirs)} RIRs for method '{method}'.")
             all_rirs[method] = np.array(current_method_rirs)
+
         else:
             print(f"  RIRs for '{method}' already exist. Skipping calculation.")
 
@@ -128,21 +129,49 @@ def calculate_and_save_data(room_params: dict, source_pos: Tuple[float, float, f
             for rir in all_rirs[method]:
                 edc, _, _ = an.compute_edc(rir, Fs, plot=False)
                 edcs_for_method.append(edc)
-            all_edcs[method] = np.array(edcs_for_method)
+            
+            # Pad all EDCs to the same length to handle inconsistencies from compute_edc's tail-trimming
+            if edcs_for_method:
+                max_len = max(len(e) for e in edcs_for_method)
+                padded_edcs = [np.pad(e, (0, max_len - len(e)), 'constant', constant_values=e[-1]) for e in edcs_for_method]
+                all_edcs[method] = np.array(padded_edcs)
+                
         elif method in all_edcs:
             print(f"  EDCs for '{method}' already exist. Skipping calculation.")
 
-        # --- Step 3: Check and Calculate NEDs ---
-        if method not in all_neds and method in all_rirs:
-            print(f"  NEDs not found for '{method}'. Calculating...")
+        # --- Step 3: Check and Calculate NEDs (BYPASSED) ---
+        # if method not in all_neds and method in all_rirs:
+        #     print(f"  NEDs not found for '{method}'. Calculating...")
+        #     any_new_data_calculated = True
+        #     neds_for_method = []
+        #     for rir in all_rirs[method]:
+        #         ned_profile = ned.echoDensityProfile(rir, fs=Fs)
+        #         neds_for_method.append(ned_profile)
+        #     all_neds[method] = np.array(neds_for_method)
+        # elif method in all_neds:
+        #     print(f"  NEDs for '{method}' already exist. Skipping calculation.")
+
+        # --- Step 4: Check and Calculate RT60s ---
+        if method not in all_rt60s and method in all_rirs:
+            print(f"  RT60s not found for '{method}'. Calculating...")
             any_new_data_calculated = True
-            neds_for_method = []
+            # neds_for_method = []
+            rt60s_for_method = []
             for rir in all_rirs[method]:
-                ned_profile = ned.echoDensityProfile(rir, fs=Fs)
-                neds_for_method.append(ned_profile)
-            all_neds[method] = np.array(neds_for_method)
-        elif method in all_neds:
-            print(f"  NEDs for '{method}' already exist. Skipping calculation.")
+                # ned_profile = ned.echoDensityProfile(rir, fs=Fs)
+                # neds_for_method.append(ned_profile)
+            # all_neds[method] = np.array(neds_for_method)
+        # elif method in all_neds:
+            # print(f"  NEDs for '{method}' already exist. Skipping calculation.")
+                if np.any(rir):
+                    rt60 = an.calculate_rt60_from_rir(rir, Fs, plot=False)
+                    # handle cases where rt60 might not be calculable
+                    rt60s_for_method.append(rt60 if rt60 is not None else np.nan)
+                else:
+                    rt60s_for_method.append(np.nan)
+            all_rt60s[method] = np.array(rt60s_for_method)
+        elif method in all_rt60s:
+            print(f"  RT60s for '{method}' already exist. Skipping calculation.")
 
 
     # --- Data Saving ---
@@ -163,6 +192,8 @@ def calculate_and_save_data(room_params: dict, source_pos: Tuple[float, float, f
                 save_dict[f'edcs_{method_key}'] = all_edcs[method_key]
             if method_key in all_neds:
                 save_dict[f'neds_{method_key}'] = all_neds[method_key]
+            if method_key in all_rt60s:
+                save_dict[f'rt60s_{method_key}'] = all_rt60s[method_key]
             
         np.savez(output_path, **save_dict)
         print("--- Save complete ---")
@@ -174,8 +205,10 @@ if __name__ == "__main__":
     # --- EXPERIMENT SETUP ---
     # Set to True to load the existing data file and only run/replace
     # the methods that are marked 'enabled' in this script.
-    UPDATE_EXISTING_FILE = True
-    ENABLED = True
+    UPDATE_EXISTING_FILE = True # Set to False to always calculate everything from scratch.
+    ENABLED = False #just a method flag to toggle all methods on/off
+    PROCESS_MULTIPLE_SOURCES = False # Set to True to iterate through multiple source positions
+    use_grid = False # Set to True to use a grid of receiver positions, False for single position
 
     # --- Room Setups ---
     room_waspaa = {
@@ -196,7 +229,7 @@ if __name__ == "__main__":
         'display_name': 'Journal Room',
         'width': 3.2, 'depth': 4, 'height': 2.7,
         'source x': 2, 'source y': 3., 'source z': 2,
-        'mic x': 1.6, 'mic y': 2, 'mic z': 1.8,
+        'mic x': 1, 'mic y': 1, 'mic z': 1.5,
         'absorption': 0.1,
     }
 
@@ -209,17 +242,31 @@ if __name__ == "__main__":
     # }
 
     # Choose which room configuration to use for this run
+    # active_room = room_aes
+    # active_room = room_journal
     active_room = room_waspaa
 
     # Define the methods to be calculated, based on main.py
     method_configs = {
-        'ISM': {
+        'ISM-pra': {
             'enabled': ENABLED,
-            'info': 'pra 100',
-            'label': "ISM",
-            'max_order': 100
+            'calculator': 'pra',
+            'params': {'max_order': 100},
+            'info': '',
+            'label': "",
         },
 
+        'ISM-pra-rand10': {
+            'enabled': ENABLED,
+            'calculator': 'pra',
+            'params': {
+                'max_order': 100,
+                'use_rand_ism': True,
+                'max_rand_disp': 0.1
+            },
+            'info': 'pra 100 rand10',
+            'label': "",
+        },
 
         'SDN-Test1': { # Renamed from Test0 to match paper_figures.py
             'enabled': ENABLED,
@@ -237,6 +284,7 @@ if __name__ == "__main__":
             'flags': {
                 'specular_source_injection': True,
                 'source_weighting': -3,
+                # 'specular_source_injection_random': True,
             },
             'label': "SDN"
         },
@@ -247,6 +295,40 @@ if __name__ == "__main__":
             'flags': {
                 'specular_source_injection': True,
                 'source_weighting': -2,
+                # 'specular_source_injection_random': True,
+            },
+            'label': "SDN"
+        },
+
+        'SDN-Test_1': {
+            'enabled': ENABLED,
+            'info': "c -1",
+            'flags': {
+                'specular_source_injection': True,
+                'source_weighting': -1,
+                # 'specular_source_injection_random': True,
+            },
+            'label': "SDN"
+        },
+
+        'SDN-Test_0': {
+            'enabled': ENABLED,
+            'info': "c 0",
+            'flags': {
+                'specular_source_injection': True,
+                'source_weighting': 0,
+                # 'specular_source_injection_random': True,
+            },
+            'label': "SDN"
+        },
+
+        'SDN-Test2': {
+            'enabled': ENABLED,
+            'info': "c2",
+            'flags': {
+                'specular_source_injection': True,
+                'source_weighting': 2,
+                # 'specular_source_injection_random': True,
             },
             'label': "SDN"
         },
@@ -257,6 +339,7 @@ if __name__ == "__main__":
             'flags': {
                 'specular_source_injection': True,
                 'source_weighting': 3,
+                # 'specular_source_injection_random': True,
             },
             'label': "SDN"
         },
@@ -266,6 +349,7 @@ if __name__ == "__main__":
             'flags': {
                 'specular_source_injection': True,
                 'source_weighting': 4,
+                # 'specular_source_injection_random': True,
             },
             'label': "SDN"
         },
@@ -275,6 +359,7 @@ if __name__ == "__main__":
             'flags': {
                 'specular_source_injection': True,
                 'source_weighting': 5,
+                # 'specular_source_injection_random': True,
             },
             'label': "SDN Test 5"
         },
@@ -284,6 +369,7 @@ if __name__ == "__main__":
             'flags': {
                 'specular_source_injection': True,
                 'source_weighting': 6,
+                # 'specular_source_injection_random': True,
             },
             'label': "SDN Test 6"
         },
@@ -293,6 +379,7 @@ if __name__ == "__main__":
             'flags': {
                 'specular_source_injection': True,
                 'source_weighting': 7,
+                # 'specular_source_injection_random': True,
             },
             'label': "SDN Test 7"
         },
@@ -312,11 +399,24 @@ if __name__ == "__main__":
         },
     
         'RIMPY-neg': {
-            'enabled': ENABLED,
+            'enabled': False,
+            'calculator': 'rimpy',
+            'params': {'reflection_sign': -1},
             'info': 'Negative Reflection',
-            'reflection_sign': -1,
             'label': 'RIMPY'
         },
+
+        'RIMPY-neg10': {
+            'enabled': True,
+            'calculator': 'rimpy',
+            'params': {
+                'reflection_sign': -1,
+                'randDist': 0.1
+            },
+            'info': 'Negative Reflection + Rand10cm',
+            'label': 'RIMPY-rand10-neg'
+        },
+
         'Test_trial': {
             'enabled': False,
             'info': "testing",
@@ -339,32 +439,88 @@ if __name__ == "__main__":
         duration = 1
 
     # --- Source and Receiver Setup ---
-    source_position = (active_room['source x'], active_room['source y'], active_room['source z'])
+    # Common receiver setup for both single and multi-source runs
+    if use_grid:
+        # Correctly use half the room dimensions for the grid, as in spatial_analysis.py
+        receiver_positions = generate_receiver_grid_old(active_room['width'] / 2, active_room['depth'] / 2, margin=0.5, n_points=16)
+        print(f"Running in MULTI-POSITION (QUARTER-GRID) mode for room '{active_room['display_name']}'")
+    else:
+        receiver_positions = [(active_room['mic x'], active_room['mic y'])]
+        print(f"\nRunning in SINGLE-POSITION mode for room '{active_room['display_name']}'")
+
+    if PROCESS_MULTIPLE_SOURCES:
+        print("\n--- PROCESSING MULTIPLE SOURCES ---")
+        source_list = generate_source_positions(active_room)
+        for src_x, src_y, src_z, src_name in source_list:
+            source_position = (src_x, src_y, src_z)
+            print(f"\nProcessing for source: '{src_name}' at {source_position}")
+
+            # Define a unique output path for this specific source
+            output_dir = "results/paper_data/multi"
+            room_name = active_room.get('display_name', 'unknown_room')
+            filename_suffix = room_name.lower().replace(' ', '_')
+            output_filename = f"{filename_suffix}_spatial_edc_data_{src_name.lower()}.npz"
+            output_path = os.path.join(output_dir, output_filename)
+
+            # Run the calculation and saving process for the current source
+            calculate_and_save_data(
+                room_params=active_room,
+                source_pos=source_position,
+                receiver_positions=receiver_positions,
+                duration=duration,
+                Fs=Fs,
+                method_configs=method_configs,
+                output_path=output_path,
+                update_mode=UPDATE_EXISTING_FILE
+            )
+    else:
+        print("\n--- PROCESSING SINGLE SOURCE from room config ---")
+        # Original behavior: use the single source from the config
+        source_position = (active_room['source x'], active_room['source y'], active_room['source z'])
+        
+        # Define output path
+        output_dir = "results/paper_data"
+        room_name = active_room.get('display_name', 'unknown_room')
+        filename_suffix = room_name.lower().replace(' ', '_')
+        output_filename = f"{filename_suffix}_spatial_edc_data.npz"
+        output_path = os.path.join(output_dir, output_filename)
+
+        # Run the calculation and saving process
+        calculate_and_save_data(
+            room_params=active_room,
+            source_pos=source_position,
+            receiver_positions=receiver_positions,
+            duration=duration,
+            Fs=Fs,
+            method_configs=method_configs,
+            output_path=output_path,
+            update_mode=UPDATE_EXISTING_FILE
+        )
     
     # By default, run for the single mic position defined in the active_room.
-    receiver_positions = [(active_room['mic x'], active_room['mic y'])]
-    print(f"\nRunning in SINGLE-POSITION mode for room '{active_room['display_name']}'")
+    # receiver_positions = [(active_room['mic x'], active_room['mic y'])]
+    # # print(f"\nRunning in SINGLE-POSITION mode for room '{active_room['display_name']}'")
 
-    # To run for a grid of receivers, uncomment the line below.
-    # receiver_positions = generate_receiver_grid_old(active_room['width'], active_room['depth'], margin=1.0, n_points=16)
+    # # To run for a grid of receivers, uncomment the line below.
+    # receiver_positions = generate_receiver_grid_old(active_room['width'], active_room['depth'], margin=0.5, n_points=16)
     # print(f"Running in MULTI-POSITION (GRID) mode for room '{active_room['display_name']}'")
 
 
-    # Define output path
-    output_dir = "results/paper_data"
-    room_name = active_room.get('display_name', 'unknown_room')
-    filename_suffix = room_name.lower().replace(' ', '_')
-    output_filename = f"{filename_suffix}_spatial_edc_data.npz"
-    output_path = os.path.join(output_dir, output_filename)
+    # # Define output path
+    # output_dir = "results/paper_data"
+    # room_name = active_room.get('display_name', 'unknown_room')
+    # filename_suffix = room_name.lower().replace(' ', '_')
+    # output_filename = f"{filename_suffix}_spatial_edc_data.npz"
+    # output_path = os.path.join(output_dir, output_filename)
 
-    # Run the calculation and saving process
-    calculate_and_save_data(
-        room_params=active_room,
-        source_pos=source_position,
-        receiver_positions=receiver_positions,
-        duration=duration,
-        Fs=Fs,
-        method_configs=method_configs,
-        output_path=output_path,
-        update_mode=UPDATE_EXISTING_FILE
-    ) 
+    # # Run the calculation and saving process
+    # calculate_and_save_data(
+    #     room_params=active_room,
+    #     source_pos=source_position,
+    #     receiver_positions=receiver_positions,
+    #     duration=duration,
+    #     Fs=Fs,
+    #     method_configs=method_configs,
+    #     output_path=output_path,
+    #     update_mode=UPDATE_EXISTING_FILE
+    # ) 

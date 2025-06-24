@@ -214,9 +214,6 @@ if __name__ == "__main__":
                 'source x': 4.5, 'source y': 3.5, 'source z': 2,
                 'mic x': 2, 'mic y': 2, 'mic z': 1.5,
                 'absorption': 0.2,
-                'air': {'humidity': 50,
-                        'temperature': 20,
-                        'pressure': 100},
                 }
 
     room_journal = {'width': 3.2, 'depth': 4, 'height': 2.7,
@@ -224,6 +221,14 @@ if __name__ == "__main__":
                     'mic x': 1, 'mic y': 1, 'mic z': 1.5,
                     'absorption': 0.1,
                     }
+
+    room_aes_outliar = {
+        'display_name': 'AES Room',
+        'width': 9, 'depth': 7, 'height': 4,
+        'source x': 8.5, 'source y': 6, 'source z': 2,
+        'mic x': 0.5, 'mic y': 0.5, 'mic z': 1.5,
+        'absorption': 0.2,
+    }
 
     room_parameters = room_aes
 

@@ -86,8 +86,11 @@ class SDNExperiment:
         self.metrics = {}
         self.skip_metrics = skip_metrics
 
-        if not self.skip_metrics:
+        if self.skip_metrics == False:
+            print("Calculating metrics for the experiment..., skipmetrics = ", self.skip_metrics)
             self._calculate_metrics()
+        else:
+            print("Skipping metrics calculation for the experiment.")
         
         # Generate a unique ID if not provided
         if experiment_id is None:
@@ -188,6 +191,7 @@ class SDNExperiment:
             self.time_axis = np.array([])
             self.ned_time_axis = np.array([])
             self._metrics_calculated = True
+            print("Skipping metrics calculation: RIR is empty.")
             return
         
         # Calculate EDC once to avoid duplication - now getting both EDC curve and raw energy
@@ -204,7 +208,7 @@ class SDNExperiment:
                 schroder_energy=schroder_energy
             )
         
-        # Calculate NED - limit to first 0.5 seconds by default and downsample to 22050 Hz
+        # Calculate NED - limit to first 0.5 seconds 
         # This significantly reduces computation time for long RIRs
         self.ned = ned.echoDensityProfile(
             self.rir, 
@@ -239,20 +243,20 @@ class SDNExperiment:
             label = f""
             
         if 'info' in self.config and self.config['info']:
-            label += f": {self.config['info']}"
+            label += f" {self.config['info']}"
             
         # Add method-specific details
         if method == 'ISM':
             if 'max_order' in self.config:
-                label += f" order={self.config['max_order']}"
+                label += f" {self.config['max_order']}"
         elif method == 'SDN':
             # Add SDN-specific flags that affect the simulation
             if 'flags' in self.config:
                 flags = self.config['flags']
-                if flags.get('source_weighting'):
-                    label += f" {flags['source_weighting']}"
-                if flags.get('specular_source_injection'):
-                    label += " specular"
+                # if flags.get('source_weighting'):
+                #     label += f" {flags['source_weighting']}"
+                # if flags.get('specular_source_injection'):
+                #     label += " specular" #commented out
                 if 'source_pressure_injection_coeff' in flags:
                     label += f" src constant coef={flags['source_pressure_injection_coeff']}"
                 if 'scattering_matrix_update_coef' in flags:
@@ -326,8 +330,8 @@ class SDNExperiment:
 class ExperimentLoaderManager:
     """Class to manage loading and accessing acoustic simulation experiments from storage."""
     
-    def __init__(self, results_dir='results', is_batch_manager=False, project_names=None, disable_unified_rooms=True, skip_metrics=False):
-        #note: skip_metrics is not fully correct yet. due to table retrieval error. only use it if you dont need table error ui.
+    def __init__(self, results_dir='results', is_batch_manager=False, project_names=None, disable_unified_rooms=True, skip_metrics=False, project_source_filters=None):
+        
         """
         Initialize the experiment manager.
         
@@ -342,6 +346,11 @@ class ExperimentLoaderManager:
                 For batch_manager=False, these are folder names in 'results/room_singulars/'
             disable_unified_rooms (bool): If True, only create individual rooms for singular mode 
                                          (saves memory by not duplicating experiments in unified rooms)
+            skip_metrics (bool): If True, skip calculating metrics for experiments.
+            project_source_filters (dict, optional): A dictionary to filter sources for specific projects.
+                                                  Example: {'aes_MULTI': ['Center_Source']}
+                                                  Only sources listed will be loaded for the specified project.
+                                                  If a project is not in the dict, all its sources are loaded.
         """
         self.results_dir = results_dir
         self.is_batch_manager = is_batch_manager
@@ -349,6 +358,7 @@ class ExperimentLoaderManager:
         self.project_names = project_names
         self.disable_unified_rooms = disable_unified_rooms
         self.skip_metrics = skip_metrics
+        self.project_source_filters = project_source_filters if project_source_filters else {}
         self.ensure_dir_exists()
         self.load_experiments()
 
@@ -432,7 +442,7 @@ class ExperimentLoaderManager:
             
             # Check if it's a directory and apply appropriate filters
             is_valid_dir = os.path.isdir(path)
-            if mode == 'singular':
+            if mode == 'singular' or 'batch':
                 # For singular mode, skip hidden folders and folders starting with underscore
                 is_valid_dir = is_valid_dir and not name.startswith('.') and not name.startswith('_')
 
@@ -464,38 +474,50 @@ class ExperimentLoaderManager:
 
         # Determine the directory path based on manager type
         base_dir = os.path.join(self.results_dir, 'room_singulars' if not self.is_batch_manager else 'rooms')
-        if not os.path.exists(base_dir):
-            print(f"No {base_dir} directory found")
-            return
 
-        # Create project_dirs list based on project_names
+        project_dirs_to_iterate = []
+
         if self.project_names is None:
-            # Load all projects from the directory
-            project_dirs = [d for d in os.listdir(base_dir) 
-                          if os.path.isdir(os.path.join(base_dir, d))]
-            # For singular case, filter out hidden folders and folders starting with underscore
-            if not self.is_batch_manager:
-                project_dirs = [d for d in project_dirs if not d.startswith('.') and not d.startswith('_')]
-            print(f"Loading all {len(project_dirs)} projects from {base_dir}")
+            # # Load all projects from the directory
+            # project_dirs = [d for d in os.listdir(base_dir)
+            #               if os.path.isdir(os.path.join(base_dir, d))]
+            # # For singular case, filter out hidden folders and folders starting with underscore
+            # if not self.is_batch_manager:
+            #     project_dirs = [d for d in project_dirs if not d.startswith('.') and not d.startswith('_')]
+            # print(f"Loading all {len(project_dirs)} projects from {base_dir}")
+            # Auto-discover projects: Load all non-hidden, non-underscore-prefixed projects from the base_dir
+            if os.path.exists(base_dir):
+                all_potential_project_dirs = [d for d in os.listdir(base_dir)
+                                              if os.path.isdir(os.path.join(base_dir, d))]
+                # Filter out hidden folders and folders starting with underscore
+                project_dirs_to_iterate = [d for d in all_potential_project_dirs if
+                                           not d.startswith('_')]
+                print(
+                    f"Auto-discovering projects. Found to load from {base_dir} (after filtering _.*): {project_dirs_to_iterate}")
+            else:
+                print(f"Base directory {base_dir} does not exist. No projects to load.")
+
         elif isinstance(self.project_names, str):
-            # Load single project
-            project_dirs = [self.project_names]
+            # Load a single explicitly specified project
+            project_dirs_to_iterate = [self.project_names]
             print(f"Loading specified project: {self.project_names}")
         elif isinstance(self.project_names, list):
-            # Load multiple specified projects
-            project_dirs = self.project_names
-            print(f"Loading {len(project_dirs)} specified projects")
+            # Load multiple explicitly specified projects
+            project_dirs_to_iterate = self.project_names
+            print(f"Loading {len(project_dirs_to_iterate)} specified projects: {project_dirs_to_iterate}")
         else:
-            print("Warning: project_names should be None, a string, or a list")
-            project_dirs = []
+            print(
+                f"Warning: project_names in ExperimentLoaderManager constructor has invalid type: "
+                f"{type(self.project_names)}. Expected None, str, or list.")
+            project_dirs_to_iterate = []
 
         # SINGULAR EXPERIMENTS
         if not self.is_batch_manager:
             # Singular case: Load from room_singulars with unified rooms
             unified_rooms = {} if not self.disable_unified_rooms else None  # Only create if not disabled
-            
-            # Process each experiment group (subfolder)
-            for folder_name in project_dirs:
+
+            # Process each experiment group (subfolder in project_dirs_to_iterate)
+            for folder_name in project_dirs_to_iterate:  # Iterating over potentially filtered list
                 folder_path = os.path.join(base_dir, folder_name)
                 # Skip if folder doesn't exist
                 if not os.path.isdir(folder_path):
@@ -619,11 +641,11 @@ class ExperimentLoaderManager:
         # BATCH EXPERIMENTS
         else:
             # Batch case: Load from rooms directory without unification
-            total_projects = len(project_dirs)
-            print(f"\nLoading {total_projects} projects:")
+            total_projects = len(project_dirs_to_iterate)
+            print(f"\nLoading {total_projects} batch projects based on configuration:")
             
             # Iterate through selected project directories
-            for project_idx, project_name in enumerate(project_dirs, 1):
+            for project_idx, project_name in enumerate(project_dirs_to_iterate, 1):
                 project_path = os.path.join(base_dir, project_name)
                 if not os.path.isdir(project_path):
                     print(f"Skipping non-directory or non-existent project: {project_name}")
@@ -664,9 +686,23 @@ class ExperimentLoaderManager:
                     all_experiment_paths = []
                     
                     # Walk through the project directory to find all config.json and rirs.npy files
-                    for root, dirs, files in os.walk(project_path):
+                    for root, dirs, files in os.walk(project_path, topdown=True):  # Use topdown=True
+                        # Filter out directories starting with an underscore from further traversal
+                        # This applies to source, method, and param_set level directories.
+                        original_dirs_count = len(dirs)
+                        dirs[:] = [d for d in dirs if not d.startswith('_')]
+                        if len(dirs) < original_dirs_count:
+                            skipped_count = original_dirs_count - len(dirs)
+                            # Provide a more informative path for the print statement
+                            relative_root_path = os.path.relpath(root, project_path) if root != project_path else '.'
+                            print(
+                                f"  Pruned {skipped_count} underscore-prefixed subdirectories from traversal under: {project_name}/{relative_root_path}")
+
                         if 'config.json' in files and 'rirs.npy' in files:
-                            # Found a simulation set directory
+                            # Found a simulation set directory.
+                            # Because underscore-prefixed dirs were pruned by modifying `dirs[:]`,
+                            # `root` and its path components (source, method, param_set folder)
+                            # relative to `project_path` will not start with an underscore.
                             rel_path = os.path.relpath(root, project_path)
                             parts = rel_path.split(os.sep)
                             
@@ -675,6 +711,12 @@ class ExperimentLoaderManager:
                                 source_label = parts[0]
                                 method = parts[1]
                                 param_set = parts[2]
+
+                                # Apply project-specific source filter if defined
+                                if project_name in self.project_source_filters and \
+                                   source_label not in self.project_source_filters[project_name]:
+                                    print(f"  Skipping source '{source_label}' in '{project_name}' due to project_source_filters.")
+                                    continue # Skip this source
                                 
                                 # Store this path
                                 all_experiment_paths.append({
@@ -727,6 +769,7 @@ class ExperimentLoaderManager:
                                     fs=config_data.get('fs'),
                                     duration=config_data.get('duration'),
                                     experiment_id=receiver_single.get('experiment_id'),
+                                    skip_metrics=self.skip_metrics
                                 )
                                 
                                 # Add experiment to room
@@ -809,12 +852,12 @@ if __name__ == "__main__":
 
     if IS_SINGULAR:
         # Example 1: Load all singular experiments
-        singular_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=False, 
+        singular_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=False,
                                                   )
         
         # Example 2: Load a single specific singular experiment folder
-        # singular_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=False, 
-        #                                           project_names="waspaa_rr", 
+        # singular_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=False,
+        #                                           project_names="trials_aes_4",
         #                                           )
         
         # Example 3: Load multiple specific singular experiment folders
@@ -822,16 +865,15 @@ if __name__ == "__main__":
         #                                           project_names=["aes_quartergrid", "journal_experiment1"],
         #                                           )
 
-        from sdn_experiment_visualizer import ExperimentVisualizer
-        single_visualizer = ExperimentVisualizer(singular_manager)
-        single_visualizer.show(port=1991)
-
-        import sdn_experiment_visualizer as sev
-        import importlib
-        importlib.reload(sev)
-        single_visualizer = sev.ExperimentVisualizer(singular_manager)
-        single_visualizer.show(port=1991)
-
+        # from sdn_experiment_visualizer import ExperimentVisualizer
+        # single_visualizer = ExperimentVisualizer(singular_manager)
+        # single_visualizer.show(port=1991)
+        #
+        # import sdn_experiment_visualizer as sev
+        # import importlib
+        # importlib.reload(sev)
+        # single_visualizer = sev.ExperimentVisualizer(singular_manager)
+        # single_visualizer.show(port=1991)
 
     elif IS_BATCH: # Batch processing
 
@@ -841,34 +883,35 @@ if __name__ == "__main__":
         waspaa_projects = batch_category.get('waspaa', [])
         journal_projects = batch_category.get('journal', [])
 
-        multiple_projects = False  # Set to True to select specific projects
-        if multiple_projects:
-            selected_projects = [batch_projects[0], batch_projects[1], batch_projects[3]]
-            print("selected projects: ", selected_projects)
-            batch_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=True, project_names=selected_projects)
+        # Example 1: Load all batch projects
+        # batch_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=True)
 
-        else:
-            # Example 1: Load all batch projects
-            # batch_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=True)
+        # Example 2: Load a single specific batch project
+        batch_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=True,
+                                                project_names=["aes_MULTI_qgrid_tr43"],
+                                                # project_names=["journal_absorptioncoeffs", "waspaa_MULTI"],
+                                                # project_names=["aes_SINGLE", "journal_SINGLE", "waspaa_SINGLE"],
+                                                # project_names=["waspaa_SINGLE"],
+                                                # skip_metrics=False,
+                                                # project_source_filters={"waspaa_MULTI": ["Center_Source"]}
+                                                )
 
-            # Example 2: Load a single specific batch project
-            # batch_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=True,
-            #                                         project_names="aes_quartergrid_new")
-            batch_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=True,
-                                                     project_names=["aes_NEW_SINGULAR_FORMAT"])
+
+        # batch_manager = ExperimentLoaderManager(results_dir=results_dir, is_batch_manager=True,
+        #                                          project_names=["journal_SINGLE"])
 
         from sdn_experiment_visualizer import ExperimentVisualizer
         batch_visualizer = ExperimentVisualizer(batch_manager)
+
         # generate random 4 digit with python random
         import random
         port_no = random.randint(1000, 9999)
         batch_visualizer.show(port=port_no)
-        #
-        # # # # import analysis as an
+
         # import importlib
-        # # importlib.reload(an)
         # import sdn_experiment_visualizer as sev
         # importlib.reload(sev)
+        # importlib.reload(an)
         # import random
         # port_no = random.randint(1000, 9999)
         # batch_visualizer = sev.ExperimentVisualizer(batch_manager)
