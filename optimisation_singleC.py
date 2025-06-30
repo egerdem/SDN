@@ -60,7 +60,7 @@ def compute_spatial_rmse(c_val, room, room_parameters, sdn_config, ref_edcs, rec
         ref_edc = ref_edcs[i]
 
         # 2. Calculate the new SDN RIR and EDC with the current 'c' value
-        room.set_microphone(rx, ry, room.z) # Update mic position
+        room.set_microphone(rx, ry, room_parameters['mic z']) # Update mic position
 
         # We need the full room_parameters dict for the calculator
         # room_params = {
