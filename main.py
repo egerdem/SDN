@@ -14,19 +14,19 @@ from rir_calculators import calculate_ho_sdn_rir, rir_normalisation
 """ Method flags """
 PLOT_SDN_BASE = False
 
-t1,t2,t3,t4,t5 = False, False, False, False, False
+t1,t2,t3,t4,t5 = True, True, True, True, True
 RUN_SDN_Test_2 = False
 RUN_SDN_Test_3 = False
 RUN_SDN_Test0 = False
 RUN_SDN_Test1 = True
-RUN_SDN_Test2 = False
-RUN_SDN_Test3 = False
-RUN_SDN_Test4 = False
-RUN_SDN_Test5 = False
+RUN_SDN_Test2 = True
+RUN_SDN_Test3 = True
+RUN_SDN_Test4 = True
+RUN_SDN_Test5 = True
 RUN_SDN_Test6 = False
 RUN_SDN_Test7 = False
 
-RUN_SDN_Test3r = False
+RUN_SDN_Test3r = True
 RUN_SDN_Test4r = False
 RUN_SDN_Test5r = False
 RUN_SDN_Test6r = False
@@ -75,11 +75,11 @@ RUN_MY_HO_SDN_n2noatt = False # My new test flag for HO-SDN no att
 PLOT_TREBLE = False
 
 PLOT_ISM_with_pra = True
-PLOT_ISM_with_pra_rand10 = True
+PLOT_ISM_with_pra_rand10 = False
 PLOT_ISM_rimPy_pos = False  # rimPy ISM with positive reflection
 PLOT_ISM_rimPy_pos_rand10 = False
 PLOT_ISM_rimPy_neg = False  # rimPy ISM with negative reflection
-PLOT_ISM_rimPy_neg_rand10 = True
+PLOT_ISM_rimPy_neg_rand10 = False
 pra_order = 100
 
 PICKLE_LOAD_RIRS = False # Load RIRs from pickle file
@@ -130,7 +130,7 @@ room_aes = {
 room_aes_outliar = {
     'display_name': 'AES Room',
     'width': 9, 'depth': 7, 'height': 4,
-    'source x': 8.5, 'source y': 6, 'source z': 2,
+    'source x': 8, 'source y': 6, 'source z': 2,
     'mic x': 0.5, 'mic y': 0.5, 'mic z': 1.5,
     'absorption': 0.2,
 }
@@ -139,7 +139,7 @@ room_journal = {
     'display_name': 'Journal Room',
     'width': 3.2, 'depth': 4, 'height': 2.7,
     'source x': 2, 'source y': 3., 'source z': 2,
-    'mic x': 1, 'mic y': 1, 'mic z': 1.5,
+    'mic x': 2.83, 'mic y': 3.00, 'mic z': 1.5,
     'absorption': 0.1,
 }
 
@@ -151,13 +151,13 @@ room_journal = {
 #         'absorption': 0.1,
 #     }
 
-room_parameters = room_aes  # Choose the room
+# room_parameters = room_aes  # Choose the room
 # room_parameters = room_waspaa  # Choose the room
 # room_parameters = room_journal
-# room_parameters = room_aes_outliar
+room_parameters = room_aes_outliar
 
 # Parameters
-duration = 0.6  # seconds
+duration = 1  # seconds
 duration_in_ms = 1000 * duration  # Convert to milliseconds
 Fs = 44100
 num_samples = int(Fs * duration)
@@ -255,38 +255,61 @@ ism_methods = {
 # SDN Test Configurations
 sdn_tests = {
 
+    '11': {'enabled': t1,
+              'info': "c1 [1,1,1,1,1,1]",
+              'flags': {
+                  'specular_source_injection': True,
+                    'injection_c_vector': [1, 1, 1, 1, 1,1],
+              }, 'label': "SDN"},
+
+    '1111': {'enabled': t1,
+                  'info': "c1 [1,1,1,1,1,1] src-mic gain:1",
+                  'flags': {
+                      'specular_source_injection': True,
+                        'injection_c_vector': [1, 1, 1, 1, 1,1],
+                      'ignore_src_node_atten': True,
+                  }, 'label': "SDN"},
+
+    '111': {'enabled': t1,
+            'info': "c1 [1,1,1,1,1,1] node-mic gain:1",
+            'flags': {
+                'specular_source_injection': True,
+                'injection_c_vector': [1, 1, 1, 1, 1, 1],
+                'ignore_node_mic_atten': True,
+            }, 'label': "SDN"},
+
     '1': {'enabled': t1,
-          'info': "c5",
+          'info': "c5 [5,1,1,1,1,1]",
           'flags': {
               'specular_source_injection': True,
-              'source_weighting': 5,
+                'injection_c_vector': [5, 1, 1, 1, 1,1],
               'print_weighted_psk': True,
           }, 'label': "SDN"},
 
     '2': {'enabled': t2,
-        'info': "c5 random best target",
+        'info': "c5 [5, 5, 1, 1, 1, 1]",
                   'flags': {
                       'specular_source_injection': True,
-                      'source_weighting': 4,
-                    'specular_source_injection_random': True,
-'print_weighted_psk': True,
+                      'injection_c_vector': [5, 5, 1, 1, 1,1],  # Example vector
+                    'print_weighted_psk': True,
                   }, 'label': "SDN"},
 
     '3': {'enabled': t3,
-            'info': "c5",
-                        'flags': {
-                            'specular_source_injection': True,
-                            'source_weighting': 5,
-                        }, 'label': "SDN"},
+        'info': "c5 only src-node gain:1 [5, 1,1,1,1,1]",
+                  'flags': {
+                      'specular_source_injection': True,
+                      'injection_c_vector': [5, 1,1, 1, 1,1],  # Example vector
+                'ignore_src_node_atten': True,
+                    'print_weighted_psk': True,
+                  }, 'label': "SDN"},
 
     '4': {'enabled': t4,
-        'info': "c5 new",
-                    'flags': {
-                        'specular_source_injection': True,
-                        'source_weighting': 5,
-                        'coef': 1 / 5,
-                      'source_pressure_injection_coeff': 1,
-                    }, 'label': "SDN"},
+        'info': "c5 [5, 5, 5, 5, 1]",
+                  'flags': {
+                      'specular_source_injection': True,
+                      'injection_c_vector': [5,5,5,5,5, 1],  # Example vector
+                    'print_weighted_psk': True,
+                  }, 'label': "SDN"},
 
 
     'TestOptimizer': {'enabled': False,
@@ -327,7 +350,7 @@ sdn_tests = {
     # """ TEST CONFIGURATIONS """
     #
     # """ ORIGINALS """
-    
+
     'Test1': {'enabled': RUN_SDN_Test1,'info': "c1 orj",'flags': {
                           'specular_source_injection': True,
                           'source_weighting': 1,
@@ -965,7 +988,7 @@ if __name__ == '__main__':
     if interactive_rirs:
         reversed_rirs = dict(reversed(list(rirs.items())))
         if UNIFIED_PLOTS:
-            pp.create_unified_interactive_plot(reversed_rirs, Fs, default_rirs, room_parameters,
+            pp.create_unified_interactive_plot(reversed_rirs, Fs, room_parameters,
                                                reflection_times=reflection_times)
             plt.show(block=False)
         else:
@@ -991,7 +1014,7 @@ if __name__ == '__main__':
 
     if PLOT_EDC:
         if not UNIFIED_PLOTS:
-            pp.create_interactive_edc_plot(rirs, Fs, default_rirs)
+            pp.create_interactive_edc_plot(rirs, Fs)
 
     if PLOT_NED and not UNIFIED_PLOTS:
         plt.figure(figsize=(12, 6))
@@ -1166,7 +1189,7 @@ if __name__ == '__main__':
             # Show the plot
             plt.show()
 
-# Only Path Length Analysis, No RIR Calculation 
+# Only Path Length Analysis, No RIR Calculation
 if ISM_SDN_PATH_DIFF_TABLE:
 
     if not PLOT_REFLECTION_LINES:

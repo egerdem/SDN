@@ -1,187 +1,165 @@
 """
-Optimises the six c_dom parameters of the SDN so that its
-energy–decay curve matches an Image‑Source‑Method reference.
+Optimises a single 'c' (source_weighting) parameter for an SDN model
+by comparing its EDCs against pre-calculated reference EDCs from spatial data files.
 
-Run:  python optimize_cdom.py
+This script iterates through multiple data files (each representing a different
+source position) and finds the optimal 'c' value for each one.
 """
+import os
+import numpy as np
+from scipy.optimize import basinhopping
 import geometry
 import analysis as an
-from rir_calculators import calculate_pra_rir
-import numpy as np
-from scipy.optimize import minimize, differential_evolution, basinhopping
+from rir_calculators import calculate_sdn_rir, rir_normalisation
+from functools import partial
+from scipy.optimize import minimize_scalar
 import plot_room as pp
-from sdn_core import DelayNetwork
 import matplotlib.pyplot as plt
+from copy import deepcopy
 
-# ------------------------------------------------------------------
-# 1. Build room and get reference EDC once
-# ------------------------------------------------------------------
-Fs = 44100
-duration = 1  # seconds – long enough for early & mid decay
-optimization_duration = 0.05  # seconds – short enough for fast optimization
-print("optimization dur. [s]:", optimization_duration)
-num_samples = int(Fs * duration)
-impulse_dirac = geometry.Source.generate_signal('dirac', num_samples)
+# --- Configuration ---
+DATA_DIR = "results/paper_data"
+REFERENCE_METHOD = 'RIMPY-neg10'
+err_duration_ms = 50  # 50 ms
 
-room_aes = {
-    'display_name': 'AES Room',
-    'width': 9, 'depth': 7, 'height': 4,
-    'source x': 4.5, 'source y': 3.5, 'source z': 2,
-    'mic x': 2, 'mic y': 2, 'mic z': 1.5,
-    'absorption': 0.2,
-}
+# List of data files to process. Each will be optimized independently.
+FILES_TO_PROCESS = [
+    "aes_room_spatial_edc_data_center_source.npz",
+    "aes_room_spatial_edc_data_top_middle_source.npz",
+    "aes_room_spatial_edc_data_upper_right_source.npz",
+    "aes_room_spatial_edc_data_lower_left_source.npz",
+]
 
-room_waspaa = {
-    'display_name': 'WASPAA Room',
-    'width': 6, 'depth': 7, 'height': 4,
-    # 'source x': 3.6, 'source y': 5.3, 'source z': 1.3,
-    'source x': 3.6, 'source y': 6, 'source z': 1.3,
-    # 'mic x': 1.2, 'mic y': 1.8, 'mic z': 2.4,
-    'mic x': 1.833333, 'mic y': 3, 'mic z': 2.4,
-    'absorption': 0.1,
-}
+# --- Objective Function ---
+def compute_spatial_rmse(c_val, room, room_parameters, sdn_config, ref_edcs, receiver_positions, duration, Fs, err_duration_ms):
+    """
+    Calculates the mean RMSE across all receiver positions for a given 'c' value.
+    This is the objective function for the optimizer.
+    """
 
-room_journal = {
-    'display_name': 'Journal Room',
-    'width': 3.2, 'depth': 4, 'height': 2.7,
-    'source x': 2, 'source y': 3., 'source z': 2,
-    'mic x': 1, 'mic y': 1, 'mic z': 1.5,
-    'absorption': 0.1,
-}
+    cut_smpl = int(err_duration_ms * Fs)
 
 
-def construct_room_object(params, Fs=44100, source_signal=impulse_dirac['signal']):
-    """Constructs a Room object from the given room parameters."""
-    room = geometry.Room(params['width'], params['depth'], params['height'])
-    room.set_microphone(params['mic x'], params['mic y'], params['mic z'])
-    room.set_source(params['source x'], params['source y'], params['source z'],
-                    signal="will be replaced", Fs=Fs)
-    room_dim = np.array([params['width'], params['depth'], params['height']])
-    room.source.signal = source_signal
-    params['reflection'] = np.sqrt(1 - params['absorption'])
-    room.wallAttenuation = [params['reflection']] * 6
-    return room, room_dim
+    # Optimizer may pass c as an array, e.g., [3.14]
+    # c_scalar = c_val[0] if isinstance(c_val, (np.ndarray, list)) else c_val
+    c_scalar = np.squeeze(c_val).item()
+
+    # Update the source weighting in the SDN configuration for this evaluation
+    cfg = deepcopy(sdn_config)
+    cfg['flags']['source_weighting'] = c_scalar
+
+    # sdn_config['flags']['source_weighting'] = c_scalar
+    cfg['label'] = f'SDN-SW-c_{c_scalar:.2f}'
+
+    total_rmse = 0.0
+    num_receivers = len(receiver_positions)
+
+    for i, (rx, ry) in enumerate(receiver_positions):
+        print(f"  Evaluating receiver {i+1}/{num_receivers} at position ({rx:.2f}, {ry:.2f}) with c = {c_scalar:.4f}")
+        # 1. Get the pre-computed reference EDC for this receiver
+        ref_edc = ref_edcs[i]
+
+        # 2. Calculate the new SDN RIR and EDC with the current 'c' value
+        room.set_microphone(rx, ry, room.z) # Update mic position
+
+        # We need the full room_parameters dict for the calculator
+        # room_params = {
+        #     'width': room.x, 'depth': room.y, 'height': room.z,
+        #     'reflection': 1 - room.wallAttenuation[0]**2,
+        #     'mic x': rx, 'mic y': ry, 'mic z': room.micPos.z,
+        #     'source x': room.source.srcPos.x, 'source y': room.source.srcPos.y, 'source z': room.source.srcPos.z,
+        # }
+
+        _, rir_sdn, _, _ = calculate_sdn_rir(room_parameters, "SDN-Opt", room, duration, Fs, cfg)
+        rir_sdn_normed = rir_normalisation(rir_sdn, room, Fs, normalize_to_first_impulse=True)['single_rir']
+
+        if i == 14 or i == 15:
+            plot_tr = True
+        else:
+            plot_tr = False
+
+        edc_sdn, _, _ = an.compute_edc(rir_sdn_normed, Fs, plot=plot_tr)
+        print("rir_sdn_normed:", len(rir_sdn_normed), "edc sdn:", len(edc_sdn), "ref edc:", len(ref_edc))
+        # 3. Compute the error and accumulate
+        # Ensure sliced EDCs are of the same length for comparison
+        rmse = an.compute_RMS(edc_sdn, ref_edc, range=int(err_duration_ms), Fs=Fs,
+                skip_initial_zeros=True,
+                normalize_by_active_length=True)
+        total_rmse += rmse
+        print(f"    RMSE: {rmse:.6f}")
+
+    mean_rmse = total_rmse / num_receivers
+    print(f"  Mean RMSE = {mean_rmse:.6f}")
+    return mean_rmse
+
+# --- Main Optimization Loop ---
+if __name__ == "__main__":
+    for filename in FILES_TO_PROCESS:
+        data_path = os.path.join(DATA_DIR, filename)
+        if not os.path.exists(data_path):
+            print(f"\n--- WARNING: File not found, skipping: {data_path} ---")
+            continue
+
+        print(f"\n--- Optimizing for file: {filename} ---")
+
+        # 1. Load data
+        with np.load(data_path, allow_pickle=True) as data:
+            room_parameters = data['room_params'][0]
+            source_pos = data['source_pos']
+            receiver_positions = data['receiver_positions']
+            Fs = int(data['Fs'])
+            duration = float(data['duration'])
+            # Load all EDCs and get the ones for the reference method
+            all_edcs = dict(np.load(data_path, allow_pickle=True))['edcs_RIMPY-neg10']
 
 
-room_parameters = room_aes
-room, room_dim = construct_room_object(room_aes, source_signal=impulse_dirac['signal'])
-# room_parameters = room_aes  # Choose the room
-# room = geometry.Room(room_parameters['width'], room_parameters['depth'], room_parameters['height'])
-# room.set_microphone(room_parameters['mic x'], room_parameters['mic y'], room_parameters['mic z'])
-# room.set_source(room_parameters['source x'], room_parameters['source y'], room_parameters['source z'],
-#                 signal = "will be replaced", Fs = Fs)
-# room_dim = np.array([room_parameters['width'], room_parameters['depth'], room_parameters['height']])
-# Setup signal
-# room.source.signal = impulse_dirac['signal']
-# room_parameters['reflection'] = np.sqrt(1 - room_parameters['absorption'])
-# room.wallAttenuation = [room_parameters['reflection']] * 6
+        # 2. Setup reusable Room object and base SDN config
+        room = geometry.Room(room_parameters['width'], room_parameters['depth'], room_parameters['height'])
+        num_samples = int(Fs * duration)
+        impulse = geometry.Source.generate_signal('dirac', num_samples)
+        room.set_source(*source_pos, signal=impulse['signal'], Fs=Fs)
+        room.set_microphone(room_parameters['mic x'], room_parameters['mic y'], room_parameters['mic z']) # Set initial mic pos
+        room_parameters['reflection'] = np.sqrt(1 - room_parameters['absorption'])
+        room.wallAttenuation = [room_parameters['reflection']] * 6
 
-# ---- reference RIR & EDC via pyroomacoustics ISM -----------------
-pra_rir, label = calculate_pra_rir(room_parameters, duration, Fs, 100)
-rir_ref = pra_rir
-edc_ref, _, _ = an.compute_edc(rir_ref, Fs)
+        base_sdn_config = {
+            'enabled': True,
+            'info': "c_optimized",
+            'flags': {'specular_source_injection': True} # Base for SW-SDN
+        }
 
-# T60_ref = pra.experimental.rt60.measure_rt60(rir_ref, Fs)  # just to clip error window
-# rt60_sabine, rt60_eyring = pp.calculate_rt60_theoretical(room_dim, room_parameters['absorption'])
-# T60_ref = rt60_sabine
-# cut_smpl = int(min(T60_ref, dur-0.01) * Fs)
-cut_smpl = int(optimization_duration * Fs)
+        # 3. Run Optimization
+        # Bounds are (1, 7) as requested
+        # bounds = [(1.0, 7.0)]
+        # x0 = [4.0] # Initial guess, centrally located in bounds
+        #
+        # minimizer_kwargs = {
+        #     "method": "L-BFGS-B",
+        #     "bounds": bounds,
+        #     "args": (room, base_sdn_config, all_edcs, receiver_positions, duration, Fs, err_duration_ms)
+        # }
+        #
+        # result = basinhopping(compute_spatial_rmse, x0,
+        #                       minimizer_kwargs=minimizer_kwargs,
+        #                       niter=1, # Number of basin hopping iterations
+        #                       disp=True)
 
-# ------------------------------------------------------------------
-# 2. Create SDN once - reuse for all optimizations
-# ------------------------------------------------------------------
-# Initialize the SDN with default config
-test_name = 'TestX'
-config = {'enabled': True,
-          'info': "",
-          'flags': {
-              'specular_source_injection': True,
-              'source_weighting': 5,  # Initial value, will be updated
-          },
-          'label': "SDN"
-          }
+        # print("\n--- Optimization Complete ---")
+        # print(f"File: {filename}")
+        # print(f"Optimal c value: {result.x[0]:.4f}")
+        # print(f"Minimum Mean RMSE: {result.fun:.6f}")
+        # print("-----------------------------\n")
 
-# Create the SDN network once
-sdn = DelayNetwork(room, Fs=Fs, label=config['label'], **config['flags'])
+        obj = partial(compute_spatial_rmse,
+                      room=room,
+                      room_parameters=room_parameters,
+                      sdn_config=base_sdn_config,
+                      ref_edcs=all_edcs,
+                      receiver_positions=receiver_positions,
+                      duration=duration, Fs=Fs,
+                      err_duration_ms=err_duration_ms)
 
+        res = minimize_scalar(obj, bounds=(1, 7), method='bounded',
+                              options={'xatol': 1e-3, 'maxiter': 10})
 
-# ------------------------------------------------------------------
-# 3. Function to update c_vector and calculate RIR
-# ------------------------------------------------------------------
-def calculate_rir_with_c(sdn, c_scalar):
-    """Calculate RIR with updated c_scalar without recreating the network"""
-    # Update the injection_c_vector in the SDN
-    sdn.source_weighting = c_scalar
-    # Reset injection index to 0 for the new calculation
-    sdn.injection_index = 0
-
-    # Calculate RIR
-    return sdn.calculate_rir(duration)
-
-
-# ------------------------------------------------------------------
-# 4. Objective function using the existing SDN
-# ------------------------------------------------------------------
-def compute_RMSE_optimizer(c, edc_ref, sdn):
-    """RMSE between SDN EDC (with given c_vec) and reference EDC"""
-    # The optimizer might pass c as an array, so extract the scalar value
-    c_scalar = c[0] if isinstance(c, (np.ndarray, list)) else c
-
-    # Calculate RIR with the updated c_vector
-    rir_sdn = calculate_rir_with_c(sdn, c_scalar)
-
-    # Compute EDC
-    edc_sdn, _, _ = an.compute_edc(rir_sdn, Fs)
-    # Cut EDCs up to cut_smpl
-    edc_sdn = edc_sdn[:cut_smpl]
-    edc_ref_cut = edc_ref[:cut_smpl]
-
-    # Calculate RMS difference
-    rms_diff = an.compute_RMS(edc_sdn, edc_ref_cut, range=50, Fs=Fs, method="rmse")
-    print(f"c: {c_scalar:.4f}, RMSE: {rms_diff:.6f}")
-    optimization_log.append((c_scalar, rms_diff))
-    return rms_diff
-
-
-# ------------------------------------------------------------------
-# 5. Optimisation call ---------------------------------------------
-# ------------------------------------------------------------------
-# Set an initial guess for the optimizer
-x0 = [0.0]
-bounds = [(-3, 7.0)]
-optimization_log = []
-
-# Configure the local minimizer (L-BFGS-B) to be used by basinhopping.
-# This includes passing the bounds and additional arguments for our objective function.
-minimizer_kwargs = {
-    "method": "L-BFGS-B",
-    "bounds": bounds,
-    "args": (edc_ref, sdn)
-}
-
-result = basinhopping(compute_RMSE_optimizer, x0,
-                      minimizer_kwargs=minimizer_kwargs,
-                      niter=20,
-                      disp=True)
-
-
-print("\nBest c_dom vector:", np.round(result.x, 3))
-print("RMSE:", result.fun)
-
-# ------------------------------------------------------------------
-# 6. Plotting the optimization results
-# ------------------------------------------------------------------
-if optimization_log:
-    # Sort the log by c value for a clean plot
-    optimization_log.sort(key=lambda x: x[0])
-    c_values, loss_values = zip(*optimization_log)
-
-    plt.figure(figsize=(10, 6))
-    plt.plot(c_values, loss_values, 'bo-', label='Optimization Path')
-    plt.scatter(result.x, [result.fun], color='red', s=100, zorder=5, label=f'Minimum Found (c={np.round(result.x[0], 3)})')
-    plt.xlabel("c value")
-    plt.ylabel("RMSE Loss")
-    plt.title("Optimization Error Surface for c")
-    plt.legend()
-    plt.grid(True)
-    plt.show()
+        print(f"Optimal c = {res.x:.3f},  mean RMSE = {res.fun:.6f}")

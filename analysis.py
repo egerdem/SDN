@@ -228,7 +228,8 @@ def compute_edc(rir, Fs, label=None, plot=True, color=None, energy_thres=1.0):
     nonzero_indices = np.where(energy > 0)[0]
     if len(nonzero_indices) > 0:
         i_nz = np.max(nonzero_indices)
-        energy = energy[:i_nz]
+        energy = energy[:i_nz + 1]  # Include the last non-zero index CHANGED ...
+
     
     # Convert to dB and normalize
     energy_db = 10 * np.log10(energy)
@@ -240,6 +241,7 @@ def compute_edc(rir, Fs, label=None, plot=True, color=None, energy_thres=1.0):
     # Plot only if requested
     if plot:
         plt.plot(time_db, energy_db, color=color, label=label)
+        plt.show()
     
     # Return both the dB curve and the raw energy (for RT60 calculation)
     return energy_db, time_db, energy
@@ -356,7 +358,7 @@ def calculate_rms_envelope(signal: np.ndarray,
 
     return rms_values
 
-def compute_RMS(sig1: np.ndarray, sig2: np.ndarray, range: int = None, Fs: int = 44100, method = "rmse", skip_initial_zeros: bool = False, normalize_by_active_length: bool = False) -> float:
+def compute_RMS_OLD(sig1: np.ndarray, sig2: np.ndarray, range: int = None, Fs: int = 44100, method = "rmse", skip_initial_zeros: bool = False, normalize_by_active_length: bool = True) -> float:
     """
     Computes the difference between two signals using specified method.
 
@@ -422,18 +424,18 @@ def compute_RMS(sig1: np.ndarray, sig2: np.ndarray, range: int = None, Fs: int =
             sig1_early = sig1_early[sig2_nonzeros[0]:]
             sig2_early = sig2_early[sig2_nonzeros[0]:]
 
-    # Calculate difference based on method
-    if method == "rmse":
-        # Root Mean Square Error (for linear scale)
-        diff = np.sqrt(np.mean((sig1_early - sig2_early)**2))
-
-    elif method == "sum":
-        # Sum of absolute differences (total accumulated error)
-        diff = np.sum(np.abs(sig1_early - sig2_early))
-
-    elif method == "sum_of_raw_diff":
-        # Sum of actual differences (total accumulated error)
-        diff = np.sum(sig1_early - sig2_early)
+    # # Calculate difference based on method
+    # if method == "rmse":
+    #     # Root Mean Square Error (for linear scale)
+    #     diff = np.sqrt(np.mean((sig1_early - sig2_early)**2))
+    #
+    # elif method == "sum":
+    #     # Sum of absolute differences (total accumulated error)
+    #     diff = np.sum(np.abs(sig1_early - sig2_early))
+    #
+    # elif method == "sum_of_raw_diff":
+    #     # Sum of actual differences (total accumulated error)
+    #     diff = np.sum(sig1_early - sig2_early)
 
     # Ensure signals have the same length after all processing
     if len(sig1_early) != len(sig2_early):
@@ -468,6 +470,93 @@ def compute_RMS(sig1: np.ndarray, sig2: np.ndarray, range: int = None, Fs: int =
         return np.sum(np.abs(diff))
     else:
         raise ValueError(f"Unknown method: {method}")
+
+def compute_RMS(sig1: np.ndarray,
+                sig2: np.ndarray,
+                range: int | None = None,          # [ms] window length
+                Fs: int = 44100,
+                method: str = "rmse",
+                skip_initial_zeros: bool = False,
+                normalize_by_active_length: bool = True) -> float:
+    """
+    Root-mean-square (or MAE / SUM / MEDIAN) distance between two 1-D signals.
+
+    * If ``skip_initial_zeros`` is True, both signals are first aligned to the
+      earliest non-zero sample (common onset); *only then* the ``range``-ms
+      window is taken, so the comparison window always has the requested
+      length.
+    * If ``range`` is None the full signals are used (after optional alignment).
+
+    Parameters
+    ----------
+    sig1, sig2 : np.ndarray
+        Signals to compare (1-D real).
+    range : int | None
+        Window length to analyse in milliseconds.  None = full length.
+    Fs : int
+        Sampling rate [Hz].
+    method : {"rmse","mae","median","sum"}
+        Error metric.
+    skip_initial_zeros : bool
+        Align to first non-zero sample before cropping.
+    normalize_by_active_length : bool
+        For RMSE / MAE, divide by the number of *active* samples
+        (after the onset) instead of the whole window.
+
+    Returns
+    -------
+    float
+        Error according to ``method``.
+    """
+    # --------- sanity checks --------------------------------------------------
+    if sig1 is None or sig2 is None:
+        raise ValueError("Null signal passed to compute_RMS")
+    # sig1 = np.asarray(sig1, dtype=float).ravel()
+    # sig2 = np.asarray(sig2, dtype=float).ravel()
+
+    # --------- (1) optional onset alignment -----------------------------------
+    if skip_initial_zeros:
+        thresh = 1e-12
+        nz1 = np.argmax(np.abs(sig1) > thresh)  # 0 if all-zeros
+        nz2 = np.argmax(np.abs(sig2) > thresh)
+        onset = min(nz1, nz2)
+        # print("onset at sample:", onset, "for signals of lengths", len(sig1), "and", len(sig2))
+        sig1, sig2 = sig1[onset:], sig2[onset:]
+
+    # --------- (2) crop the requested window ----------------------------------
+    if range is not None:
+        Lwin = int(range * 1e-3 * Fs)          # samples in window
+        sig1 = sig1[:Lwin]
+        sig2 = sig2[:Lwin]
+
+    # --------- make length equal ---------------------------------------------
+    Lmin = min(len(sig1), len(sig2))
+    if Lmin == 0:
+        return 0.0
+    sig1, sig2 = sig1[:Lmin], sig2[:Lmin]
+
+    diff = sig1 - sig2
+
+    # --------- normalisation length ------------------------------------------
+    N = len(diff)
+    if normalize_by_active_length and skip_initial_zeros:
+        N = max(N, 1)                          # already aligned ⇒ no plateau
+    elif normalize_by_active_length:
+        plateau = np.argmax(sig1 != sig1[0])   # end of initial constant part
+        if plateau:                            # plateau > 0 means found
+            N = max(len(diff) - plateau, 1)
+
+    # --------- metrics --------------------------------------------------------
+    if method == "rmse":
+        return np.sqrt(np.sum(diff ** 2) / N)
+    if method == "mae":
+        return np.sum(np.abs(diff)) / N
+    if method == "median":
+        return np.median(np.abs(diff))
+    if method == "sum":
+        return np.sum(np.abs(diff))
+    raise ValueError(f"Unknown method: {method}")
+
 
 def plot_edc_comparison(edc1: np.ndarray, edc2: np.ndarray, Fs: int = 44100, 
                        label1: str = "EDC 1", label2: str = "EDC 2"):

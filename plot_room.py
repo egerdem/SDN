@@ -354,13 +354,12 @@ def create_interactive_rir_plot(rirs_dict, Fs, put_rect=True):
     # plt.show(block=True)  # Make sure to block to keep the window interactive
     plt.show(block=False)  # Non-blocking
 
-def create_interactive_edc_plot(rirs_dict, Fs, default_rirs):
+def create_interactive_edc_plot(rirs_dict, Fs):
     """Create an interactive EDC plot with checkboxes to show/hide different EDCs.
     
     Args:
         rirs_dict: Dictionary containing RIRs with their labels as keys
         Fs: Sampling frequency
-        default_rirs: Set of RIR labels that should be plotted in black
     """
     from matplotlib.widgets import CheckButtons
     import analysis as an
@@ -381,7 +380,6 @@ def create_interactive_edc_plot(rirs_dict, Fs, default_rirs):
         time = np.arange(len(rir)) / Fs
         
         # Determine color based on whether it's a default RIR
-        # color = 'black' if label in default_rirs or label == "SDN-Base (original)" else None
         color = None
         # Plot EDC
         line, = ax.plot(time, edc, label=label, alpha=1, color=color)
@@ -433,13 +431,12 @@ def create_interactive_edc_plot(rirs_dict, Fs, default_rirs):
 
     plt.show(block=False)  # Non-blocking
 
-def create_unified_interactive_plot(rirs_dict, Fs, default_rirs, room_parameters, reflection_times=None):
+def create_unified_interactive_plot(rirs_dict, Fs, room_parameters=None, reflection_times=None):
     """Create a unified interactive plot with RIR and EDC side by side, and NED below, sharing synchronized checkboxes.
 
     Args:
         rirs_dict: Dictionary containing RIRs with their labels as keys
         Fs: Sampling frequency
-        default_rirs: Set of RIR labels that should be plotted in black
         room_parameters: Dictionary containing room parameters including dimensions and display_name
         reflection_times: Dictionary containing arrival times for different reflection orders
     """
@@ -480,9 +477,15 @@ def create_unified_interactive_plot(rirs_dict, Fs, default_rirs, room_parameters
     ax_check = fig.add_subplot(gs[:, 2])
 
     # Add room information at the top
-    room_name = room_parameters.get('display_name', 'Custom Room')
-    room_info = f"**{room_name}: {room_parameters['width']}×{room_parameters['depth']}×{room_parameters['height']}m**"
-    fig.suptitle(room_info, fontsize=12)
+    if room_parameters is not None:
+        rp = room_parameters
+        room_name = room_parameters.get('display_name', 'Custom Room')
+        src = rp["source x"], rp["source y"], rp["source z"]
+        mic = rp["mic x"], rp["mic y"], rp["mic z"]
+        room_info = f"**{room_name}: {rp['width']}×{rp['depth']}×{rp['height']}m \
+                    Source: {src[0]:.2f}m, {src[1]:.2f}m, {src[2]:.2f}m \
+                    Microphone: {mic[0]:.2f}m, {mic[1]:.2f}m, {mic[2]:.2f}m  **"
+        fig.suptitle(room_info, fontsize=12)
 
     # Initialize lines dictionaries for all plots
     rir_lines = {}

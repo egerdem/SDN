@@ -247,7 +247,6 @@ def calculate_and_plot_error_maps(sim_data, output_path: str, reference_method: 
     Y = receiver_positions[:, 1].reshape(grid_size, grid_size)
     
     ref_signals = all_edcs[reference_method]
-    err_samples = int(err_duration_ms / 1000 * Fs)
 
     # --- Method Filtering and Availability Report ---
     available_methods = [m for m in all_edcs.keys() if m != reference_method]
@@ -260,7 +259,7 @@ def calculate_and_plot_error_maps(sim_data, output_path: str, reference_method: 
     if methods_to_plot:
         print(f"Methods requested for plotting: {methods_to_plot}")
         # Intersect available methods with requested methods
-        final_methods_to_plot = [m for m in available_methods if m in methods_to_plot]
+        final_methods_to_plot = [m for m in methods_to_plot if m in available_methods]
         
         # Report on what will actually be plotted
         print(f"==> Final methods to be plotted: {final_methods_to_plot}")
@@ -283,8 +282,8 @@ def calculate_and_plot_error_maps(sim_data, output_path: str, reference_method: 
         test_signals = all_edcs[method]
 
         for i in range(len(receiver_positions)):
-            sig1 = ref_signals[i][:err_samples]
-            sig2 = test_signals[i][:err_samples]
+            sig1 = ref_signals[i]
+            sig2 = test_signals[i]
             
             # Using the same robust RMSE calculation from spatial_analysis
             error = an.compute_RMS(
@@ -293,7 +292,7 @@ def calculate_and_plot_error_maps(sim_data, output_path: str, reference_method: 
                 range=int(err_duration_ms),
                 Fs=Fs,
                 skip_initial_zeros=True,
-                normalize_by_active_length=False
+                normalize_by_active_length=True
             )
             error_maps[comparison_key]['errors'].append(error)
         
@@ -339,7 +338,7 @@ def calculate_and_plot_error_maps(sim_data, output_path: str, reference_method: 
     else:
         plt.close(fig) # Avoid displaying and free up memory
 
-    return mean_errors_dict
+    return mean_errors_dict, X, Y, error_maps
 
 
 if __name__ == "__main__":
@@ -351,39 +350,37 @@ if __name__ == "__main__":
     # --- SELECT DATA FILES ---
     # List of data files to process. This will generate a separate figure for each file.
     files_to_process = [
-        "aes_room_spatial_edc_data_center_source.npz",
-        "aes_room_spatial_edc_data_lower_left_source.npz",
-        "aes_room_spatial_edc_data_top_middle_source.npz",
-        "aes_room_spatial_edc_data_upper_right_source.npz",
+        # "aes_room_spatial_edc_data_upper_right_source.npz",
+        # "aes_room_spatial_edc_data_upper_right_sourcev2_8_6_2.npz",
+        # "aes_room_spatial_edc_data_upper_right_sourcev2_7d5_6_2.npz"
     ]
-    # files_to_process = [
-    #     "aes_room_RANDOMdom_spatial_edc_data_center_source.npz",
-    #     "aes_room_RANDOMdom_spatial_edc_data_lower_left_source.npz",
-    #     "aes_room_RANDOMdom_spatial_edc_data_top_middle_source.npz",
-    #     "aes_room_RANDOMdom_spatial_edc_data_upper_right_source.npz",
-    # ]
-    # files_to_process = ["journal_room_spatial_edc_data.npz"]
-    # files_to_process = ["aes_room_spatial_edc_data.npz"]
-    # files_to_process = ["waspaa_room_spatial_edc_data.npz"]
-    # files_to_process = ["journal_room_spatial_edc_data_mic1_1_1dot5.npz"]
+
+    # files_to_process = ["journal_room_spatial_edc_data.npz"]  # Single file for now, can be expanded later
+
+    files_to_process = [
+        "aes_room_spatial_edc_data_center_source.npz",
+        # "aes_room_spatial_edc_data_top_middle_source.npz",
+        # "aes_room_spatial_edc_data_upper_right_source.npz",
+        # "aes_room_spatial_edc_data_lower_left_source.npz",
+    ]
 
     # --- ANALYSIS PARAMETERS ---
     REFERENCE_METHOD = 'RIMPY-neg10'
+    # REFERENCE_METHOD = 'RIMPY-neg'
     # REFERENCE_METHOD = 'ISM-pra-rand10'
     # REFERENCE_METHOD = 'ISM'
     # Specify which methods to plot. Leave empty or set to None to plot all.
-    # METHODS_TO_PLOT = ['SDN-Test_3', 'SDN-Test_2', 'SDN-Test1', 'SDN-Test2', 'SDN-Test3', 'SDN-Test4', 'SDN-Test5','SDN-Test6', 'SDN-Test7']
-    # METHODS_TO_PLOT = ['SDN-Test1', 'SDN-Test4r', 'SDN-Test5r','SDN-Test6r']
-    METHODS_TO_PLOT = None
+    METHODS_TO_PLOT = ['SDN-Test1', 'SDN-Test2', 'SDN-Test3','SDN-Test5']
+    # METHODS_TO_PLOT = None
 
     COMPARISON_TYPE = 'edc'  # 'edc' is the most common for this
     ERROR_METRIC = 'rmse'
     ERROR_DURATION_MS = 50  # Analyze the first 50ms of the EDC
-    USE_INTERPOLATION = False # Use 'False' for blocky, discrete plot; 'True' for smooth contours
 
     # --- CONTROL FLAGS ---
     SAVE_FIGURES = False  # Set to True to save the generated figures to disk
     SHOW_PLOTS = False    # Set to True to display interactive plot windows
+    SAVE_SUMMARY_TEXT = False # Set to False to disable saving the summary .txt file
 
     # --- EXECUTION LOOP ---
     all_mean_errors = {}
@@ -456,7 +453,7 @@ if __name__ == "__main__":
         if SAVE_FIGURES:
             print(f"Output will be saved to: {output_path}")
 
-        mean_errors = calculate_and_plot_error_maps(
+        mean_errors, X, Y, err_maps = calculate_and_plot_error_maps(
             sim_data=sim_data,
             output_path=output_path,
             reference_method=REFERENCE_METHOD,
@@ -464,7 +461,7 @@ if __name__ == "__main__":
             comparison_type=COMPARISON_TYPE,
             error_metric=ERROR_METRIC,
             err_duration_ms=ERROR_DURATION_MS,
-            interpolated=USE_INTERPOLATION,
+            interpolated=False,
             save_figure=SAVE_FIGURES,
             show_plot=SHOW_PLOTS
         )
@@ -486,7 +483,7 @@ if __name__ == "__main__":
     )
 
     # --- Export Results to Files if plotting all methods ---
-    if METHODS_TO_PLOT is None:
+    if METHODS_TO_PLOT is None and SAVE_SUMMARY_TEXT:
         # Export Formatted Tables to a single .txt file
         import io
         from contextlib import redirect_stdout

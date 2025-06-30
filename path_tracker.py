@@ -2,6 +2,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import List, Dict, Tuple
 import numpy as np
+from spatial_analysis import generate_receiver_grid_old, generate_source_positions, print_receiver_grid
 
 @dataclass
 class Path:
@@ -104,6 +105,14 @@ class PathTracker:
     def print_path_comparison(self):
         """Print SDN and ISM paths side by side for comparison."""
         print("\nPath Comparison (SDN vs ISM):")
+        room_name = room_parameters.get('display_name')
+        rp = room_parameters
+        src = rp["source x"], rp["source y"], rp["source z"]
+        mic = rp["mic x"], rp["mic y"], rp["mic z"]
+        room_info = f"**{room_name}: {rp['width']}×{rp['depth']}×{rp['height']}m " \
+                    f"SOURCE: {src[0]:.2f}m, {src[1]:.2f}m, {src[2]:.2f}m " \
+                    f"MICROPHONE: {mic[0]:.2f}m, {mic[1]:.2f}m, {mic[2]:.2f}m  **"
+        print(f"{room_info}")
         print("=" * 80)
         print(f"{'SDN Path':<40} | {'ISM Path':<40}")
         print("-" * 80)
@@ -210,6 +219,8 @@ if __name__ == "__main__":
     import plot_room as pp
     import matplotlib.pyplot as plt
 
+    plot_arrival_times_per_order = False
+
     room_aes = {'width': 9, 'depth': 7, 'height': 4,
                 'source x': 4.5, 'source y': 3.5, 'source z': 2,
                 'mic x': 2, 'mic y': 2, 'mic z': 1.5,
@@ -225,96 +236,121 @@ if __name__ == "__main__":
     room_aes_outliar = {
         'display_name': 'AES Room',
         'width': 9, 'depth': 7, 'height': 4,
-        'source x': 8.5, 'source y': 6, 'source z': 2,
-        'mic x': 0.5, 'mic y': 0.5, 'mic z': 1.5,
+        'source x': 4.5, 'source y': 6, 'source z': 2,
+        'mic x':0.5, 'mic y': 0.5, 'mic z': 1.5,
         'absorption': 0.2,
     }
 
-    room_parameters = room_aes
-
+    room_parameters = room_aes_outliar
+    active_room = room_parameters
     room = geometry.Room(room_parameters['width'], room_parameters['depth'], room_parameters['height'])
-    room.set_microphone(room_parameters['mic x'], room_parameters['mic y'], room_parameters['mic z'])
-    room.set_source(room_parameters['source x'], room_parameters['source y'], room_parameters['source z'],
-                    signal="will be replaced", Fs=44100)
+
+    receiver_positions = generate_receiver_grid_old(active_room['width'] / 2, active_room['depth'] / 2, wall_margin=0.5,
+                                                    center_margin=0.5,
+                                                    n_points=16)
+    source_pos = room_parameters['source x'], room_parameters['source y'], room_parameters['source z']
+
+    print_receiver_grid(receiver_positions, room_parameters)
+
+    for i, (rx, ry) in enumerate(receiver_positions):
+        print(f"    ... receiver {i + 1}/{len(receiver_positions)} at ({rx:.2f}, {ry:.2f})")
+
+        room_parameters.update({
+            'mic x': rx,
+            'mic y': ry,
+            'source x': source_pos[0],
+            'source y': source_pos[1],
+            'source z': source_pos[2],
+        })
 
 
-    # Only Path Length Analysis, No RIR Calculation
-    # Create shared path tracker and calculate paths
-    path_tracker = PathTracker()
-    sdn_calc = SDNCalculator(room.walls, room.source.srcPos, room.micPos)
-    ism_calc = ISMCalculator(room.walls, room.source.srcPos, room.micPos)
-    sdn_calc.set_path_tracker(path_tracker)
-    ism_calc.set_path_tracker(path_tracker)
-    N = 3
-    # Compare paths and analyze invalid ISM paths
-    PathCalculator.compare_paths(sdn_calc, ism_calc,
-                                 max_order=N, print_comparison=True)  # Increased to 5
+        room.set_microphone(room_parameters['mic x'], room_parameters['mic y'], room_parameters['mic z'])
+        room.set_source(room_parameters['source x'], room_parameters['source y'], room_parameters['source z'],
+                        signal="will be replaced", Fs=44100)
 
-    # analyze_paths() returns a list of invalid paths (only for ISM calculator)
-    invalid_paths = ism_calc.analyze_paths(max_order=N)  # Increased to 5
 
-    # Visualize example ISM paths
-        # example_paths = [
-        #     ['s', 'east', 'west', 'm'],
-            # ['s', 'west', 'm'],
-            # ['s', 'west', 'east', 'north', 'm']
-        # ]
+        # Only Path Length Analysis, No RIR Calculation
+        # Create shared path tracker and calculate paths
+        path_tracker = PathTracker()
+        sdn_calc = SDNCalculator(room.walls, room.source.srcPos, room.micPos)
+        ism_calc = ISMCalculator(room.walls, room.source.srcPos, room.micPos)
+        sdn_calc.set_path_tracker(path_tracker)
+        ism_calc.set_path_tracker(path_tracker)
+        N = 1
+        # Compare paths and analyze invalid ISM paths
+        PathCalculator.compare_paths(sdn_calc, ism_calc,
+                                     max_order=N, print_comparison=True)  # Increased to 5
 
-    # for path in example_paths:
-    #     pp.plot_ism_path(room, ism_calc, path)
-    #     plt.show()
-    
-    TOA_order_SDN = path_tracker.get_latest_arrival_time_by_order('SDN')
-    TOA_order_ISM = path_tracker.get_latest_arrival_time_by_order('ISM')
+        # analyze_paths() returns a list of invalid paths (only for ISM calculator)
+        invalid_paths = ism_calc.analyze_paths(max_order=N)  # Increased to 5
 
-    # Print arrival times
-    print("\nLatest Arrival Times by Order:")
-    print("=" * 50)
-    print(f"{'Order':>5} {'SDN (s)':>10} {'ISM (s)':>10}")
-    print("-" * 50)
-    
-    for order in range(5):
-        sdn_time = f"{TOA_order_SDN.get(order, '-'):>10.5f}" if order in TOA_order_SDN else " " * 10
-        ism_time = f"{TOA_order_ISM.get(order, '-'):>10.5f}" if order in TOA_order_ISM else " " * 10
-        print(f"{order:>5} {sdn_time} {ism_time}")
+        # Visualize example ISM paths
+            # example_paths = [
+            #     ['s', 'east', 'west', 'm'],
+                # ['s', 'west', 'm'],
+                # ['s', 'west', 'east', 'north', 'm']
+            # ]
 
-    path_tracker.print_valid_paths_count(N)
+        # for path in example_paths:
+        #     pp.plot_ism_path(room, ism_calc, path)
+        #     plt.show()
 
-    # Create scatter plot of arrival times vs order
-    plt.figure(figsize=(10, 6))
+        TOA_order_SDN = path_tracker.get_latest_arrival_time_by_order('SDN')
+        TOA_order_ISM = path_tracker.get_latest_arrival_time_by_order('ISM')
 
-    # Plot SDN points
-    sdn_orders = []
-    sdn_times = []
-    for order in range(N+1):  # 0 to 4
-        if order in TOA_order_SDN:
-            sdn_orders.append(order)
-            sdn_times.append(TOA_order_SDN[order])
-    plt.scatter(sdn_times, sdn_orders, label='SDN', marker='o', s=100, alpha=0.6)
+        # Print arrival times
+        print("\nLatest Arrival Times by Order:")
+        print("=" * 50)
+        print(f"{'Order':>5} {'SDN (s)':>10} {'ISM (s)':>10}")
+        print("-" * 50)
 
-    # Plot ISM points
-    ism_orders = []
-    ism_times = []
-    for order in range(1, N+1):  # 1 to 4 (ISM doesn't have 0th order)
-        if order in TOA_order_ISM:
-            ism_orders.append(order)
-            ism_times.append(TOA_order_ISM[order])
-    # Add 0th order from SDN to ISM (they're the same)
-    if 0 in TOA_order_SDN:
-        ism_orders.insert(0, 0)
-        ism_times.insert(0, TOA_order_SDN[0])
-    plt.scatter(ism_times, ism_orders, label='ISM', marker='x', s=100, alpha=0.6)
+        for order in range(N+1):
+            sdn_time = f"{TOA_order_SDN.get(order, '-'):>10.5f}" if order in TOA_order_SDN else " " * 10
+            ism_time = f"{TOA_order_ISM.get(order, '-'):>10.5f}" if order in TOA_order_ISM else " " * 10
+            print(f"{order:>5} {sdn_time} {ism_time}")
 
-    plt.xlabel('Arrival Time (s)')
-    plt.ylabel('Reflection Order')
-    plt.title('Latest Arrival Times per Reflection Order')
-    plt.grid(True)
-    plt.legend()
-    plt.show(block=False)
+        path_tracker.print_valid_paths_count(N)
 
-    paths = path_tracker.paths["SDN"]
-    # Flatten and sort all paths by distance
-    sorted_paths = sorted(
-        (path for order_paths in paths.values() for path in order_paths),
-        key=lambda p: p.distance
-    )
+        if plot_arrival_times_per_order:
+            # Create scatter plot of arrival times vs order
+            plt.figure(figsize=(10, 6))
+
+            # Plot SDN points
+            sdn_orders = []
+            sdn_times = []
+            for order in range(N+1):  # 0 to 4
+                if order in TOA_order_SDN:
+                    sdn_orders.append(order)
+                    sdn_times.append(TOA_order_SDN[order])
+            plt.scatter(sdn_times, sdn_orders, label='SDN', marker='o', s=100, alpha=0.6)
+
+            # Plot ISM points
+            ism_orders = []
+            ism_times = []
+            for order in range(1, N+1):  # 1 to 4 (ISM doesn't have 0th order)
+                if order in TOA_order_ISM:
+                    ism_orders.append(order)
+                    ism_times.append(TOA_order_ISM[order])
+            # Add 0th order from SDN to ISM (they're the same)
+            if 0 in TOA_order_SDN:
+                ism_orders.insert(0, 0)
+                ism_times.insert(0, TOA_order_SDN[0])
+            plt.scatter(ism_times, ism_orders, label='ISM', marker='x', s=100, alpha=0.6)
+
+            plt.xlabel('Arrival Time (s)')
+            plt.ylabel('Reflection Order')
+            plt.title('Latest Arrival Times per Reflection Order')
+            plt.grid(True)
+            plt.legend()
+            plt.show(block=False)
+
+        paths = path_tracker.paths["SDN"]
+        # Flatten and sort all paths by distance
+        sorted_paths = sorted(
+            (path for order_paths in paths.values() for path in order_paths),
+            key=lambda p: p.distance
+        )
+
+
+# source_pos_new = [(1.0, 1.0, 6, 'Upper_Right_Source'),
+#                   (2.0, 1.0, 7, "Center_SourceV2")]

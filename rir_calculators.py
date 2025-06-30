@@ -31,6 +31,7 @@ def rir_normalisation(rirs_dict, room, Fs, normalize_to_first_impulse=True):
     # Check if input is a single RIR array
     if isinstance(rirs_dict, np.ndarray):
         rirs_dict = {'single_rir': rirs_dict}  # Convert to dict for uniform processing
+        # print("Input is a single RIR array, converting to dictionary format.")
 
     if normalize_to_first_impulse:
         # print("Normalizing to direct- first impulse")
