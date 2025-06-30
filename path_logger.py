@@ -8,17 +8,22 @@ import matplotlib.pyplot as plt
 class PressurePacket:
     """Represents a pressure value with its propagation history."""
     value: float
+    val_history: List[float]  # List of pressure values at each step
     path_history: List[str]  # List of nodes visited (e.g., ['src', 'ceiling', 'mic'])
-    birth_sample: int        # Sample index when this packet was created
-    delay: int              # Accumulated delay in samples
+    timestamps: List[int]     # List of sample indices when this packet was created
+    delay: int                # Accumulated delay in samples
+    birth_sample: int         # Sample index when this packet was created
+
     
-    def extend_path(self, node: str, additional_delay: int = 0) -> 'PressurePacket':
+    def extend_path(self, node: str, additional_delay: int = 0, new_val: float = 0.0) -> 'PressurePacket':
         """Create new packet with extended path."""
         return PressurePacket(
             value=self.value,
+            val_history=self.val_history + [new_val],  # Retain the pressure values history
             path_history=self.path_history + [node],
-            birth_sample=self.birth_sample,
-            delay=self.delay + additional_delay
+            timestamps=self.timestamps,     # Retain timestamps
+            delay=self.delay + additional_delay,
+            birth_sample=self.birth_sample   # Retain the original birth sample
         )
     
     @property
@@ -76,8 +81,8 @@ class PathLogger:
         """Get all paths that reach the mic, sorted by arrival time."""
         complete_paths = []
         for path_key, packets in self.paths.items():
-            mic_packets = [p for p in packets if p.reaches_mic]
-            complete_paths.extend((path_key, p) for p in mic_packets)
+            for p in packets:
+                complete_paths.append((path_key, p))
         
         # Sort by arrival time (birth_sample + delay)
         return sorted(complete_paths, key=lambda x: x[1].birth_sample + x[1].delay)

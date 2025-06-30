@@ -27,14 +27,24 @@ frameSize = 8
 room = geom.Room()
 # room.shape = geom.Cuboid(9,7,4)
 
-room_parameters = {'width': 9, 'depth': 7, 'height': 4,
+# room_parameters = {'width': 9, 'depth': 7, 'height': 4,
+#                    'source x': 4.5, 'source y': 3.5, 'source z': 2,
+#                    'mic x': 2, 'mic y': 2, 'mic z': 1.5,
+#                    'absorption': 0.2,
+#                    'air': {'humidity': 50,
+#                            'temperature': 20,
+#                            'pressure': 100},
+#                    'duration': 2.0}
+
+room_parameters_air = {'width': 9, 'depth': 7, 'height': 4,
                    'source x': 4.5, 'source y': 3.5, 'source z': 2,
                    'mic x': 2, 'mic y': 2, 'mic z': 1.5,
                    'absorption': 0.2,
-                   'air': {'humidity': 50,
-                           'temperature': 20,
-                           'pressure': 100},
                    'duration': 2.0}
+room_parameters = room_parameters_air
+
+if room_parameters == room_parameters_air:
+    print("Air absorption is enabled.")
 
 # room_parameters =  {     'width': 9, 'height': 7, 'depth': 4,
 #                          'source x': 4.5, 'source y': 3.5, 'source z': 2,
