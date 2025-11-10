@@ -1,10 +1,12 @@
 """
-Optimizes a single source weighting parameter ``c`` for an SDN model using all
-available spatial data files for a room.
+Optimises a 6-element source weighting vector ``c`` for an SDN model
+by minimising the EDC RMSE averaged over all available spatial data
+files.
 
-Where ``optimisation_singleC.py`` computes an optimal ``c`` for each source
-position separately, this script finds one global ``c`` that minimises the mean
-EDC error across all sources and receivers.
+Each element of the vector corresponds to the ``injection_c_vector``
+parameter used during specular source injection.  All six values share
+the same optimisation bounds of 1 to 7 (future work may extend this to
+-3 to 7).
 """
 
 import os
@@ -12,7 +14,7 @@ from functools import partial
 from copy import deepcopy
 
 import numpy as np
-from scipy.optimize import minimize_scalar
+from scipy.optimize import minimize
 
 import geometry
 import analysis as an
@@ -26,14 +28,14 @@ DATA_DIR = "results/paper_data"
 REFERENCE_METHOD = "RIMPY-neg10"
 ERROR_DURATION_MS = 50  # compare first 50 ms of the EDC
 
-# Bounds for ``c``.  Can be changed to ``(-3, 7)`` if needed in the future.
-BOUNDS = (1.0, 7.0)
+# Bounds for each c parameter
+BOUNDS_VEC = [(1.0, 7.0)] * 6
 
 FILES_TO_PROCESS = [
-    "aes_room_spatial_edc_data_center_source.npz",
-    "aes_room_spatial_edc_data_top_middle_source.npz",
+    # "aes_room_spatial_edc_data_center_source.npz",
+    # "aes_room_spatial_edc_data_lower_left_source.npz",
+    # "aes_room_spatial_edc_data_top_middle_source.npz",
     "aes_room_spatial_edc_data_upper_right_source.npz",
-    "aes_room_spatial_edc_data_lower_left_source.npz",
 ]
 
 
@@ -51,14 +53,13 @@ def load_dataset(path: str):
             "receiver_positions": data["receiver_positions"],
             "Fs": int(data["Fs"]),
             "duration": float(data["duration"]),
-            # Each dataset stores pre-computed EDCs for a reference method
             "ref_edcs": data[f"edcs_{REFERENCE_METHOD}"]
         }
     return dataset
 
 
-def compute_dataset_rmse(c_val: float, dataset: dict, err_duration_ms: int,
-                          base_cfg: dict, return_individual: bool = False) -> float:
+def compute_dataset_rmse(c_vec: np.ndarray, dataset: dict, err_duration_ms: int,
+                         base_cfg: dict, return_individual: bool = False) -> float:
     """Return mean RMSE over receivers for one source position."""
     Fs = dataset["Fs"]
     duration = dataset["duration"]
@@ -77,16 +78,18 @@ def compute_dataset_rmse(c_val: float, dataset: dict, err_duration_ms: int,
     room.wallAttenuation = [room_params["reflection"]] * 6
 
     cfg = deepcopy(base_cfg)
-    cfg["flags"]["source_weighting"] = float(np.squeeze(c_val))
-    cfg["label"] = f"SDN-SW-c_{cfg['flags']['source_weighting']:.2f}"
+    c_list = [float(v) for v in np.squeeze(c_vec)]
+    cfg["flags"]["injection_c_vector"] = c_list
+    cfg["label"] = "SDN-SW-cvec_" + "-".join(f"{v:.2f}" for v in c_list)
 
     total_rmse = 0.0
     individual_rmses = []
-    receivers = dataset["receiver_positions"]
+
+    receivers = dataset["receiver_positions"] #CHANGE THIS
     ref_edcs = dataset["ref_edcs"]
 
     for i, (rx, ry) in enumerate(receivers):
-        room.set_microphone(rx, ry, room_params["mic z"])
+        room.set_microphone(rx, ry,  room_params["mic z"])
 
         _, rir_sdn, _, _ = calculate_sdn_rir(room_params, "SDN-Opt", room,
                                              duration, Fs, cfg)
@@ -103,24 +106,25 @@ def compute_dataset_rmse(c_val: float, dataset: dict, err_duration_ms: int,
         )
         total_rmse += rmse
         individual_rmses.append(rmse)
-        if not return_individual:
-            print(f"Receiver {i + 1}/{len(receivers)}: RMSE = {rmse:.6f}")
+        print(f"Receiver {i + 1}/{len(receivers)}, ({rx:.2f},{ry:.2f}): RMSE = {rmse:.6f}")
 
     mean_rmse = total_rmse / len(receivers)
+    print(f"Mean RMSE for source at {dataset['source_pos']}: {mean_rmse:.6f}")
     if return_individual:
         return mean_rmse, individual_rmses
+
     return mean_rmse
 
 
-def compute_total_rmse(c_val: float, datasets: list, err_duration_ms: int,
+def compute_total_rmse(c_vec: np.ndarray, datasets: list, err_duration_ms: int,
                         base_cfg: dict) -> float:
     """Objective: mean RMSE across all datasets and receivers."""
     sum_rmse = 0.0
     sum_receivers = 0
 
     for ds in datasets:
-        print(f"Processing dataset with source at {ds['source_pos']}, c = {c_val:.3f}")
-        rmse = compute_dataset_rmse(c_val, ds, err_duration_ms, base_cfg)
+        print(f"Processing dataset with source at {ds['source_pos']}, c = {c_vec}")
+        rmse = compute_dataset_rmse(c_vec, ds, err_duration_ms, base_cfg)
         n_rx = len(ds["receiver_positions"])
         sum_rmse += rmse * n_rx
         sum_receivers += n_rx
@@ -141,9 +145,12 @@ if __name__ == "__main__":
             continue
         datasets.append(load_dataset(fpath))
 
+    if not datasets:
+        raise RuntimeError("No data files loaded for optimisation.")
+
     base_cfg = {
         "enabled": True,
-        "info": "c_global_optimised",
+        "info": "c_vector_optimised",
         "flags": {"specular_source_injection": True},
     }
 
@@ -154,15 +161,54 @@ if __name__ == "__main__":
         base_cfg=base_cfg,
     )
 
-    result = minimize_scalar(
+    x0 = np.full(6, 1.24)
+
+    # print("--- Starting Nelder-Mead Optimization ---")
+    # result = minimize(
+    #     obj,
+    #     x0,
+    #     method="Nelder-Mead",  # <<< Change the method here
+    #     bounds=BOUNDS_VEC,
+    #     # A generous tolerance might be needed for such a long function
+    #     options={"maxiter": 10, "xatol": 1e-3, "fatol": 1e-3, "adaptive": True},
+    # )
+
+    # best_x0_from_stage_1 = [4.6895261,  6.29991025, 1.08560566, 6.97723387, 1.10307365, 1.9357747]
+    # print("--- Starting Stage 2: Precise local search ---")
+    # result = minimize(
+    #     obj,  # The full objective function with all data
+    #     best_x0_from_stage_1,
+    #     method="Nelder-Mead",
+    #     bounds=BOUNDS_VEC,
+    #     options={"xatol": 1e-1, "fatol": 1e-1, "adaptive": True},  # Use a slightly tighter tolerance
+    # )
+
+
+    # # Define a callback to see progress
+    from scipy.optimize import basinhopping
+    def print_fun(x, f, accepted):
+        print(f"At minimum {x} with value {f}, accepted: {bool(accepted)}")
+
+
+    # Configure the local minimizer to be used for each "hop"
+    minimizer_kwargs = {
+        "method": "Nelder-Mead",  # Using Nelder-Mead for local search is robust
+        "bounds": BOUNDS_VEC,
+        "options": {"xatol": 1e-1, "fatol": 1e-1, "adaptive": True}
+    }
+
+    print("--- Starting Basin-Hopping Optimization ---")
+    result = basinhopping(
         obj,
-        bounds=BOUNDS,
-        method="bounded",
-        options={"xatol": 1e-3, "maxiter": 20},
+        x0,
+        minimizer_kwargs=minimizer_kwargs,
+        niter=5,  # Number of basin-hopping iterations
+        callback=print_fun,
     )
 
-    optimal_c = result.x
-    print(f"Optimal c across all sources: {optimal_c:.3f}, mean RMSE = {result.fun:.6f}")
+    optimal_c_vec = result.x
+    print("Optimal c vector:", np.round(optimal_c_vec, 3))
+    # print(f"Mean RMSE: {result.fun:.6f}")
 
     # Collect individual RMSE results for export
     all_results = {}
@@ -172,9 +218,9 @@ if __name__ == "__main__":
         source_name = FILES_TO_PROCESS[i].replace('aes_room_spatial_edc_data_', '').replace('.npz', '').replace('_', ' ').title()
         source_names.append(source_name)
         
-        mean_rmse, individual_rmses = compute_dataset_rmse(optimal_c, dataset, ERROR_DURATION_MS, base_cfg, return_individual=True)
+        mean_rmse, individual_rmses = compute_dataset_rmse(optimal_c_vec, dataset, ERROR_DURATION_MS, base_cfg, return_individual=True)
         all_results[source_name] = {
-            'optimal_c': optimal_c,
+            'optimal_c_vec': optimal_c_vec,
             'mean_rmse': mean_rmse,
             'individual_rmses': individual_rmses,
             'source_pos': dataset['source_pos']
@@ -182,7 +228,8 @@ if __name__ == "__main__":
 
     # Export results
     room_info = datasets[0]['room_params']
-    print(f"\n--- GLOBAL OPTIMIZATION RESULTS (c={optimal_c:.3f}) ---")
+    c_vec_str = "[" + ",".join(f"{v:.2f}" for v in optimal_c_vec) + "]"
+    print(f"\n--- WALL C-VECTOR OPTIMIZATION RESULTS {c_vec_str} ---")
     
     # Console table
     header = f"{'Method':<25}"
@@ -202,13 +249,13 @@ if __name__ == "__main__":
     # Export to file
     output_dir = "results/paper_data"
     os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, f"global_optimization_results_c_{optimal_c:.3f}_ref_{REFERENCE_METHOD}.txt")
+    output_path = os.path.join(output_dir, f"wall_c_vector_optimization_results_ref_{REFERENCE_METHOD}.txt")
     
     with open(output_path, 'w') as f:
-        f.write("--- SDN GLOBAL SOURCE-WEIGHTING OPTIMIZATION RESULTS ---\n")
+        f.write("--- SDN WALL C-VECTOR OPTIMIZATION RESULTS ---\n")
         f.write(f"Room: {room_info.get('display_name', 'AES Room')} ({room_info['width']}x{room_info['depth']}x{room_info['height']} m)\n")
         f.write(f"Absorption: {room_info['absorption']}, Reference Method: {REFERENCE_METHOD}\n")
-        f.write(f"Global Optimal c: {optimal_c:.4f}, Global Mean RMSE: {result.fun:.6f}\n")
+        f.write(f"Optimal c vector: {c_vec_str}, Global Mean RMSE: {result.fun:.6f}\n")
         f.write("="*100 + "\n\n")
         
         f.write(header + "\n")
@@ -223,3 +270,5 @@ if __name__ == "__main__":
             f.write(row + "\n")
     
     print(f"\n--- Results exported to: {output_path} ---")
+
+

@@ -14,7 +14,7 @@ from rir_calculators import calculate_ho_sdn_rir, rir_normalisation
 """ Method flags """
 PLOT_SDN_BASE = False
 
-t1,t2,t3,t4,t5 = True, True, True, True, True
+t1,t2,t3,t4,t5 = True, False, False, False, False
 RUN_SDN_Test_2 = False
 RUN_SDN_Test_3 = False
 RUN_SDN_Test0 = False
@@ -27,9 +27,9 @@ RUN_SDN_Test6 = False
 RUN_SDN_Test7 = False
 
 RUN_SDN_Test3r = True
-RUN_SDN_Test4r = False
-RUN_SDN_Test5r = False
-RUN_SDN_Test6r = False
+RUN_SDN_Test4r = True
+RUN_SDN_Test5r = True
+RUN_SDN_Test6r = True
 RUN_SDN_Test7r = False
 
 RUN_SDN_Test_2_noatt =  False
@@ -65,21 +65,21 @@ RUN_HO_N3 = False
 RUN_HO_N3g = False
 
 RUN_MY_HO_SDN_n1 = False # My new test flag for HO-SDN
-RUN_MY_HO_SDN_n2_swc5 = False # My new test flag for HO-SDN
-RUN_MY_HO_SDN_n2_swc3 = False # My new test flag for HO-SDN
-RUN_MY_HO_SDN_n3_swc3 = False # My new test flag for HO-SDN
+RUN_MY_HO_SDN_n2_swc5 = False
+RUN_MY_HO_SDN_n2_swc3 = False
+RUN_MY_HO_SDN_n3_swc3 = False
 
 RUN_MY_HO_SDN_n1noatt = False
 RUN_MY_HO_SDN_n2noatt = False # My new test flag for HO-SDN no att
 
 PLOT_TREBLE = False
 
-PLOT_ISM_with_pra = True
-PLOT_ISM_with_pra_rand10 = False
+PLOT_ISM_with_pra = False
+PLOT_ISM_with_pra_rand10 = True
 PLOT_ISM_rimPy_pos = False  # rimPy ISM with positive reflection
 PLOT_ISM_rimPy_pos_rand10 = False
 PLOT_ISM_rimPy_neg = False  # rimPy ISM with negative reflection
-PLOT_ISM_rimPy_neg_rand10 = False
+PLOT_ISM_rimPy_neg_rand10 = True
 pra_order = 100
 
 PICKLE_LOAD_RIRS = False # Load RIRs from pickle file
@@ -103,7 +103,7 @@ PLOT_FREQ = False  # Frequency response plot
 UNIFIED_PLOTS = True  # Flag to switch between unified and separated plots
 normalize_to_first_impulse = True  # Set this to True if you want to normalize to first impulse
 
-Print_RIR_comparison_metrics = False
+Print_RIR_comparison_metrics = True
 interactive_rirs = True  # Set to True to enable interactive RIR comparison
 pulse_analysis = "upto_4"
 plot_smoothed_rirs = False
@@ -255,11 +255,11 @@ ism_methods = {
 # SDN Test Configurations
 sdn_tests = {
 
-    '11': {'enabled': t1,
-              'info': "c1 [1,1,1,1,1,1]",
+    '11': {'enabled': True,
+              'info': "c [3.87694432 3.91420138 4.00285606 3.99207621 4.02144006 4.01794584]",
               'flags': {
                   'specular_source_injection': True,
-                    'injection_c_vector': [1, 1, 1, 1, 1,1],
+                    'injection_c_vector':[3.87694432, 3.91420138, 4.00285606, 3.99207621, 4.02144006, 4.01794584],
               }, 'label': "SDN"},
 
     '1111': {'enabled': t1,
