@@ -6,6 +6,7 @@ __pycache__/
 *.npy
 *.DS_Store
 *.h5
+*.cursorrules
 
 # Ignore image files
 *.jpeg
