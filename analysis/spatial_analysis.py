@@ -3,13 +3,13 @@ import matplotlib.pyplot as plt
 from typing import Dict, List, Tuple
 import geometry
 from sdn_core import DelayNetwork
-from sdn_base import calculate_sdn_base_rir
+from archive.sdn_base import calculate_sdn_base_rir
 import pyroomacoustics as pra
 from scipy import signal
 # import seaborn as sns
-import analysis as an
+from . import analysis as an
 from rir_calculators import calculate_pra_rir, calculate_rimpy_rir, calculate_sdn_rir, rir_normalisation
-from plotting_utils import DISPLAY_NAME_MAP
+from .plotting_utils import DISPLAY_NAME_MAP
 
 
 def print_receiver_grid(receiver_positions, room, source_position=None):

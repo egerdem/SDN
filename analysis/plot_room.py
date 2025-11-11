@@ -6,7 +6,7 @@ from mpl_toolkits.mplot3d import Axes3D
 from typing import List
 import pyroomacoustics as pra
 
-from plotting_utils import DISPLAY_NAME_MAP, get_display_name, get_color
+from .plotting_utils import DISPLAY_NAME_MAP, get_display_name, get_color
 
 def plot_room(room, ax=None):
     """Plot room geometry with source, mic, and walls."""
@@ -362,7 +362,7 @@ def create_interactive_edc_plot(rirs_dict, Fs):
         Fs: Sampling frequency
     """
     from matplotlib.widgets import CheckButtons
-    import analysis as an
+    from . import analysis as an
 
     # Create the main figure and axis for EDC plot with more space for the plot
     fig, (ax, ax_check) = plt.subplots(1, 2, gridspec_kw={'width_ratios': [10, 1]}, figsize=(13, 6))
@@ -441,8 +441,8 @@ def create_unified_interactive_plot(rirs_dict, Fs, room_parameters=None, reflect
         reflection_times: Dictionary containing arrival times for different reflection orders
     """
     from matplotlib.widgets import CheckButtons
-    import analysis as an
-    import EchoDensity as ned
+    from . import analysis as an
+    from . import EchoDensity as ned
 
     num_rirs_total = len(rirs_dict)
     initial_legend_fontsize = None

@@ -3,7 +3,7 @@ import numpy as np
 from typing import List, Dict, Optional
 import geometry
 from geometry import Point
-import path_tracker
+from . import path_tracker
 from collections import defaultdict
 
 class PathCalculator(ABC):

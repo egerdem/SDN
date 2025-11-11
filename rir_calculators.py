@@ -9,7 +9,7 @@ from src import Signal as sig
 from src import Source as src
 from src import Microphone as mic
 from sdn_core import DelayNetwork
-from sdn_base import calculate_sdn_base_rir
+from archive.sdn_base import calculate_sdn_base_rir
 from scipy.signal import find_peaks
 
 def rir_normalisation(rirs_dict, room, Fs, normalize_to_first_impulse=True):

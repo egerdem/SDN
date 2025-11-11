@@ -2,7 +2,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import List, Dict, Tuple
 import numpy as np
-from spatial_analysis import generate_receiver_grid_old, generate_source_positions, print_receiver_grid
+from .spatial_analysis import generate_receiver_grid_old, generate_source_positions, print_receiver_grid
 
 @dataclass
 class Path:
@@ -214,9 +214,9 @@ class PathTracker:
             print(f"Order {order}: {count} valid paths")
 
 if __name__ == "__main__":
-    from sdn_path_calculator import SDNCalculator, ISMCalculator, PathCalculator
+    from .sdn_path_calculator import SDNCalculator, ISMCalculator, PathCalculator
     import geometry
-    import plot_room as pp
+    from . import plot_room as pp
     import matplotlib.pyplot as plt
 
     plot_arrival_times_per_order = False

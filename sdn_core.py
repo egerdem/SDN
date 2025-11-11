@@ -2,9 +2,8 @@ from collections import deque
 import numpy as np
 from typing import Dict, List, Optional
 from geometry import Room, get_best_node2node_targets, get_best_reflection_targets, build_specular_matrices_from_angles, get_image_sources
-from path_logger import PathLogger, PressurePacket, deque_plotter
 import matplotlib.pyplot as plt
-import specular_scattering_matrix as ssm
+from research import specular_scattering_matrix as ssm
 import random
 
 def random_wall_mapping(walls):

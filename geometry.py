@@ -101,7 +101,7 @@ class Source:
             signal = np.array([1.0] + [0.0] * (num_samples - 1))
         elif label == 'gaussian':
             # Generate Gaussian pulse
-            import frequency as ff
+            from analysis import frequency as ff
             signal = ff.gaussian_impulse(num_samples, num_gaussian_samples=30, std_dev=5, plot=False)
         else:
             raise ValueError('Invalid source label')
