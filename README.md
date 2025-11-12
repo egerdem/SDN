@@ -71,9 +71,9 @@ Edit `main.py` to select room and methods:
 room_parameters = room_aes  # or room_waspaa, room_journal
 
 # Enable methods
-RUN_SDN_Test5 = True           # SDN with sw sinjection c=5
-PLOT_ISM_rimPy_neg = True      # ISM rimpy with negative reflection coef (reference)
-RUN_MY_HO_SDN_n2_swc5 = True   # SW-HO-SDN order 2 with sw injection c=5
+- RUN_SDN_Test5 = True           # SDN with sw injection c=5
+- PLOT_ISM_rimPy_neg = True      # ISM rimpy with negative reflection coef (reference)
+- RUN_MY_HO_SDN_n2_swc5 = True   # SW-HO-SDN order 2 with sw injection c=5
 
 ## 📝 Research Focus
 
