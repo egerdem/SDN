@@ -16,7 +16,7 @@ from rir_calculators import calculate_pra_rir, calculate_rimpy_rir, calculate_sd
 from rir_calculators import calculate_ho_sdn_rir, rir_normalisation
 
 """ Method flags """
-PLOT_SDN_BASE = False
+PLOT_SDN_BASE = True
 
 t1,t2,t3,t4,t5 = False, False, False, False, False
 RUN_SDN_Test_2 = False
@@ -63,14 +63,14 @@ RUN_SDN_Test5c = False
 RUN_SDN_Test6c = False
 
 RUN_HO_N1 = False
-RUN_HO_N2 = True
+RUN_HO_N2 = False
 RUN_HO_N2g = False
-RUN_HO_N3 = True
+RUN_HO_N3 = False
 RUN_HO_N3g = False
 
-RUN_MY_HO_SDN_n1 = True # no source weighthing
-RUN_MY_HO_SDN_n2 = True
-RUN_MY_HO_SDN_n3 = True
+RUN_MY_HO_SDN_n1 = False # no source weighthing
+RUN_MY_HO_SDN_n2 = False
+RUN_MY_HO_SDN_n3 = False
 RUN_MY_HO_SDN_n2_swc5 = False
 RUN_MY_HO_SDN_n2_swc3 = False
 RUN_MY_HO_SDN_n3_swc3 = False
@@ -80,7 +80,7 @@ RUN_MY_HO_SDN_n2noatt = False # My new test flag for HO-SDN no att
 
 PLOT_TREBLE = False
 
-PLOT_ISM_with_pra = True
+PLOT_ISM_with_pra = False
 PLOT_ISM_with_pra_rand10 = False
 PLOT_ISM_rimPy_pos = False  # rimPy ISM with positive reflection
 PLOT_ISM_rimPy_pos_rand10 = False

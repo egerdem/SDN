@@ -266,7 +266,7 @@ def get_best_reflection_target(wall_id: str, mappings: Dict) -> str:
     return min(angles.items(), key=lambda x: x[1])[0]
 
 if __name__ == '__main__':
-    import plot_room as pp
+    from analysis import plot_room as pp
     
     # First print the specular matrices as before
     spec_mats = build_specular_matrices()
@@ -367,3 +367,63 @@ if __name__ == '__main__':
     plt.tight_layout()
     plt.show()
 """
+
+
+# ============================================================================
+# Experimental SDN Functions (moved from sdn_core.py)
+# ============================================================================
+
+def random_wall_mapping(walls):
+    """
+    ONLY USED if specular_source_injection_random flag is True.
+    Experiment for: RANDOM source injection, not used by the main SW-SDN
+    
+    Given a list of unique wall‐IDs, return a dict that maps each wall
+    to a different one, with no wall mapped to itself.
+    
+    >>> walls = ["e", "w", "s", "f", "n", "c"]
+    >>> random_wall_mapping(walls)
+    {'e': 'n', 'w': 'c', 's': 'e', 'f': 'w', 'n': 's', 'c': 'f'}
+    """
+    import random
+    
+    if len(set(walls)) != len(walls):
+        raise ValueError("Wall IDs must be unique")
+    
+    while True:
+        shuffled = walls[:]        # copy
+        random.shuffle(shuffled)   # in-place random permutation
+        
+        # keep the permutation only if nothing stayed in place
+        if all(orig != new for orig, new in zip(walls, shuffled)):
+            return dict(zip(walls, shuffled))
+
+
+def scattering_matrix_crate(increase_coef=0.2):
+    """
+    ONLY USED if scattering_matrix_update_coef flag is not None.
+    Experiment for: increasing the off-diagonal elements of the scattering matrix
+    and decreasing the others accordingly to compensate for the overall energy.
+    
+    Create a modified scattering matrix with adjusted diagonal and off-diagonal elements.
+    
+    Args:
+        increase_coef (float): Coefficient to adjust the matrix elements
+        
+    Returns:
+        np.ndarray: Modified scattering matrix
+    """
+    c = increase_coef
+    original_matrix = (2 / 5) * np.ones((5, 5)) - np.eye(5)
+    adjusted_matrix = np.copy(original_matrix)
+    
+    # Decrease diagonal elements by c
+    np.fill_diagonal(adjusted_matrix, adjusted_matrix.diagonal() - c)
+    
+    # Increase only off-diagonal elements by c/4
+    off_diagonal_mask = np.ones(adjusted_matrix.shape, dtype=bool)
+    np.fill_diagonal(off_diagonal_mask, False)
+    
+    # Add c/4 to only the off-diagonal elements
+    adjusted_matrix[off_diagonal_mask] += (c / 4)
+    return adjusted_matrix
