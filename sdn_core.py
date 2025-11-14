@@ -471,7 +471,7 @@ class DelayNetwork:
         """
         output_sample = 0.0
         self.n = n
-
+        # print(f"sample {n}")
         # ═══════════════════════════════════════════════════════════════════════════
         # STEP 0: propagate the DIRECT SOUND (0th order) to source_to_mic delay line
         # ═══════════════════════════════════════════════════════════════════════════
@@ -479,6 +479,9 @@ class DelayNetwork:
         self.source_to_mic["src_to_mic"].append(direct_sound)
         output_sample += self.source_to_mic["src_to_mic"][0]
 
+        if self.print_mic_pressures:
+            if self.source_to_mic["src_to_mic"][0] != 0.0:
+                print(f"direct sound pressure: {self.source_to_mic['src_to_mic'][0]}")
         # ═══════════════════════════════════════════════════════════════════════════
         # STEP 1: SOURCE INJECTION - Distribute input (source) to all scattering nodes
         # ═══════════════════════════════════════════════════════════════════════════
@@ -528,8 +531,7 @@ class DelayNetwork:
             # ─────────────────────────────────────────────────────────────────────────
             incoming_waves = []  # Will be size (N-1) array, e.g. 5 elements for 6-wall room
             other_nodes = []     # List of other wall IDs (excluding current wall)
-            psk = self.source_pressure_injection_coeff * source_pressure_at_wall  # Default: 0.5 * source_pressure, source pressure arriving at any (all) nodes (mostly zero except 
-            impulse sample)
+            psk = self.source_pressure_injection_coeff * source_pressure_at_wall  # Default: 0.5 * source_pressure, source pressure arriving at any (all) nodes (mostly zero except impulse sample)
 
             # Get both best and second-best targets
             targets = get_best_reflection_targets(wall_id, self.room.angle_mappings, num_targets=2)

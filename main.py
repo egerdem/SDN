@@ -1,9 +1,8 @@
 import numpy as np
 import geometry
 import matplotlib.pyplot as plt
-import pickle  # Added for loading pickled Treble RI
+import pickle 
 
-# Analysis tools
 from analysis import plot_room as pp
 from analysis import path_tracker
 from analysis.sdn_path_calculator import SDNCalculator, ISMCalculator, PathCalculator
@@ -11,12 +10,11 @@ from analysis import frequency as ff
 from analysis import EchoDensity as ned
 from analysis import analysis as an
 
-# RIR calculators
 from rir_calculators import calculate_pra_rir, calculate_rimpy_rir, calculate_sdn_rir
 from rir_calculators import calculate_ho_sdn_rir, rir_normalisation
 
 """ Method flags """
-PLOT_SDN_BASE = True
+PLOT_SDN_BASE = False
 
 t1,t2,t3,t4,t5 = False, False, False, False, False
 RUN_SDN_Test_2 = False
@@ -26,7 +24,7 @@ RUN_SDN_Test1 = True
 RUN_SDN_Test2 = False
 RUN_SDN_Test3 = False
 RUN_SDN_Test4 = False
-RUN_SDN_Test5 = False
+RUN_SDN_Test5 = True
 RUN_SDN_Test6 = False
 RUN_SDN_Test7 = False
 
@@ -68,9 +66,7 @@ RUN_HO_N2g = False
 RUN_HO_N3 = False
 RUN_HO_N3g = False
 
-RUN_MY_HO_SDN_n1 = False # no source weighthing
-RUN_MY_HO_SDN_n2 = False
-RUN_MY_HO_SDN_n3 = False
+RUN_MY_HO_SDN_n1 = False # My new test flag for HO-SDN
 RUN_MY_HO_SDN_n2_swc5 = False
 RUN_MY_HO_SDN_n2_swc3 = False
 RUN_MY_HO_SDN_n3_swc3 = False
@@ -81,7 +77,7 @@ RUN_MY_HO_SDN_n2noatt = False # My new test flag for HO-SDN no att
 PLOT_TREBLE = False
 
 PLOT_ISM_with_pra = False
-PLOT_ISM_with_pra_rand10 = False
+PLOT_ISM_with_pra_rand10 = True
 PLOT_ISM_rimPy_pos = False  # rimPy ISM with positive reflection
 PLOT_ISM_rimPy_pos_rand10 = False
 PLOT_ISM_rimPy_neg = False  # rimPy ISM with negative reflection
@@ -92,7 +88,7 @@ PICKLE_LOAD_RIRS = False # Load RIRs from pickle file
 # file_name = "rirs_c_cSN_cSPMAT_rimneg_ho3ho2.pkl"
 # file_name = "rirs_c_cSN_cSPMAT_rimneg_ho3ho2.pkl"
 # file_name = "rirs_c_cSN.pkl"
-file_name = "results/pra_n2swc3_n2swc5_n3_swc3_hoN2_hoN3_c5_c1.pkl"  #
+file_name = "pra_n2swc3_n2swc5_n3_swc3_hoN2_hoN3_c5_c1.pkl"  #
 
 """ Visualization flags """
 PLOT_ROOM = False  # 3D Room Visualisation
@@ -109,7 +105,7 @@ PLOT_FREQ = False  # Frequency response plot
 UNIFIED_PLOTS = True  # Flag to switch between unified and separated plots
 normalize_to_first_impulse = True  # Set this to True if you want to normalize to first impulse
 
-Print_RIR_comparison_metrics = False
+Print_RIR_comparison_metrics = True
 interactive_rirs = True  # Set to True to enable interactive RIR comparison
 pulse_analysis = "upto_4"
 plot_smoothed_rirs = False
@@ -157,10 +153,10 @@ room_journal = {
 #         'absorption': 0.1,
 #     }
 
-room_parameters = room_aes  # Choose the room
+# room_parameters = room_aes  # Choose the room
 # room_parameters = room_waspaa  # Choose the room
 # room_parameters = room_journal
-# room_parameters = room_aes_outliar
+room_parameters = room_aes_outliar
 
 # Parameters
 duration = 1  # seconds
@@ -661,27 +657,8 @@ sdn_tests = {
         # 'ignore_src_node_atten': True,
         # 'ignore_node_mic_atten': True,
         },
-        'label': "My ho 1 orj"
+        'label': "My ho 2"
     },
-
-    'TestHO_N2': {
-            'enabled': RUN_MY_HO_SDN_n2,
-            'info': "my ho",
-            'flags': {
-                'ho_sdn_order': 2,
-            },
-            'label': "My ho 2 orj"
-        },
-
-    'TestHO_N3': {
-            'enabled': RUN_MY_HO_SDN_n3,
-            'info': "my ho",
-            'flags': {
-                'ho_sdn_order': 3,
-            },
-            'label': "My ho 3 orj"
-        },
-
 
     'TestHO_N2_swc5': {
             'enabled': RUN_MY_HO_SDN_n2_swc5,
@@ -1086,112 +1063,33 @@ if __name__ == '__main__':
     method_pairs = get_method_pairs()
 
     if Print_RIR_comparison_metrics:
-        # Dictionary to store all RIR analyses
-        for rir_label, rir in rirs.items():
-            smoothed = an.calculate_smoothed_energy(rir, window_length=30, range=50, Fs=Fs)
-            early_energy, energy, ERR = an.calculate_err(rir, early_range=50, Fs=Fs)
-            c50 = an.compute_clarity_c50(rir, Fs=Fs)
-            c80 = an.compute_clarity_c80(rir, Fs=Fs)
-
-            rirs_analysis[rir_label] = {
-                "smoothed_energy": smoothed,
-                "early_energy": early_energy,
-                "energy": energy,
-                "ERR": ERR,
-                "c50": c50,
-                "c80": c80
-            }
-
-            print("\nEnergy Total {} = {:.3f}".format(rir_label, sum(energy)))
-            print("Energy 50ms {} = {:.3f}".format(rir_label, sum(early_energy)))
-            print("ERR: Energy50ms/EnergyTotal {} = {:.3f}".format(rir_label, ERR))
-            print("C50 {} = {:.3f}".format(rir_label, c50))
-            print("C80 {} = {:.3f}".format(rir_label, c80))
-
-        # Dictionary to store comparison results for both energy and smoothed signals
+        # Compute all RIR metrics in batch (moved to analysis.py)
+        rirs_analysis = an.compute_rir_metrics_batch(rirs, Fs)
+        
+        # Print individual RIR metrics
+        an.print_rir_metrics(rirs_analysis)
+        
+        # Store comparison results for both energy and smoothed signals
         comparison_results = {
             'early_energy': [],
             'smoothed_energy': []
         }
-
-        # Process energy signal comparisons
-        print("\n" + "=" * 130)
-        print(" " * 50 + "Energy (squared RIRs) Signal Comparison Results")
-        print("=" * 130)
-        print(f"{'Method Pair':<40} {'Rmse':>12} {'MAE':>12} {'Median':>12} {'Info':>20}")
-        print("-" * 130)
-
-        for pair_info in method_pairs:
-            l1, l2 = pair_info['label1'], pair_info['label2']
-
-            # Compare energy signals
-            energy1 = rirs_analysis[l1]['early_energy']
-            energy2 = rirs_analysis[l2]['early_energy']
-
-            # Store energy comparison results
-            energy_result = {
-                'pair': pair_info['pair'],
-                'info': pair_info['info'],
-                'rmse': an.compute_RMS(energy1, energy2, method="rmse", skip_initial_zeros=True),
-                'mae': an.compute_RMS(energy1, energy2, method="mae", skip_initial_zeros=True),
-                'median': an.compute_RMS(energy1, energy2, method="median", skip_initial_zeros=True)
-            }
-            comparison_results['early_energy'].append(energy_result)
-
-            # Print energy comparison results
-            print(f"{energy_result['pair']:<40} {energy_result['rmse']:12.6f} {energy_result['mae']:12.6f} "
-                  f"{energy_result['median']:12.6f}  {energy_result['info']:>20}")
-
-        print("=" * 130)
-
-        # Process smoothed signal comparisons
-        print("\n" + "=" * 130)
-        print(" " * 50 + "Smoothed (hann windowed squared RIRs) Signal Comparison Results")
-        print("=" * 130)
-        print(f"{'Method Pair':<40} {'Rmse':>12} {'MAE':>12} {'Median':>12} {'Info':>20}")
-        print("-" * 130)
-
-        for pair_info in method_pairs:
-            l1, l2 = pair_info['label1'], pair_info['label2']
-
-            # Compare smoothed signals
-            smoothed1 = rirs_analysis[l1]['smoothed_energy']
-            smoothed2 = rirs_analysis[l2]['smoothed_energy']
-
-            # Store smoothed comparison results
-            smoothed_result = {
-                'pair': pair_info['pair'],
-                'info': pair_info['info'],
-                'rmse': an.compute_RMS(smoothed1, smoothed2, method="rmse", skip_initial_zeros=True),
-                'mae': an.compute_RMS(smoothed1, smoothed2, method="mae", skip_initial_zeros=True),
-                'median': an.compute_RMS(smoothed1, smoothed2, method="median", skip_initial_zeros=True)
-            }
-            comparison_results['smoothed_energy'].append(smoothed_result)
-
-            # Print smoothed comparison results
-            print(f"{smoothed_result['pair']:<40} {smoothed_result['rmse']:12.6f} {smoothed_result['mae']:12.6f} "
-                  f"{smoothed_result['median']:12.6f}  {smoothed_result['info']:>20}")
-
-        print("=" * 130)
+        
+        # Compare energy signals between all pairs
+        energy_comparisons = an.compare_rir_pairs(rirs_analysis, method_pairs, comparison_type='early_energy')
+        comparison_results['early_energy'] = energy_comparisons
+        an.print_comparison_results(energy_comparisons, "Energy (squared RIRs) Signal Comparison Results")
+        
+        # Compare smoothed signals between all pairs
+        smoothed_comparisons = an.compare_rir_pairs(rirs_analysis, method_pairs, comparison_type='smoothed_energy')
+        comparison_results['smoothed_energy'] = smoothed_comparisons
+        an.print_comparison_results(smoothed_comparisons, "Smoothed (hann windowed squared RIRs) Signal Comparison Results")
+        
         print("\n")
-
-        # Compare all distinct pairs of EDCs
-        print("\nEDC Comparison (First 50ms RMSE Differences):")
-        print("-" * 50)
-
-        # Get all unique pairs of RIR labels
-        i = 0
-
-        for pair_info in get_method_pairs():
-            label1, label2 = pair_info['label1'], pair_info['label2']
-
-            # Calculate EDCs for both RIRs without plotting
-            edc1, _, _ = an.compute_edc(rirs[label1], Fs, label1, plot=False)
-            edc2, _, _ = an.compute_edc(rirs[label2], Fs, label2, plot=False)
-
-            # Compare EDCs
-            rms_diff = an.compute_RMS(edc1, edc2, range=50, Fs=Fs, method="mae", skip_initial_zeros=True)  # range=50ms
-            print(f"{label1} vs {label2}: {rms_diff:.2f} dB RMSE difference")
+        
+        # Compare EDCs between all pairs
+        edc_comparisons = an.compare_edc_pairs(rirs, get_method_pairs(), Fs)
+        an.print_edc_comparisons(edc_comparisons)
 
     if plot_smoothed_rirs:
         # Iterate through each method in rirs_analysis
@@ -1246,41 +1144,8 @@ if PLOT_ROOM:
         pp.plot_room(room)
 
 if pulse_analysis == "all":
-
-    print("\n=== RIR Pulse Analysis ===")
-    from scipy.signal import find_peaks
-
-    for rir_label, rir in rirs.items():
-        print(f"\n{rir_label}:")
-
-        if "ISM-pra" in rir_label:  # For PRA method, use peak detection
-            # Find peaks that are at least 1% of the maximum amplitude
-            threshold = 0.01 * np.max(np.abs(rir))
-            peaks, _ = find_peaks(np.abs(rir), height=threshold)
-
-            print(f"  Total significant peaks: {len(peaks)}")
-            print(f"  First peak at: {peaks[0] / Fs * 1000:.2f} ms")
-            print(f"  Last peak at: {peaks[-1] / Fs * 1000:.2f} ms")
-            print(f"  Time span: {(peaks[-1] - peaks[0]) / Fs * 1000:.2f} ms")
-
-        else:  # For other methods, use non-zero analysis
-            # Count total nonzero pulses (using small threshold to account for floating point)
-            threshold = 1e-10  # Adjust this threshold based on your needs
-            nonzero_indices = np.where(np.abs(rir) > threshold)[0]
-            nonzero_count = len(nonzero_indices)
-
-            # Calculate percentage of nonzero samples
-            percentage = (nonzero_count / len(rir)) * 100
-
-            # Find first and last nonzero indices
-            first_pulse = nonzero_indices[0] if nonzero_count > 0 else 0
-            last_pulse = nonzero_indices[-1] if nonzero_count > 0 else 0
-
-            print(f"  Total (nonzero) pulses: {nonzero_count}")
-            print(f"  Percentage of nonzero samples: {percentage:.2f}%")
-            print(f"  First pulse at: {first_pulse / Fs * 1000:.2f} ms")
-            print(f"  Last pulse at: {last_pulse / Fs * 1000:.2f} ms")
-            print(f"  Time span: {(last_pulse - first_pulse) / Fs * 1000:.2f} ms")
+    # Pulse analysis moved to analysis.py for better organization
+    pulse_results = an.analyze_rir_pulses(rirs, Fs, print_results=True)
 
 # import pickle
 # # # Save the RIRs to a file

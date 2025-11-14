@@ -858,3 +858,231 @@ def calculate_rt60_theoretical(room_dim, absorption):
     rt60_eyring = 0.161 * V / (-S * np.log(1 - absorption))
 
     return rt60_sabine, rt60_eyring
+
+
+def analyze_rir_pulses(rirs_dict, Fs, print_results=True):
+    """
+    Analyze pulse characteristics of RIRs (nonzero sample count, time span, etc.)
+    
+    For ISM-pra methods: uses peak detection
+    For other methods: counts nonzero samples
+    
+    Args:
+        rirs_dict: Dictionary of RIRs {label: rir_array}
+        Fs: Sampling frequency
+        print_results: If True, print analysis results
+        
+    Returns:
+        dict: Analysis results for each RIR
+    """
+    from scipy.signal import find_peaks
+    
+    results = {}
+    
+    if print_results:
+        print("\n=== RIR Pulse Analysis ===")
+    
+    for rir_label, rir in rirs_dict.items():
+        rir_results = {}
+        
+        if print_results:
+            print(f"\n{rir_label}:")
+        
+        if "ISM-pra" in rir_label:  # For PRA method, use peak detection
+            # Find peaks that are at least 1% of the maximum amplitude
+            threshold = 0.01 * np.max(np.abs(rir))
+            peaks, _ = find_peaks(np.abs(rir), height=threshold)
+            
+            rir_results['method'] = 'peak_detection'
+            rir_results['total_peaks'] = len(peaks)
+            rir_results['first_peak_sample'] = peaks[0] if len(peaks) > 0 else 0
+            rir_results['last_peak_sample'] = peaks[-1] if len(peaks) > 0 else 0
+            rir_results['first_peak_time_ms'] = peaks[0] / Fs * 1000 if len(peaks) > 0 else 0
+            rir_results['last_peak_time_ms'] = peaks[-1] / Fs * 1000 if len(peaks) > 0 else 0
+            rir_results['time_span_ms'] = (peaks[-1] - peaks[0]) / Fs * 1000 if len(peaks) > 0 else 0
+            
+            if print_results:
+                print(f"  Total significant peaks: {rir_results['total_peaks']}")
+                print(f"  First peak at: {rir_results['first_peak_time_ms']:.2f} ms")
+                print(f"  Last peak at: {rir_results['last_peak_time_ms']:.2f} ms")
+                print(f"  Time span: {rir_results['time_span_ms']:.2f} ms")
+        
+        else:  # For other methods, use non-zero analysis
+            # Count total nonzero pulses (using small threshold to account for floating point)
+            threshold = 1e-10  # Adjust this threshold based on your needs
+            nonzero_indices = np.where(np.abs(rir) > threshold)[0]
+            nonzero_count = len(nonzero_indices)
+            
+            # Calculate percentage of nonzero samples
+            percentage = (nonzero_count / len(rir)) * 100
+            
+            # Find first and last nonzero indices
+            first_pulse = nonzero_indices[0] if nonzero_count > 0 else 0
+            last_pulse = nonzero_indices[-1] if nonzero_count > 0 else 0
+            
+            rir_results['method'] = 'nonzero_analysis'
+            rir_results['total_nonzero_pulses'] = nonzero_count
+            rir_results['percentage_nonzero'] = percentage
+            rir_results['first_pulse_sample'] = first_pulse
+            rir_results['last_pulse_sample'] = last_pulse
+            rir_results['first_pulse_time_ms'] = first_pulse / Fs * 1000
+            rir_results['last_pulse_time_ms'] = last_pulse / Fs * 1000
+            rir_results['time_span_ms'] = (last_pulse - first_pulse) / Fs * 1000
+            
+            if print_results:
+                print(f"  Total (nonzero) pulses: {rir_results['total_nonzero_pulses']}")
+                print(f"  Percentage of nonzero samples: {rir_results['percentage_nonzero']:.2f}%")
+                print(f"  First pulse at: {rir_results['first_pulse_time_ms']:.2f} ms")
+                print(f"  Last pulse at: {rir_results['last_pulse_time_ms']:.2f} ms")
+                print(f"  Time span: {rir_results['time_span_ms']:.2f} ms")
+        
+        results[rir_label] = rir_results
+    
+    return results
+
+
+def compute_rir_metrics_batch(rirs_dict, Fs):
+    """
+    Compute comprehensive metrics for all RIRs in a batch.
+    
+    Computes: smoothed_energy, early_energy, energy, ERR, C50, C80
+    
+    Args:
+        rirs_dict: Dictionary of RIRs {label: rir_array}
+        Fs: Sampling frequency
+        
+    Returns:
+        dict: Nested dictionary {rir_label: {metric_name: value}}
+    """
+    rirs_analysis = {}
+    
+    for rir_label, rir in rirs_dict.items():
+        smoothed = calculate_smoothed_energy(rir, window_length=30, range=50, Fs=Fs)
+        early_energy, energy, ERR = calculate_err(rir, early_range=50, Fs=Fs)
+        c50 = compute_clarity_c50(rir, Fs=Fs)
+        c80 = compute_clarity_c80(rir, Fs=Fs)
+        
+        rirs_analysis[rir_label] = {
+            "smoothed_energy": smoothed,
+            "early_energy": early_energy,
+            "energy": energy,
+            "ERR": ERR,
+            "c50": c50,
+            "c80": c80
+        }
+    
+    return rirs_analysis
+
+
+def print_rir_metrics(rirs_analysis):
+    """
+    Print RIR metrics in a formatted way.
+    
+    Args:
+        rirs_analysis: Dictionary from compute_rir_metrics_batch()
+    """
+    for rir_label, metrics in rirs_analysis.items():
+        print(f"\nEnergy Total {rir_label} = {sum(metrics['energy']):.3f}")
+        print(f"Energy 50ms {rir_label} = {sum(metrics['early_energy']):.3f}")
+        print(f"ERR: Energy50ms/EnergyTotal {rir_label} = {metrics['ERR']:.3f}")
+        print(f"C50 {rir_label} = {metrics['c50']:.3f}")
+        print(f"C80 {rir_label} = {metrics['c80']:.3f}")
+
+
+def compare_rir_pairs(rirs_analysis, method_pairs, comparison_type='early_energy'):
+    """
+    Compare RIR pairs using RMSE, MAE, and Median metrics.
+    
+    Args:
+        rirs_analysis: Dictionary from compute_rir_metrics_batch()
+        method_pairs: List of pair dictionaries with 'label1', 'label2', 'pair', 'info'
+        comparison_type: 'early_energy' or 'smoothed_energy'
+        
+    Returns:
+        list: List of comparison result dictionaries
+    """
+    comparison_results = []
+    
+    for pair_info in method_pairs:
+        l1, l2 = pair_info['label1'], pair_info['label2']
+        
+        # Get the signals to compare
+        signal1 = rirs_analysis[l1][comparison_type]
+        signal2 = rirs_analysis[l2][comparison_type]
+        
+        # Compute metrics
+        result = {
+            'pair': pair_info['pair'],
+            'info': pair_info['info'],
+            'rmse': compute_RMS(signal1, signal2, method="rmse", skip_initial_zeros=True),
+            'mae': compute_RMS(signal1, signal2, method="mae", skip_initial_zeros=True),
+            'median': compute_RMS(signal1, signal2, method="median", skip_initial_zeros=True)
+        }
+        comparison_results.append(result)
+    
+    return comparison_results
+
+
+def print_comparison_results(comparison_results, title):
+    """
+    Print comparison results in formatted table.
+    
+    Args:
+        comparison_results: List of comparison dictionaries
+        title: Title for the comparison table
+    """
+    print("\n" + "=" * 130)
+    print(" " * 50 + title)
+    print("=" * 130)
+    print(f"{'Method Pair':<40} {'Rmse':>12} {'MAE':>12} {'Median':>12} {'Info':>20}")
+    print("-" * 130)
+    
+    for result in comparison_results:
+        print(f"{result['pair']:<40} {result['rmse']:12.6f} {result['mae']:12.6f} "
+              f"{result['median']:12.6f}  {result['info']:>20}")
+    
+    print("=" * 130)
+
+
+def compare_edc_pairs(rirs_dict, method_pairs, Fs):
+    """
+    Compare EDCs between RIR pairs.
+    
+    Args:
+        rirs_dict: Dictionary of RIRs {label: rir_array}
+        method_pairs: List of pair dictionaries with 'label1', 'label2'
+        Fs: Sampling frequency
+        
+    Returns:
+        dict: EDC comparison results {pair: rms_diff}
+    """
+    edc_comparisons = {}
+    
+    for pair_info in method_pairs:
+        label1, label2 = pair_info['label1'], pair_info['label2']
+        
+        # Calculate EDCs for both RIRs without plotting
+        edc1, _, _ = compute_edc(rirs_dict[label1], Fs, label1, plot=False)
+        edc2, _, _ = compute_edc(rirs_dict[label2], Fs, label2, plot=False)
+        
+        # Compare EDCs
+        rms_diff = compute_RMS(edc1, edc2, range=50, Fs=Fs, method="mae", skip_initial_zeros=True)
+        
+        pair_name = f"{label1} vs {label2}"
+        edc_comparisons[pair_name] = rms_diff
+    
+    return edc_comparisons
+
+
+def print_edc_comparisons(edc_comparisons):
+    """
+    Print EDC comparison results.
+    
+    Args:
+        edc_comparisons: Dictionary from compare_edc_pairs()
+    """
+    print("\nEDC Comparison (First 50ms RMSE Differences):")
+    print("-" * 50)
+    
+    for pair_name, rms_diff in edc_comparisons.items():
+        print(f"{pair_name}: {rms_diff:.2f} dB RMSE difference")
