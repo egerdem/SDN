@@ -5,11 +5,11 @@ energy–decay curve matches an Image‑Source‑Method reference.
 Run:  python optimize_cdom.py
 """
 import geometry
-import analysis as an
+from analysis import analysis as an
 from rir_calculators import calculate_pra_rir
 import numpy as np
 from scipy.optimize import minimize
-import plot_room as pp
+from analysis import plot_room as pp
 from sdn_core import DelayNetwork
 
 # ------------------------------------------------------------------

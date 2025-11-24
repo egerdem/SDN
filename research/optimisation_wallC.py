@@ -17,25 +17,31 @@ import numpy as np
 from scipy.optimize import minimize
 
 import geometry
-import analysis as an
-from rir_calculators import calculate_sdn_rir, rir_normalisation
+from analysis import analysis as an
+from rir_calculators import calculate_sdn_rir, calculate_sdn_rir_fast, rir_normalisation
 
 
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
-DATA_DIR = "results/paper_data"
+# Get absolute path to results directory (works regardless of where script is run from)
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_project_root = os.path.dirname(_script_dir)  # Go up one level from research/ to project root
+DATA_DIR = os.path.join(_project_root, "results", "paper_data")
 REFERENCE_METHOD = "RIMPY-neg10"
 ERROR_DURATION_MS = 50  # compare first 50 ms of the EDC
 
 # Bounds for each c parameter
 BOUNDS_VEC = [(1.0, 7.0)] * 6
 
+# Limit number of receivers for testing (set to None to use all)
+MAX_RECEIVERS = 16  # For trial runs, limit to first 2 receivers
+
 FILES_TO_PROCESS = [
-    # "aes_room_spatial_edc_data_center_source.npz",
+    "aes_room_spatial_edc_data_center_source.npz",
     # "aes_room_spatial_edc_data_lower_left_source.npz",
     # "aes_room_spatial_edc_data_top_middle_source.npz",
-    "aes_room_spatial_edc_data_upper_right_source.npz",
+    # "aes_room_spatial_edc_data_upper_right_source.npz",
 ]
 
 
@@ -85,14 +91,21 @@ def compute_dataset_rmse(c_vec: np.ndarray, dataset: dict, err_duration_ms: int,
     total_rmse = 0.0
     individual_rmses = []
 
-    receivers = dataset["receiver_positions"] #CHANGE THIS
+    receivers = dataset["receiver_positions"]
     ref_edcs = dataset["ref_edcs"]
+    
+    # Limit receivers for testing if MAX_RECEIVERS is set
+    if MAX_RECEIVERS is not None and len(receivers) > MAX_RECEIVERS:
+        receivers = receivers[:MAX_RECEIVERS]
+        ref_edcs = ref_edcs[:MAX_RECEIVERS]
+        print(f"  [Trial Mode] Limiting to first {MAX_RECEIVERS} receivers")
 
     for i, (rx, ry) in enumerate(receivers):
         room.set_microphone(rx, ry,  room_params["mic z"])
 
-        _, rir_sdn, _, _ = calculate_sdn_rir(room_params, "SDN-Opt", room,
-                                             duration, Fs, cfg)
+        # Use FAST method for instant reconstruction (basis functions cached per receiver)
+        _, rir_sdn, _, _ = calculate_sdn_rir_fast(room_params, "SDN-Opt", room,
+                                                   duration, Fs, cfg)
         rir_sdn_normed = rir_normalisation(
             rir_sdn, room, Fs, normalize_to_first_impulse=True
         )["single_rir"]
@@ -238,7 +251,12 @@ if __name__ == "__main__":
     print(header)
     print("-" * len(header))
     
-    for i in range(len(datasets[0]['receiver_positions'])):
+    # Determine number of receivers to display (respect MAX_RECEIVERS limit)
+    num_receivers = len(datasets[0]['receiver_positions'])
+    if MAX_RECEIVERS is not None:
+        num_receivers = min(num_receivers, MAX_RECEIVERS)
+    
+    for i in range(num_receivers):
         rx, ry = datasets[0]['receiver_positions'][i]
         row = f"Receiver {i+1:2d} ({rx:.2f},{ry:.2f})"
         for source_name in source_names:
@@ -247,7 +265,7 @@ if __name__ == "__main__":
         print(row)
     
     # Export to file
-    output_dir = "results/paper_data"
+    output_dir = DATA_DIR  # Use the same directory as input data
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, f"wall_c_vector_optimization_results_ref_{REFERENCE_METHOD}.txt")
     
@@ -261,7 +279,12 @@ if __name__ == "__main__":
         f.write(header + "\n")
         f.write("-" * len(header) + "\n")
         
-        for i in range(len(datasets[0]['receiver_positions'])):
+        # Determine number of receivers to display (respect MAX_RECEIVERS limit)
+        num_receivers = len(datasets[0]['receiver_positions'])
+        if MAX_RECEIVERS is not None:
+            num_receivers = min(num_receivers, MAX_RECEIVERS)
+        
+        for i in range(num_receivers):
             rx, ry = datasets[0]['receiver_positions'][i]
             row = f"Receiver {i+1:2d} ({rx:.2f},{ry:.2f})"
             for source_name in source_names:

@@ -2,7 +2,16 @@ import numpy as np
 import pyroomacoustics as pra
 from copy import deepcopy
 import sys
-sys.path.append('SDN-Simplest_Hybrid_HO-SDN/SDNPy')
+import os
+
+# Add SDNPy to path (works regardless of where script is run from)
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_sdnpy_path = os.path.join(_script_dir, 'SDN-Simplest_Hybrid_HO-SDN', 'SDNPy')
+if os.path.exists(_sdnpy_path):
+    sys.path.insert(0, _sdnpy_path)
+else:
+    raise ImportError(f"SDNPy directory not found at: {_sdnpy_path}")
+
 from src import Simulation_HO_SDN_centroid as sim_HO_SDN_centroid
 from src import Geometry as geom
 from src import Signal as sig
@@ -11,6 +20,45 @@ from src import Microphone as mic
 from sdn_core import DelayNetwork
 from archive.sdn_base import calculate_sdn_base_rir
 from scipy.signal import find_peaks
+
+# Global Cache for Basis Functions
+# Keys: tuple(room_dims, src_pos, mic_pos, Fs, duration, absorption, mode)
+# Values: (rir_base, rir_shape_or_slopes)
+_BASIS_CACHE = {}
+
+# Cache file path for persistence across runs
+_CACHE_DIR = os.path.join(_script_dir, "results", "basis_cache")
+_CACHE_FILE = os.path.join(_CACHE_DIR, "basis_functions_cache.pkl")
+
+def _load_basis_cache():
+    """Load basis function cache from disk."""
+    global _BASIS_CACHE
+    if os.path.exists(_CACHE_FILE):
+        try:
+            import pickle
+            with open(_CACHE_FILE, 'rb') as f:
+                _BASIS_CACHE = pickle.load(f)
+            print(f"  [Cache] Loaded {len(_BASIS_CACHE)} cached basis function sets from disk")
+        except Exception as e:
+            print(f"  [Cache] Warning: Could not load cache file: {e}")
+            _BASIS_CACHE = {}
+    else:
+        _BASIS_CACHE = {}
+
+def _save_basis_cache():
+    """Save basis function cache to disk."""
+    global _BASIS_CACHE
+    try:
+        import pickle
+        os.makedirs(_CACHE_DIR, exist_ok=True)
+        with open(_CACHE_FILE, 'wb') as f:
+            pickle.dump(_BASIS_CACHE, f)
+        # print(f"  [Cache] Saved {len(_BASIS_CACHE)} basis function sets to disk")
+    except Exception as e:
+        print(f"  [Cache] Warning: Could not save cache file: {e}")
+
+# Load cache on module import
+_load_basis_cache()
 
 def rir_normalisation(rirs_dict, room, Fs, normalize_to_first_impulse=True):
     """
@@ -140,8 +188,7 @@ def calculate_rimpy_rir(room_parameters, duration, Fs, reflection_sign, tw_fract
     Returns:
         tuple: (normalized RIR, room object)
     """
-    import sys
-    sys.path.append('SDN-Simplest_Hybrid_HO-SDN/SDNPy')
+    # SDNPy path is already added at module level, but ensure it's available
     from rimPypack import rimPy as rimpy
 
     # Room dimensions for rimPy
@@ -239,6 +286,121 @@ def calculate_sdn_rir(room_parameters, test_name, room, duration, Fs, config):
         label += f': {config["info"]}'
     
     return sdn, rir, label, is_default
+
+def calculate_sdn_rir_fast(room_parameters, test_name, room, duration, Fs, config):
+    """
+    Calculate RIR using FAST SDN (Analytic Reconstruction).
+    Uses caching to store Basis Functions (R(0) and R(1)-R(0)).
+    
+    Handles both scalar 'source_weighting' and vector 'injection_c_vector'.
+    
+    Args:
+        Same as calculate_sdn_rir
+    """
+    global _BASIS_CACHE
+    
+    flags = config.get('flags', {})
+    
+    # Determine mode: Scalar or Vector
+    is_vector_mode = 'injection_c_vector' in flags
+    
+    if is_vector_mode:
+        mode_key = "vector"
+        requested_c = flags.get('injection_c_vector')
+        # Ensure it's a list/array of 6 floats
+        if not isinstance(requested_c, (list, np.ndarray)) or len(requested_c) != 6:
+             assert False, f"Fast SDN Vector mode requires list of 6 coefficients. Got {requested_c}. Fallback to scalar 1.0"
+             
+    else:
+        mode_key = "scalar"
+        requested_c = flags.get('source_weighting')
+
+    # Construct Cache Key (Geometry + Absorption + Duration + Mode)
+    cache_key = (
+        room_parameters['width'], room_parameters['depth'], room_parameters['height'],
+        round(room.source.srcPos.x, 3), round(room.source.srcPos.y, 3), round(room.source.srcPos.z, 3),
+        round(room.micPos.x, 3), round(room.micPos.y, 3), round(room.micPos.z, 3),
+        Fs, duration, room_parameters.get('absorption'), mode_key
+    )
+    
+    # --- VECTOR MODE (Optimisation Wall C) ---
+    if is_vector_mode:
+        if cache_key in _BASIS_CACHE:
+            # print("  [FastSDN-Vector] Using Cached Basis Functions")
+            rir_base, rir_slopes = _BASIS_CACHE[cache_key]
+        else:
+            print("  [FastSDN-Vector] Cache Miss - Pre-computing 7 Basis Functions...")
+            
+            # 1. Baseline (All c=0)
+            cfg_base = deepcopy(config)
+            
+            cfg_base['flags']['injection_c_vector'] = [0.0] * 6
+            
+            _, rir_base, _, _ = calculate_sdn_rir(room_parameters, test_name, room, duration, Fs, cfg_base)
+            
+            rir_slopes = []
+            num_walls = 6
+            
+            # 2. Wall Slopes (One c=1, others c=0)
+            for i in range(num_walls):
+                # Activate wall i
+                c_vec = [0.0] * num_walls
+                c_vec[i] = 1.0
+                
+                cfg_i = deepcopy(config)
+                cfg_i['flags']['injection_c_vector'] = c_vec
+                cfg_i['label'] = f"Basis_{i}"
+                
+                _, rir_i, _, _ = calculate_sdn_rir(room_parameters, f"Basis{i}", room, duration, Fs, cfg_i)
+                
+                # Slope for wall i = R(e_i) - R(0)
+                slope_i = rir_i - rir_base
+                rir_slopes.append(slope_i)
+            
+            rir_slopes = np.array(rir_slopes)
+            _BASIS_CACHE[cache_key] = (rir_base, rir_slopes)
+            _save_basis_cache()  # Persist to disk
+            
+        # Reconstruction: R(c) = R(0) + sum(c_i * Slope_i)
+        # Use tensordot for weighted sum of arrays
+        weighted_slopes = np.tensordot(requested_c, rir_slopes, axes=([0], [0]))
+        rir = rir_base + weighted_slopes
+        label = f'SDN-FAST-Vec-{test_name}'
+        if 'info' in config:
+            label += f': {config["info"]}'
+
+    # --- SCALAR MODE (Uniform C) ---
+    else:
+        if cache_key in _BASIS_CACHE:
+            # print("  [FastSDN-Scalar] Using Cached Basis Functions")
+            rir_base, rir_shape = _BASIS_CACHE[cache_key]
+        else:
+            print("  [FastSDN-Scalar] Cache Miss - Pre-computing 2 Basis Functions...")
+            
+            # Basis 1: c=0
+            cfg_0 = deepcopy(config)
+            cfg_0['flags']['source_weighting'] = 0.0
+            cfg_0['label'] = "Basis_0"
+            
+            # Basis 2: c=1
+            cfg_1 = deepcopy(config)
+            cfg_1['flags']['source_weighting'] = 1.0
+            cfg_1['label'] = "Basis_1"
+            
+            _, rir_0, _, _ = calculate_sdn_rir(room_parameters, "Basis0", room, duration, Fs, cfg_0)
+            _, rir_1, _, _ = calculate_sdn_rir(room_parameters, "Basis1", room, duration, Fs, cfg_1)
+            
+            rir_shape = rir_1 - rir_0
+            
+            _BASIS_CACHE[cache_key] = (rir_0, rir_shape)
+            _save_basis_cache()  # Persist to disk
+            rir_base = rir_0
+            
+        # Reconstruction: R(c) = R(0) + c * (R(1) - R(0))
+        rir = rir_base + (requested_c * rir_shape)
+        label = f"SDN-FAST-{test_name}: c={requested_c}"
+    
+    return None, rir, label, False
 
 def calculate_ho_sdn_rir(room_parameters, Fs, duration, source_signal='dirac', order=None):
     import geometry

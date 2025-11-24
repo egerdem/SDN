@@ -182,11 +182,12 @@ if __name__ == '__main__':
     print("L2 Norm square of outputs:", np.round(norm_out_sq, 3))
     print("L2 Norm square of input incoming wave vector", np.round(norm_inj_sq, 3))
 
-    # w = np.array([0.4,0.4,0.4,0.4, 0.4])
+    w = np.array([2.5,2.5,0,0,0])
     # v = np.ones(5)
-    # S = scat()
+    S = scat()
     # w @ S @ v
-
+    out = S @ w
+    print("Output weighted:", np.round(out,3))
     # def f_perm(i, N=6):
     #     f = (6*i -((i-1)%N-1) ) % (N*(N-1)) + 1
     #     return(f)

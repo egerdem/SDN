@@ -3,11 +3,11 @@ import os
 import json
 from typing import Dict, List, Tuple
 import geometry
-import analysis as an
-import EchoDensity as ned
+from analysis import analysis as an
+from analysis import EchoDensity as ned
 from rir_calculators import calculate_pra_rir, calculate_sdn_rir, calculate_ho_sdn_rir, calculate_rimpy_rir, rir_normalisation
 import pyroomacoustics as pra
-from spatial_analysis import generate_receiver_grid_old, generate_source_positions
+from analysis.spatial_analysis import generate_receiver_grid_old, generate_source_positions
 
 def calculate_and_save_data(room_params: dict, source_pos: Tuple[float, float, float],
                               receiver_positions: List[Tuple[float, float]],

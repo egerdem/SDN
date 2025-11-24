@@ -1,7 +1,7 @@
 from collections import deque
 import numpy as np
 from typing import Dict, List, Optional
-from geometry import Room, get_best_node2node_targets, get_best_reflection_targets, build_specular_matrices_from_angles, get_image_sources
+from geometry import Room, get_best_node2node_targets, get_best_reflection_targets, build_specular_matrices_from_angles, get_image_sources, Point
 import matplotlib.pyplot as plt
 from research import specular_scattering_matrix as ssm
 
@@ -40,6 +40,7 @@ class DelayNetwork:
                  print_weighted_psk: bool = False,
                  normalize_to_first_impulse: bool = False,
                  ho_sdn_order: Optional[int] = None,
+                 disable_recursive: bool = False,
                  label: str = ""):
         """Initialize SDN with test flags.
         
@@ -60,7 +61,15 @@ class DelayNetwork:
         self.room = room
         self.Fs = Fs
         self.c = c
-        self.source_pressure_injection_coeff = source_pressure_injection_coeff
+        # Handle source_pressure_injection_coeff as list or float
+        if isinstance(source_pressure_injection_coeff, (list, np.ndarray)):
+             if len(source_pressure_injection_coeff) != len(room.walls):
+                 raise ValueError(f"source_pressure_injection_coeff list length ({len(source_pressure_injection_coeff)}) must match number of walls ({len(room.walls)})")
+             self.source_pressure_injection_coeff = source_pressure_injection_coeff
+        else:
+             # Convert single float to list for uniform handling
+             self.source_pressure_injection_coeff = [source_pressure_injection_coeff] * len(room.walls)
+             
         self.coef = coef
         self.source_weighting = source_weighting
         self.injection_c_vector = injection_c_vector
@@ -81,7 +90,11 @@ class DelayNetwork:
         self.print_weighted_psk = print_weighted_psk
         self.specular_increase_coef = specular_increase_coef
         self.ho_sdn_order = ho_sdn_order
+        self.disable_recursive = disable_recursive
         self.source_trial_injection = source_trial_injection
+
+        if disable_recursive:
+            print("⚠️ DEBUG MODE: Recursive network disabled (no node-to-node scattering)")
         # Override wall attenuation if ignore_wall_absorption is True
         if self.ignore_wall_absorption:
             self.room.wallAttenuation = [1.0] * len(self.room.wallAttenuation)
@@ -131,6 +144,9 @@ class DelayNetwork:
             # Order-N reflections feed the SDN network
             self.sdn_feeding_paths = [img for img in all_image_sources if img['order'] == self.ho_sdn_order]
             self.ho_source_to_nodes = {}  # Format: "src_img_{img_idx}_to_{wall_id}"
+
+            # NEW: Calculate effective node positions for HO-SDN
+            self.ho_node_positions = self._calculate_ho_node_positions()
         else:
             self.early_reflection_paths = []
             self.sdn_feeding_paths = []
@@ -284,6 +300,43 @@ class DelayNetwork:
         """
         return build_specular_matrices_from_angles(self.room)
 
+    def _calculate_ho_node_positions(self) -> Dict[str, Point]:
+        """
+        Calculate effective node positions (centroids) for HO-SDN.
+        
+        For each wall, averages the last bounce points of all Nth order paths 
+        ending at that wall. These centroids are used for:
+        - Nth order path delays (alpha_k = delta_true - beta_k)
+        - Nth order path attenuation (g_Sk uses alpha_k, g_kR uses beta_k)
+        - Recursive network delays (node-to-node, node-to-mic)
+        - Recursive network gains (for reflections of order >= N)
+        
+        β_k MUST be common (centroid-based) because node-to-mic gain is shared
+        across ALL signals leaving that node in the recursive network.
+        
+        Returns:
+            Dict[str, Point]: {wall_id: centroid_of_last_bounces}
+        """
+
+        ho_nodes = {}
+        
+        for wall_id in self.room.walls:
+            # Alternative (N):
+            paths_for_wall = [p for p in self.sdn_feeding_paths if p['path'][-1] == wall_id]
+
+            
+            if len(paths_for_wall) > 0:
+                # Calculate average position
+                avg_x = sum(p['last_bounce'].x for p in paths_for_wall) / len(paths_for_wall)
+                avg_y = sum(p['last_bounce'].y for p in paths_for_wall) / len(paths_for_wall)
+                avg_z = sum(p['last_bounce'].z for p in paths_for_wall) / len(paths_for_wall)
+                
+                ho_nodes[wall_id] = Point(avg_x, avg_y, avg_z)
+            else:
+                raise ValueError(f"No (N)th order paths found for wall {wall_id}")
+        
+        return ho_nodes
+
     def _setup_delay_lines(self):
         """Initialize all delay lines in the network."""
 
@@ -311,9 +364,10 @@ class DelayNetwork:
                 
                 # Correct delay calculation for the source-to-node path (alpha_k)
                 # alpha_k = delta_true - beta_k
-                delta_true = img_info['position'].getDistance(self.room.micPos)
-                beta_k = wall.node_positions.getDistance(self.room.micPos)
-                alpha_k_dist = delta_true - beta_k
+                delta_true = img_info['position'].getDistance(self.room.micPos) # image source to mic distance
+                # beta_k = wall.node_positions.getDistance(self.room.micPos) # BEFORE TOKYO, using original singular node positions
+                beta_k = self.ho_node_positions[last_wall_id].getDistance(self.room.micPos) # NEW: using effective node positions for HO-SDN // # node to mic distance
+                alpha_k_dist = delta_true - beta_k # sum of all previous bounce legs (source to node)
 
                 # Ensure delay is not negative due to geometric/numerical precision issues
                 if alpha_k_dist < 0:
@@ -334,13 +388,15 @@ class DelayNetwork:
 
                 self.source_to_nodes[key] = deque([0.0] * delay_src2node, maxlen=delay_src2node)
 
-        # Nodes to microphone (common for both standard and HO-SDN)
+        # Nodes to microphone (HO-SDN needs centroid of all (N)th order paths)
         for wall_id, wall in self.room.walls.items():
             key = f"{wall_id}_to_mic"
-            dist = wall.node_positions.getDistance(self.room.micPos)
+            if self.ho_sdn_order is not None:
+                dist = self.ho_node_positions[wall_id].getDistance(self.room.micPos)
+            else:
+                dist = wall.node_positions.getDistance(self.room.micPos)
             delay_w2mic = round((self.Fs * dist) / self.c)
             setattr(self, f'{wall_id}_to_mic_delay', delay_w2mic)
-
             self.node_to_mic[key] = deque([0.0] * delay_w2mic, maxlen=delay_w2mic)
 
         # NODE to NODE DELAY LINES
@@ -348,7 +404,10 @@ class DelayNetwork:
             self.node_to_node[wall1_id] = {}
             for wall2_id, wall2 in self.room.walls.items():
                 if wall1_id != wall2_id:
-                    dist = wall1.node_positions.getDistance(wall2.node_positions)
+                    if self.ho_sdn_order is not None:
+                        dist = self.ho_node_positions[wall1_id].getDistance(self.ho_node_positions[wall2_id])
+                    else:
+                        dist = wall1.node_positions.getDistance(wall2.node_positions)
                     delay_samples = round((self.Fs * dist) / self.c)
 
                     self.node_to_node[wall1_id][wall2_id] = deque([0.0] * delay_samples, maxlen=delay_samples)
@@ -471,7 +530,7 @@ class DelayNetwork:
         """
         output_sample = 0.0
         self.n = n
-        # print(f"sample {n}")
+
         # ═══════════════════════════════════════════════════════════════════════════
         # STEP 0: propagate the DIRECT SOUND (0th order) to source_to_mic delay line
         # ═══════════════════════════════════════════════════════════════════════════
@@ -479,9 +538,6 @@ class DelayNetwork:
         self.source_to_mic["src_to_mic"].append(direct_sound)
         output_sample += self.source_to_mic["src_to_mic"][0]
 
-        if self.print_mic_pressures:
-            if self.source_to_mic["src_to_mic"][0] != 0.0:
-                print(f"direct sound pressure: {self.source_to_mic['src_to_mic'][0]}")
         # ═══════════════════════════════════════════════════════════════════════════
         # STEP 1: SOURCE INJECTION - Distribute input (source) to all scattering nodes
         # ═══════════════════════════════════════════════════════════════════════════
@@ -531,7 +587,18 @@ class DelayNetwork:
             # ─────────────────────────────────────────────────────────────────────────
             incoming_waves = []  # Will be size (N-1) array, e.g. 5 elements for 6-wall room
             other_nodes = []     # List of other wall IDs (excluding current wall)
-            psk = self.source_pressure_injection_coeff * source_pressure_at_wall  # Default: 0.5 * source_pressure, source pressure arriving at any (all) nodes (mostly zero except impulse sample)
+            
+            # Previously:
+            # psk = self.source_pressure_injection_coeff * source_pressure_at_wall
+            # Now:
+            # Get injection coefficient for this specific wall
+            # Assuming wall iteration order matches the list order. 
+            # Note: room.walls is a dict. In Python 3.7+ insertion order is preserved.
+            # Ideally we should map wall_id to index. 
+            wall_index = list(self.room.walls.keys()).index(wall_id)
+            p_inj_coeff = self.source_pressure_injection_coeff[wall_index]
+            
+            psk = p_inj_coeff * source_pressure_at_wall  # Default: 0.5 * source_pressure, source pressure arriving at any (all) nodes (mostly zero except the impulse)
 
             # Get both best and second-best targets
             targets = get_best_reflection_targets(wall_id, self.room.angle_mappings, num_targets=2)
@@ -548,7 +615,11 @@ class DelayNetwork:
                     other_nodes.append(other_id)  # Add this line to collect other_nodes
                     # Read from delay line and add half of source pressure
 
-                    pki_pressure = self.node_to_node[other_id][wall_id][0]  # incoming wave from other node at n
+                    # Disable node-to-node connections if requested (for debugging)
+                    if self.disable_recursive:
+                        pki_pressure = 0.0
+                    else:
+                        pki_pressure = self.node_to_node[other_id][wall_id][0]  # incoming wave from other node at n
 
                     if self.specular_source_injection or self.specular_source_injection_random:
                         if psk != 0.0: # change the source injection distribution. new approach.
@@ -636,13 +707,16 @@ class DelayNetwork:
             else: # Use default scattering matrix (identity or diffuse)
                 self.instant_outgoing_waves = np.dot(self.scattering_matrix, incoming_waves)
 
+            # PREVIOUSLY :
             # Create diagonal attenuation matrix with wall-specific attenuation values
-            attenuation_values = [self.room.wallAttenuation[self.room.walls[other_id].wall_index] for other_id in other_nodes]
-            att = np.diag(attenuation_values)
+            #attenuation_values = [self.room.wallAttenuation[self.room.walls[other_id].wall_index] for other_id in other_nodes]
+            #att = np.diag(attenuation_values)
             # Apply attenuation matrix to the scattered waves
-            self.instant_outgoing_waves = np.dot(att, self.instant_outgoing_waves)
-
-            all_zero = all(element == 0 for element in self.instant_outgoing_waves)
+            #self.instant_outgoing_waves = np.dot(att, self.instant_outgoing_waves)
+            
+            # Apply current wall's attenuation to all outgoing waves
+            current_wall_attenuation = self.room.wallAttenuation[self.room.walls[wall_id].wall_index]
+            self.instant_outgoing_waves = self.instant_outgoing_waves * current_wall_attenuation
 
             # ─────────────────────────────────────────────────────────────────────────
             # STEP 2d: Store outgoing waves (will be used in Step 3 to update delay lines)
@@ -709,33 +783,56 @@ class DelayNetwork:
             self.early_reflection_gains = {}
 
             # 1. Attenuation for early reflections (order < N), direct to mic
-            # Gain is 1/distance
+            # Gain is 1/distance, plus wall attenuation for each bounce
             for i, path_info in enumerate(self.early_reflection_paths):
                 dist = path_info['position'].getDistance(self.room.micPos)
+                order = path_info['order']
                 key = f"early_path_{i}"
-                self.early_reflection_gains[key] = (G / dist) if not self.ignore_src_node_atten else 1.0
+                
+                base_gain = (G / dist) if not self.ignore_src_node_atten else 1.0
+                
+                # Apply wall attenuation for all bounces (these bypass the SDN network)
+                if not self.ignore_wall_absorption and order > 0:
+                    wall_atten = self.room.wallAttenuation[0] ** order
+                    base_gain *= wall_atten
+                
+                self.early_reflection_gains[key] = base_gain
 
 
             # 2. Attenuation for SDN-feeding paths (order N)
+            # Must use CENTROID geometry because β_k is shared across all recursive reflections
             for i, img_info in enumerate(self.sdn_feeding_paths):
                 last_wall_id = img_info['path'][-1]
-                node_pos = self.room.walls[last_wall_id].node_positions
+                order = img_info['order']  # N
                 
-                alpha = node_pos.getDistance(img_info['position'])
-                beta = node_pos.getDistance(self.room.micPos)
+                delta_true = img_info['position'].getDistance(self.room.micPos)  # True total path
+
+                # β_k: Distance from centroid to receiver (COMMON to all paths ending at this wall)
+                beta_k = self.ho_node_positions[last_wall_id].getDistance(self.room.micPos)
+                alpha_k = delta_true - beta_k  # Corrected α_k
 
                 key = f"sdn_feed_path_{i}_to_{last_wall_id}"
-                # Formula from analysis of Simulation_HO_SDN_centroid.py
-                # Total gain = G / (alpha + beta).
-                # Here we use the g_sk = 1/(1+alpha/beta) split from the paper, but multiply by G
-                # to match the reference implementation's spherical spreading loss model.
-                self.ho_source_to_node_gains[key] = (G / (1.0 + alpha / beta)) if not self.ignore_src_node_atten else 1.0
+                
+                # Base spherical spreading gain: g_Sk = G/(1 + α_k/β_k)
+                base_gain = (G / (1.0 + alpha_k / beta_k)) if not self.ignore_src_node_atten else 1.0
+                
+                # Apply wall attenuation for (N-1) bounces (before entering the SDN network)
+                # The Nth bounce will be handled by the SDN node's wall filter
+                if not self.ignore_wall_absorption and order > 1:
+                    # Get wall attenuation from the path
+                    # For simplicity, use uniform attenuation (could be improved to track per-wall)
+                    wall_atten = self.room.wallAttenuation[0] ** (order - 1)
+                    # wall_atten = 1
+                    base_gain *= wall_atten
+                
+                self.ho_source_to_node_gains[key] = base_gain
 
-            # 3. Node-to-mic gain (one per node), g_kr = 1/beta
-            # The reference code uses 1/beta, not G/beta. We follow that.
+            # 3. Node-to-mic gain (one per node), g_kR = 1/β_k
+            # β_k is COMMON to all reflections (Nth order AND recursive) leaving this node
             for wall_id, wall in self.room.walls.items():
                 mic_key = f"{wall_id}_to_mic"
-                beta = wall.node_positions.getDistance(self.room.micPos)
+                # Use centroid position (shared across all signals from this node)
+                beta = self.ho_node_positions[wall_id].getDistance(self.room.micPos)
                 self.node_to_mic_gains[mic_key] = (1.0 / beta) if not self.ignore_node_mic_atten else 1.0
 
         else:

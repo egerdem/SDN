@@ -2,11 +2,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 from typing import Dict, List, Tuple
-import analysis as an
+from analysis import analysis as an
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import json
 
-from plotting_utils import (
+from analysis.plotting_utils import (
     load_data, 
     get_display_name, 
     DISPLAY_NAME_MAP

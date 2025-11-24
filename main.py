@@ -10,23 +10,36 @@ from analysis import frequency as ff
 from analysis import EchoDensity as ned
 from analysis import analysis as an
 
-from rir_calculators import calculate_pra_rir, calculate_rimpy_rir, calculate_sdn_rir
+from rir_calculators import calculate_pra_rir, calculate_rimpy_rir, calculate_sdn_rir, calculate_sdn_rir_fast
 from rir_calculators import calculate_ho_sdn_rir, rir_normalisation
 
 """ Method flags """
 PLOT_SDN_BASE = False
 
+# tests
+wall1, wall2, wall3, wall4, wall5, wall6 = False, False, False, False, False, False
+t1111, t111, t11 = False, False, False
 t1,t2,t3,t4,t5 = False, False, False, False, False
+s1, s2 = True, True
 RUN_SDN_Test_2 = False
 RUN_SDN_Test_3 = False
-RUN_SDN_Test0 = False
-RUN_SDN_Test1 = True
-RUN_SDN_Test2 = False
+RUN_SDN_Test0 = True   
+RUN_SDN_Test1 = True # = Original
+RUN_SDN_Test2 = True
 RUN_SDN_Test3 = False
 RUN_SDN_Test4 = False
 RUN_SDN_Test5 = True
 RUN_SDN_Test6 = False
 RUN_SDN_Test7 = False
+
+
+RUN_SDN_Test1_FAST = False
+RUN_SDN_Test2_FAST = True 
+RUN_SDN_Test3_FAST = False
+RUN_SDN_Test4_FAST = False
+RUN_SDN_Test5_FAST = True
+RUN_SDN_Test6_FAST = False
+RUN_SDN_Test7_FAST = False
 
 RUN_SDN_Test3r = False
 RUN_SDN_Test4r = False
@@ -67,6 +80,8 @@ RUN_HO_N3 = False
 RUN_HO_N3g = False
 
 RUN_MY_HO_SDN_n1 = False # My new test flag for HO-SDN
+RUN_MY_HO_SDN_n2 = False
+RUN_MY_HO_SDN_n3 = False
 RUN_MY_HO_SDN_n2_swc5 = False
 RUN_MY_HO_SDN_n2_swc3 = False
 RUN_MY_HO_SDN_n3_swc3 = False
@@ -77,7 +92,7 @@ RUN_MY_HO_SDN_n2noatt = False # My new test flag for HO-SDN no att
 PLOT_TREBLE = False
 
 PLOT_ISM_with_pra = False
-PLOT_ISM_with_pra_rand10 = True
+PLOT_ISM_with_pra_rand10 = False
 PLOT_ISM_rimPy_pos = False  # rimPy ISM with positive reflection
 PLOT_ISM_rimPy_pos_rand10 = False
 PLOT_ISM_rimPy_neg = False  # rimPy ISM with negative reflection
@@ -153,10 +168,10 @@ room_journal = {
 #         'absorption': 0.1,
 #     }
 
-# room_parameters = room_aes  # Choose the room
+room_parameters = room_aes  # Choose the room
 # room_parameters = room_waspaa  # Choose the room
 # room_parameters = room_journal
-room_parameters = room_aes_outliar
+# room_parameters = room_aes_outliar
 
 # Parameters
 duration = 1  # seconds
@@ -257,22 +272,62 @@ ism_methods = {
 # SDN Test Configurations
 sdn_tests = {
 
-    '11': {'enabled': False,
-              'info': "c [3.87694432 3.91420138 4.00285606 3.99207621 4.02144006 4.01794584]",
+    's1': {'enabled': s1, 'use_fast_method': True,
+              'info': "var new",
               'flags': {
                   'specular_source_injection': True,
-                    'injection_c_vector':[3.87694432, 3.91420138, 4.00285606, 3.99207621, 4.02144006, 4.01794584],
+                    'injection_c_vector':[1.5, 4.5, 0.8, 5.3, 2.1, 3.9],
+
               }, 'label': "SDN"},
 
-    '1111': {'enabled': t1,
-                  'info': "c1 [1,1,1,1,1,1] src-mic gain:1",
+    's2': {'enabled': s2,
+                  'info': "var legacy",
                   'flags': {
                       'specular_source_injection': True,
-                        'injection_c_vector': [1, 1, 1, 1, 1,1],
-                      'ignore_src_node_atten': True,
+                        'injection_c_vector':[1.5, 4.5, 0.8, 5.3, 2.1, 3.9],
                   }, 'label': "SDN"},
 
-    '111': {'enabled': t1,
+    'wall1': {'enabled': wall1,
+                  'info': "[1,0,0,0,0]",
+                  'flags': {
+                      'specular_source_injection': True,
+                        'injection_vector': [1,0,0,0,0],
+                  }, 'label': "SDN"},
+
+    'wall2': {'enabled': wall2,
+                      'info': "[0,1,0,0,0]",
+                      'flags': {
+                          'specular_source_injection': True,
+                            'injection_vector': [0,1,0,0,0],
+                      }, 'label': "SDN"},
+
+    'wall3': {'enabled': wall3,
+                        'info': "[0,0,1,0,0]",
+                        'flags': {
+                            'specular_source_injection': True,
+                              'injection_vector': [0,0,1,0,0],
+                        }, 'label': "SDN"},
+
+    'wall4': {'enabled': wall4,
+                            'info': "[0,0,0,1,0]",
+                            'flags': {
+                                'specular_source_injection': True,
+                                  'injection_vector': [0,0,0,1,0],
+                            }, 'label': "SDN"},
+    'wall5': {'enabled': wall5,
+                              'info': "[0,0,0,0,1]",
+                              'flags': {
+                                  'specular_source_injection': True,
+                                    'injection_vector': [0,0,0,0,1],
+                              }, 'label': "SDN"},
+    'wall6': {'enabled': wall6,
+                                'info': "[0,0,0,0,0,1]",
+                                'flags': {
+                                    'specular_source_injection': True,
+                                      'injection_vector': [0,0,0,0,0,1],
+                                }, 'label': "SDN"},
+
+    '111': {'enabled': t111,
             'info': "c1 [1,1,1,1,1,1] node-mic gain:1",
             'flags': {
                 'specular_source_injection': True,
@@ -281,11 +336,10 @@ sdn_tests = {
             }, 'label': "SDN"},
 
     '1': {'enabled': t1,
-          'info': "c5 [5,1,1,1,1,1]",
+          'info': "t1",
           'flags': {
               'specular_source_injection': True,
-                'injection_c_vector': [5, 1, 1, 1, 1,1],
-              'print_weighted_psk': True,
+            # 'source_pressure_injection_coeff': [0.5,0,0,0,0,0],
           }, 'label': "SDN"},
 
     '2': {'enabled': t2,
@@ -362,6 +416,11 @@ sdn_tests = {
                         'specular_source_injection': True,
                         'source_weighting': 2,
                     }, 'label': "SDN"},
+    
+    'T2F': {'enabled': RUN_SDN_Test2_FAST, 'use_fast_method': True, 'info': "c2 Fast", 'flags': {
+                    'specular_source_injection': True,
+                    'source_weighting': 2,
+                }, 'label': "SDN"},
 
     'Test3': {'enabled': RUN_SDN_Test3,'info': "c3",'flags': {
                       'specular_source_injection': True,
@@ -377,6 +436,11 @@ sdn_tests = {
                     'specular_source_injection': True,
                     'source_weighting': 5,
                 }, 'label': "SDN Test 5"},
+                
+    'T5F': {'enabled': RUN_SDN_Test5_FAST, 'use_fast_method': True, 'info': "c5 Fast", 'flags': {
+                    'specular_source_injection': True,
+                    'source_weighting': 5,
+                }, 'label': "SDN"},
 
     'Test6': {'enabled': RUN_SDN_Test6, 'info': "c6", 'flags': {
                     'specular_source_injection': True,
@@ -467,11 +531,10 @@ sdn_tests = {
 
     'Test-3np': {
         'enabled': RUN_SDN_Test0,
-        'info': "c-3 specular NODE!",
+        'info': "c0",
         'flags': {
             'specular_source_injection': True,
-            'source_weighting': -3,
-            'specular_node_pressure': True,
+            'source_weighting': 0,
         },
         'label': "SDN"
     },
@@ -657,8 +720,31 @@ sdn_tests = {
         # 'ignore_src_node_atten': True,
         # 'ignore_node_mic_atten': True,
         },
-        'label': "My ho 2"
+        'label': "My ho 1"
     },
+
+    'TestHO_N2': {
+            'enabled': RUN_MY_HO_SDN_n2,
+            'info': "my ho",
+            'flags': {
+                'ho_sdn_order': 2,
+            'disable_recursive': False,
+            # 'ignore_wall_absorption': True,
+            # 'ignore_src_node_atten': True,
+            # 'ignore_node_mic_atten': True,
+            },
+            'label': "My ho 2"
+        },
+
+    'TestHO_N3': {
+            'enabled': RUN_MY_HO_SDN_n3,
+            'info': "my ho",
+            'flags': {
+                'ho_sdn_order': 3,
+        'disable_recursive': False,
+            },
+            'label': "My ho 3"
+        },
 
     'TestHO_N2_swc5': {
             'enabled': RUN_MY_HO_SDN_n2_swc5,
@@ -778,7 +864,11 @@ def run_sdn_test(test_name, config):
             room.source.signal = impulse_dirac['signal']
             print(f"Using Dirac impulse for {test_name}")
 
-    sdn, rir, label, is_default = calculate_sdn_rir(room_parameters, test_name, room, duration, Fs, config)
+    if config.get('use_fast_method', False):
+         print(f"--- Running {test_name} with FAST method (Analytic Reconstruction) ---")
+         sdn, rir, label, is_default = calculate_sdn_rir_fast(room_parameters, test_name, room, duration, Fs, config)
+    else:
+         sdn, rir, label, is_default = calculate_sdn_rir(room_parameters, test_name, room, duration, Fs, config)
 
     if 'source_signal' in config:
         room.source.signal = original_signal
@@ -974,15 +1064,17 @@ if __name__ == '__main__':
                 threshold = 0  # threshold for considering a sample nonzero
 
                 # For SDN original
-                sdn_rir = rirs['SDN-Original:  ']
-                sdn_nonzero = np.sum(np.abs(sdn_rir[:sample_idx_3rd]) > threshold)
-                print(f"\nSDN nonzero samples up to 4rd order ({arrival_time_3rd:.3f}s): {sdn_nonzero}")
+                sdn_rir = rirs.get('SDN-Original:  ')
+                if sdn_rir is not None:
+                     sdn_nonzero = np.sum(np.abs(sdn_rir[:sample_idx_3rd]) > threshold)
+                     print(f"\nSDN nonzero samples up to 4rd order ({arrival_time_3rd:.3f}s): {sdn_nonzero}")
 
                 # For ISM rimPy negative
 
-                ism_rir = rirs['ISM-rimpy-negREF']
-                ism_nonzero = np.sum(np.abs(ism_rir[:sample_idx_3rd]) > threshold)
-                print(f"ISM-rimpy-neg nonzero samples up to 4rd order ({arrival_time_3rd:.3f}s): {ism_nonzero}")
+                ism_rir = rirs.get('ISM-rimpy-negREF')
+                if ism_rir is not None:
+                    ism_nonzero = np.sum(np.abs(ism_rir[:sample_idx_3rd]) > threshold)
+                    print(f"ISM-rimpy-neg nonzero samples up to 4rd order ({arrival_time_3rd:.3f}s): {ism_nonzero}")
 
                 # Print valid ISM paths count
                 path_tracker.print_valid_paths_count(4)

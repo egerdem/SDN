@@ -752,7 +752,11 @@ def get_image_sources(room: Room, max_order: int) -> List[Dict]:
 
     Returns:
         List[Dict]: A list of valid image source information, where each entry is a
-                    dictionary with 'position', 'order', and 'path'.
+                    dictionary with:
+                    - 'position': Point - Image source position
+                    - 'order': int - Reflection order
+                    - 'path': List[str] - Path sequence (e.g., ['s', 'west', 'floor'])
+                    - 'last_bounce': Point - Last intersection point (on the last wall)
     """
     valid_image_sources = []
     
@@ -797,6 +801,7 @@ def get_image_sources(room: Room, max_order: int) -> List[Dict]:
 
                 # Validate the path by checking each bounce point
                 is_path_valid = True
+                last_bounce_point = None  # NEW: Store the last bounce point
                 
                 # The principle: trace from the receiver back to the source,
                 # ensuring each bounce is valid.
@@ -818,6 +823,10 @@ def get_image_sources(room: Room, max_order: int) -> List[Dict]:
                     if not wall.is_point_within_bounds(intersection):
                         is_path_valid = False
                         break
+                    
+                    # NEW: Store the first intersection (which is the last bounce in forward time)
+                    if i == 0:
+                        last_bounce_point = intersection
 
                     # Prepare for the next iteration in the backward trace
                     current_point = intersection
@@ -845,7 +854,8 @@ def get_image_sources(room: Room, max_order: int) -> List[Dict]:
                     new_source = {
                         'position': final_image_source_pos,
                         'order': order,
-                        'path': list(new_path_tuple)
+                        'path': list(new_path_tuple),
+                        'last_bounce': last_bounce_point  # NEW: Add last bounce point
                     }
                     valid_image_sources.append(new_source)
                     next_q.append(new_source)

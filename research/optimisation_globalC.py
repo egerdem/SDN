@@ -15,14 +15,17 @@ import numpy as np
 from scipy.optimize import minimize_scalar
 
 import geometry
-import analysis as an
+from analysis import analysis as an
 from rir_calculators import calculate_sdn_rir, rir_normalisation
 
 
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
-DATA_DIR = "results/paper_data"
+# Get absolute path to results directory (works regardless of where script is run from)
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_project_root = os.path.dirname(_script_dir)  # Go up one level from research/ to project root
+DATA_DIR = os.path.join(_project_root, "results", "paper_data")
 REFERENCE_METHOD = "RIMPY-neg10"
 ERROR_DURATION_MS = 50  # compare first 50 ms of the EDC
 
@@ -200,9 +203,9 @@ if __name__ == "__main__":
         print(row)
     
     # Export to file
-    output_dir = "results/paper_data"
+    output_dir = DATA_DIR  # Use the same directory as input data
     os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, f"global_optimization_results_c_{optimal_c:.3f}_ref_{REFERENCE_METHOD}.txt")
+    output_path = os.path.join(output_dir, f"optimization_globSINGLE_c_{optimal_c:.3f}_ref_{REFERENCE_METHOD}.txt")
     
     with open(output_path, 'w') as f:
         f.write("--- SDN GLOBAL SOURCE-WEIGHTING OPTIMIZATION RESULTS ---\n")

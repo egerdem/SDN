@@ -4,7 +4,7 @@ import os
 from typing import Dict, List
 
 # Import shared functions and variables from our new utility module
-from plotting_utils import (
+from analysis.plotting_utils import (
     load_data, 
     get_display_name, 
     get_linestyle, 
@@ -18,8 +18,8 @@ from plotting_utils import (
 
 if __name__ == "__main__":
     # --- FIGURE GENERATION SETUP ---
-    data_dir = "results/paper_data"
-    output_dir = "results/paper_figures"
+    data_dir = "../results/paper_data"
+    output_dir = "../results/paper_figures"
     os.makedirs(output_dir, exist_ok=True)
 
     # Load the pre-calculated reflection times for all rooms
