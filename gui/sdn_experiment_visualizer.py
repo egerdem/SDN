@@ -9,8 +9,8 @@ import analysis as an
 import io
 import base64
 import soundfile as sf
-import plot_room as pp
-import EchoDensity as ned
+from analysis import plot_room as pp
+from analysis import EchoDensity as ned
 import plotly.express as px
 from scipy.signal import convolve
 import time
@@ -67,9 +67,9 @@ class ExperimentVisualizer:
         
         # Import analysis modules and store them as class attributes
         # This makes them accessible in callback functions via self
-        import plot_room as pp
-        import EchoDensity as ned
-        import analysis as an
+        from analysis import plot_room as pp
+        from analysis import EchoDensity as ned
+        from analysis import analysis as an
         self.pp = pp
         self.ned = ned
         self.an = an

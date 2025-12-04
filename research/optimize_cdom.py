@@ -48,16 +48,16 @@ room_journal = {
         'absorption': 0.1,
     }
 
-def construct_room_object(params, Fs=44100, source_signal=impulse_dirac['signal']):
+def construct_room_object(room_params, Fs=44100, source_signal=impulse_dirac['signal']):
     """Constructs a Room object from the given room parameters."""
-    room = geometry.Room(params['width'], params['depth'], params['height'])
-    room.set_microphone(params['mic x'], params['mic y'], params['mic z'])
-    room.set_source(params['source x'], params['source y'], params['source z'],
+    room = geometry.Room(room_params['width'], room_params['depth'], room_params['height'])
+    room.set_microphone(room_params['mic x'], room_params['mic y'], room_params['mic z'])
+    room.set_source(room_params['source x'], room_params['source y'], room_params['source z'],
                     signal="will be replaced", Fs=Fs)
-    room_dim = np.array([params['width'], params['depth'], params['height']])
+    room_dim = np.array([room_params['width'], room_params['depth'], room_params['height']])
     room.source.signal = source_signal
-    params['reflection'] = np.sqrt(1 - params['absorption'])
-    room.wallAttenuation = [params['reflection']] * 6
+    room_params['reflection'] = np.sqrt(1 - room_params['absorption'])
+    room.wallAttenuation = [room_params['reflection']] * 6
     return room, room_dim
 
 room_parameters = room_aes

@@ -1,11 +1,11 @@
 import numpy as np
 import os
 from scipy import signal
-import analysis as an
-import plot_room as pp
+from analysis import analysis as an
+from analysis import plot_room as pp
 import geometry
 from rir_calculators import calculate_ho_sdn_rir, rir_normalisation
-from plotting_utils import load_data, get_display_name, DISPLAY_NAME_MAP
+from analysis.plotting_utils import load_data, get_display_name, DISPLAY_NAME_MAP
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -357,7 +357,7 @@ def print_comparison_table(final_edcs, ref_method, cutoff_freqs, exclude_methods
 
 if __name__ == "__main__":
     # Configuration
-    DATA_DIR = "results/paper_data"
+    DATA_DIR = "../results/paper_data"
     FILES_TO_PROCESS = ["aes_room_spatial_edc_data.npz"]
     METHODS_TO_PROCESS = ['RIMPY-neg10', "SDN-Test1",
                           "SDN-Test5","SDN-Test6",

@@ -12,13 +12,23 @@ the same optimisation bounds of 1 to 7 (future work may extend this to
 import os
 from functools import partial
 from copy import deepcopy
+import sys
+from scipy.optimize import basinhopping, differential_evolution
+
+# Add project root to path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 from scipy.optimize import minimize
 
 import geometry
 from analysis import analysis as an
-from rir_calculators import calculate_sdn_rir, calculate_sdn_rir_fast, rir_normalisation
+from rir_calculators import (
+    calculate_sdn_rir,
+    calculate_sdn_rir_fast,
+    rir_normalisation,
+    enable_basis_disk_cache,
+)
 
 
 # -----------------------------------------------------------------------------
@@ -39,9 +49,9 @@ MAX_RECEIVERS = 16  # For trial runs, limit to first 2 receivers
 
 FILES_TO_PROCESS = [
     "aes_room_spatial_edc_data_center_source.npz",
-    # "aes_room_spatial_edc_data_lower_left_source.npz",
-    # "aes_room_spatial_edc_data_top_middle_source.npz",
-    # "aes_room_spatial_edc_data_upper_right_source.npz",
+    "aes_room_spatial_edc_data_lower_left_source.npz",
+    "aes_room_spatial_edc_data_top_middle_source.npz",
+    "aes_room_spatial_edc_data_upper_right_source.npz",
 ]
 
 
@@ -54,6 +64,7 @@ def load_dataset(path: str):
     with np.load(path, allow_pickle=True) as data:
         room_params = data["room_params"][0]
         dataset = {
+            "name": os.path.splitext(os.path.basename(path))[0],
             "room_params": room_params,
             "source_pos": data["source_pos"],
             "receiver_positions": data["receiver_positions"],
@@ -102,6 +113,8 @@ def compute_dataset_rmse(c_vec: np.ndarray, dataset: dict, err_duration_ms: int,
 
     for i, (rx, ry) in enumerate(receivers):
         room.set_microphone(rx, ry,  room_params["mic z"])
+        cache_label = f"{dataset.get('name', 'dataset')}_rx{i:02d}"
+        cfg['cache_label'] = cache_label
 
         # Use FAST method for instant reconstruction (basis functions cached per receiver)
         _, rir_sdn, _, _ = calculate_sdn_rir_fast(room_params, "SDN-Opt", room,
@@ -119,14 +132,48 @@ def compute_dataset_rmse(c_vec: np.ndarray, dataset: dict, err_duration_ms: int,
         )
         total_rmse += rmse
         individual_rmses.append(rmse)
-        print(f"Receiver {i + 1}/{len(receivers)}, ({rx:.2f},{ry:.2f}): RMSE = {rmse:.6f}")
+        # print(f"Receiver {i + 1}/{len(receivers)}, ({rx:.2f},{ry:.2f}): RMSE = {rmse:.6f}")
 
     mean_rmse = total_rmse / len(receivers)
-    print(f"Mean RMSE for source at {dataset['source_pos']}: {mean_rmse:.6f}")
+    print(f"Mean RMSE for source at {dataset['source_pos']}: {mean_rmse:.6f}\n")
     if return_individual:
         return mean_rmse, individual_rmses
 
     return mean_rmse
+
+
+def compute_total_cost(c_vec: np.ndarray, datasets: list, err_duration_ms: int,
+                       base_cfg: dict, reg_weight: float = 0.0) -> float:
+    """
+    Objective: mean RMSE + Regularization.
+
+    reg_weight: Penalizes differences between wall coefficients.
+                If reg_weight > 0, the optimizer favors symmetric/uniform c-vectors
+                when RMSEs are otherwise identical.
+    """
+    sum_rmse = 0.0
+    total_receivers = 0
+
+    # 1. Compute standard RMSE
+    for ds in datasets:
+        # We can call the existing helper, but we need to ensure it doesn't print too much
+        # during optimization if workers > 1
+        rmse = compute_dataset_rmse(c_vec, ds, err_duration_ms, base_cfg)
+        n_rx = len(ds["receiver_positions"])
+        sum_rmse += rmse * n_rx
+        total_receivers += n_rx
+
+    mean_rmse = sum_rmse / total_receivers
+
+    # 2. Add Regularization (Penalty for high variance among walls)
+    # This solves the "non-uniqueness" problem where [4,2] might be equal to [2,4]
+    # It biases the search towards [3,3] if the error is the same.
+    variance_penalty = np.std(c_vec) * reg_weight
+
+    # You could also penalize large magnitude: + np.mean(c_vec) * 0.001
+
+    total_cost = mean_rmse + variance_penalty
+    return total_cost
 
 
 def compute_total_rmse(c_vec: np.ndarray, datasets: list, err_duration_ms: int,
@@ -141,7 +188,6 @@ def compute_total_rmse(c_vec: np.ndarray, datasets: list, err_duration_ms: int,
         n_rx = len(ds["receiver_positions"])
         sum_rmse += rmse * n_rx
         sum_receivers += n_rx
-        print(f"  RMSE for this dataset: {rmse:.6f}, ")
 
     return sum_rmse / sum_receivers
 
@@ -150,6 +196,8 @@ def compute_total_rmse(c_vec: np.ndarray, datasets: list, err_duration_ms: int,
 # Main optimisation
 # -----------------------------------------------------------------------------
 if __name__ == "__main__":
+    # Enable disk caching of basis functions for optimisation runs
+    enable_basis_disk_cache()
     datasets = []
     for fname in FILES_TO_PROCESS:
         fpath = os.path.join(DATA_DIR, fname)
@@ -168,14 +216,17 @@ if __name__ == "__main__":
     }
 
     obj = partial(
-        compute_total_rmse,
+        compute_total_rmse, #compute_total_cost
         datasets=datasets,
         err_duration_ms=ERROR_DURATION_MS,
         base_cfg=base_cfg,
+        # reg_weight=0.0,  # Regularization weight
     )
 
-    x0 = np.full(6, 1.24)
+    # x0 = np.full(6, 1.24)
+    # x0 = np.array([3.21,7.00,3.14,1.09,7.00,1.02])
 
+    # TWO-STAGE NELDER-MEAD APPROACH
     # print("--- Starting Nelder-Mead Optimization ---")
     # result = minimize(
     #     obj,
@@ -183,7 +234,7 @@ if __name__ == "__main__":
     #     method="Nelder-Mead",  # <<< Change the method here
     #     bounds=BOUNDS_VEC,
     #     # A generous tolerance might be needed for such a long function
-    #     options={"maxiter": 10, "xatol": 1e-3, "fatol": 1e-3, "adaptive": True},
+    #     options={"maxiter": 500, "xatol": 1e-3, "fatol": 1e-3, "adaptive": True},
     # )
 
     # best_x0_from_stage_1 = [4.6895261,  6.29991025, 1.08560566, 6.97723387, 1.10307365, 1.9357747]
@@ -196,32 +247,49 @@ if __name__ == "__main__":
     #     options={"xatol": 1e-1, "fatol": 1e-1, "adaptive": True},  # Use a slightly tighter tolerance
     # )
 
-
-    # # Define a callback to see progress
-    from scipy.optimize import basinhopping
-    def print_fun(x, f, accepted):
-        print(f"At minimum {x} with value {f}, accepted: {bool(accepted)}")
-
-
-    # Configure the local minimizer to be used for each "hop"
-    minimizer_kwargs = {
-        "method": "Nelder-Mead",  # Using Nelder-Mead for local search is robust
-        "bounds": BOUNDS_VEC,
-        "options": {"xatol": 1e-1, "fatol": 1e-1, "adaptive": True}
-    }
-
-    print("--- Starting Basin-Hopping Optimization ---")
-    result = basinhopping(
+    # DIFFERENTIAL EVOLUTION APPROACH
+    # Robust, global optimizer. Does not require an initial guess (x0).
+    print(f"--- Starting Differential Evolution Optimization ---")
+    print(f"Bounds: {BOUNDS_VEC}")
+    print(f"Processing {len(datasets)} datasets...")
+    result = differential_evolution(
         obj,
-        x0,
-        minimizer_kwargs=minimizer_kwargs,
-        niter=5,  # Number of basin-hopping iterations
-        callback=print_fun,
+        bounds=BOUNDS_VEC,
+        strategy='best1bin',  # Default strategy, good balance
+        maxiter=5,  # Max generations (increase if not converging)
+        popsize=15,  # Population size multiplier (15*6 = 90 candidates)
+        tol=0.01,  # Tolerance for convergence
+        mutation=(0.5, 1),  # Mutation factor
+        recombination=0.7,  # Crossover probability
+        disp=True,  # Print progress
+        polish=True  # Perform a final local minimization (L-BFGS-B) at the end
     )
+
+    # BASIN-HOPPING APPROACH
+    # def print_fun(x, f, accepted):
+    #     print(f"At minimum {x} with value {f}, accepted: {bool(accepted)}")
+    #
+    #
+    # # Configure the local minimizer to be used for each "hop"
+    # minimizer_kwargs = {
+    #     "method": "Nelder-Mead",  # Using Nelder-Mead for local search is robust
+    #     "bounds": BOUNDS_VEC,
+    #     "options": {"xatol": 1e-1, "fatol": 1e-1, "adaptive": True}
+    # }
+    #
+    # print("--- Starting Basin-Hopping Optimization ---")
+    # result = basinhopping(
+    #     obj,
+    #     x0,
+    #     minimizer_kwargs=minimizer_kwargs,
+    #     niter=5,  # Number of basin-hopping iterations
+    #     callback=print_fun,
+    # )
 
     optimal_c_vec = result.x
     print("Optimal c vector:", np.round(optimal_c_vec, 3))
-    # print(f"Mean RMSE: {result.fun:.6f}")
+    print(f"Final Cost (RMSE ): {result.fun:.6f}")
+
 
     # Collect individual RMSE results for export
     all_results = {}
@@ -262,12 +330,20 @@ if __name__ == "__main__":
         for source_name in source_names:
             rmse = all_results[source_name]['individual_rmses'][i]
             row += f" | {rmse:>15.6f}"
-        print(row)
+        # print(row)
+
+    #print the mean
+    print(f"\nOptimal c vector: {c_vec_str}, Global Mean RMSE: {result.fun:.6f}")
     
     # Export to file
+    if len(source_names) > 1:
+        file_prefix = "multi_source"
+    else:
+        file_prefix = source_names[0].split()[0].lower()
+        
     output_dir = DATA_DIR  # Use the same directory as input data
     os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, f"wall_c_vector_optimization_results_ref_{REFERENCE_METHOD}.txt")
+    output_path = os.path.join(output_dir, f"{file_prefix}_wall_c_vector_opt_ref_{REFERENCE_METHOD}.txt")
     
     with open(output_path, 'w') as f:
         f.write("--- SDN WALL C-VECTOR OPTIMIZATION RESULTS ---\n")
@@ -276,8 +352,16 @@ if __name__ == "__main__":
         f.write(f"Optimal c vector: {c_vec_str}, Global Mean RMSE: {result.fun:.6f}\n")
         f.write("="*100 + "\n\n")
         
+        # Add Mean column to header
+        header = f"{'Method':<25}"
+        for source_name in source_names:
+            header += f" | {source_name}"
+        header += f" | {'Mean':>15}"
+        
         f.write(header + "\n")
         f.write("-" * len(header) + "\n")
+        print(header)
+        print("-" * len(header))
         
         # Determine number of receivers to display (respect MAX_RECEIVERS limit)
         num_receivers = len(datasets[0]['receiver_positions'])
@@ -287,10 +371,19 @@ if __name__ == "__main__":
         for i in range(num_receivers):
             rx, ry = datasets[0]['receiver_positions'][i]
             row = f"Receiver {i+1:2d} ({rx:.2f},{ry:.2f})"
+            
+            row_values = []
             for source_name in source_names:
                 rmse = all_results[source_name]['individual_rmses'][i]
+                row_values.append(rmse)
                 row += f" | {rmse:>15.6f}"
+            
+            # Calculate and append mean
+            row_mean = sum(row_values) / len(row_values)
+            row += f" | {row_mean:>15.6f}"
+            
             f.write(row + "\n")
+            print(row)
     
     print(f"\n--- Results exported to: {output_path} ---")
 

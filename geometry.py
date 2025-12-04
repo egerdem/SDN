@@ -47,11 +47,13 @@ class Room:
     def set_source(self, sx, sy, sz, signal=None, Fs=44100):
         """Set source position and optionally its signal."""
         self.source = Source(sx, sy, sz, signal, Fs)
+        self.sdn_nodes_calculated = False  # Force recalculation
         self._try_calculate_sdn_nodes()  # Try to calculate nodes if mic is already set
 
     def set_microphone(self, mx, my, mz):
         """Set microphone position."""
         self.micPos = Point(mx, my, mz)
+        self.sdn_nodes_calculated = False  # Force recalculation
         self._try_calculate_sdn_nodes()  # Try to calculate nodes if source is already set
 
     def _try_calculate_sdn_nodes(self):

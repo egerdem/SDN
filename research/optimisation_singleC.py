@@ -4,15 +4,38 @@ by comparing its EDCs against pre-calculated reference EDCs from spatial data fi
 
 This script iterates through multiple data files (each representing a different
 source position) and finds the optimal 'c' value for each one.
+
+Now uses FAST caching mechanism to avoid recalculating RIRs on every iteration.
+
+RELATIONSHIP TO optimisation_globalC.py:
+----------------------------------------
+This script finds a separate optimal 'c' for each source position, while
+optimisation_globalC.py finds one global 'c' that works across all sources.
+
+IDENTICAL/SIMILAR FUNCTIONS WITH optimisation_globalC.py:
+----------------------------------------------------------
+1. compute_spatial_rmse() - Core logic is identical to compute_dataset_rmse() 
+   in optimisation_globalC.py. Both functions:
+   - Take a c value and compute SDN RIRs for all receiver positions
+   - Calculate EDCs and compare against reference EDCs
+   - Return mean RMSE (and optionally individual RMSEs)
+   - Use FAST method with caching
+   - Main difference: compute_spatial_rmse() takes individual parameters, while 
+     compute_dataset_rmse() takes a dataset dict
+
 """
 import os
+import sys
+
+# Add project root to path BEFORE other imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import numpy as np
-from scipy.optimize import basinhopping
+from scipy.optimize import basinhopping, minimize_scalar, differential_evolution
 import geometry
 from analysis import analysis as an
-from rir_calculators import calculate_sdn_rir, rir_normalisation
+from rir_calculators import calculate_sdn_rir_fast, rir_normalisation, enable_basis_disk_cache, calculate_sdn_rir
 from functools import partial
-from scipy.optimize import minimize_scalar
 from analysis import plot_room as pp
 import matplotlib.pyplot as plt
 from copy import deepcopy
@@ -25,29 +48,32 @@ DATA_DIR = os.path.join(_project_root, "results", "paper_data")
 REFERENCE_METHOD = 'RIMPY-neg10'
 err_duration_ms = 50  # 50 ms
 
+# --- Optimizer Selection ---
+OPTIMIZER = 'minimize_scalar'  # Options: 'minimize_scalar', 'basin_hopping', 'differential_evolution'
+BOUNDS = (1.0, 7.0)  # Bounds for c parameter
+
 # List of data files to process. Each will be optimized independently.
 FILES_TO_PROCESS = [
-    "aes_room_spatial_edc_data_center_source.npz",
+    # "aes_room_spatial_edc_data_center_source.npz",
     "aes_room_spatial_edc_data_top_middle_source.npz",
-    "aes_room_spatial_edc_data_upper_right_source.npz",
-    "aes_room_spatial_edc_data_lower_left_source.npz",
+    # "aes_room_spatial_edc_data_upper_right_source.npz",
+    # "aes_room_spatial_edc_data_lower_left_source.npz",
 ]
 
 # --- Objective Function ---
-def compute_spatial_rmse(c_val, room, room_parameters, sdn_config, ref_edcs, receiver_positions, duration, Fs, err_duration_ms, return_individual=False):
+def compute_spatial_rmse(c_val, room, room_parameters, sdn_config, ref_edcs, receiver_positions, duration, Fs, err_duration_ms, source_name, return_individual=False):
     """
     Calculates the mean RMSE across all receiver positions for a given 'c' value.
     This is the objective function for the optimizer.
+    Uses FAST method with caching.
     """
     # Optimizer may pass c as an array, e.g., [3.14]
-    # c_scalar = c_val[0] if isinstance(c_val, (np.ndarray, list)) else c_val
     c_scalar = np.squeeze(c_val).item()
 
     # Update the source weighting in the SDN configuration for this evaluation
     cfg = deepcopy(sdn_config)
-    cfg['flags']['source_weighting'] = c_scalar
-
-    # sdn_config['flags']['source_weighting'] = c_scalar
+    cfg['flags']['source_weighting'] = c_scalar.__round__(4)
+    cfg['use_fast_method'] = False  # Enable fast method
     cfg['label'] = f'SDN-SW-c_{c_scalar:.2f}'
 
     total_rmse = 0.0
@@ -59,13 +85,17 @@ def compute_spatial_rmse(c_val, room, room_parameters, sdn_config, ref_edcs, rec
         # 1. Get the pre-computed reference EDC for this receiver
         ref_edc = ref_edcs[i]
 
-        # 2. Calculate the new SDN RIR and EDC with the current 'c' value
+        # 2. Calculate the new SDN RIR and EDC with the current 'c' value (FAST)
         room.set_microphone(rx, ry, room_parameters['mic z']) # Update mic position
-
-        _, rir_sdn, _, _ = calculate_sdn_rir(room_parameters, "SDN-Opt", room, duration, Fs, cfg)
+        
+        # Add cache label for this specific receiver
+        cfg['cache_label'] = f"{source_name}_rx{i:02d}"
+        # print the entire cfg dict
+        print(cfg)
+        _, rir_sdn, _, _ = calculate_sdn_rir_fast(room_parameters, "SDN-Opt", room, duration, Fs, cfg)
         rir_sdn_normed = rir_normalisation(rir_sdn, room, Fs, normalize_to_first_impulse=True)['single_rir']
 
-        if i == 14 or i == 15:
+        if  i == 15:
             plot_tr = True
         else:
             plot_tr = False
@@ -88,8 +118,71 @@ def compute_spatial_rmse(c_val, room, room_parameters, sdn_config, ref_edcs, rec
         return mean_rmse, individual_rmses
     return mean_rmse
 
+# -----------------------------------------------------------------------------
+# Optimizer Functions
+# -----------------------------------------------------------------------------
+def optimize_minimize_scalar(obj_func, bounds):
+    """
+    1D bounded scalar optimization using Brent's method.
+    Fast and reliable for single-parameter optimization.
+    """
+    print(f"--- Starting Minimize-Scalar Optimization (bounds={bounds}) ---")
+    res = minimize_scalar(obj_func, bounds=bounds, method='bounded',
+                          options={'xatol': 1e-3, 'maxiter': 20})
+    return res
+
+def optimize_basin_hopping(obj_func, bounds, x0=None):
+    """
+    Global optimization using basin-hopping with Nelder-Mead local search.
+    Good for escaping local minima via random jumps.
+    """
+    if x0 is None:
+        x0 = np.array([(bounds[0] + bounds[1]) / 2])  # Start at midpoint
+    
+    def print_fun(x, f, accepted):
+        print(f"At minimum c={x[0]:.4f} with RMSE={f:.6f}, accepted: {bool(accepted)}")
+    
+    minimizer_kwargs = {
+        "method": "Nelder-Mead",
+        "bounds": [bounds],  # List of tuples for basin-hopping
+        "options": {"xatol": 1e-2, "fatol": 1e-2, "adaptive": True}
+    }
+    
+    print(f"--- Starting Basin-Hopping Optimization (bounds={bounds}, x0={x0[0]:.2f}) ---")
+    result = basinhopping(
+        obj_func,
+        x0,
+        minimizer_kwargs=minimizer_kwargs,
+        niter=5,  # Number of basin-hopping iterations
+        callback=print_fun,
+    )
+    return result
+
+def optimize_differential_evolution(obj_func, bounds):
+    """
+    Global optimization using differential evolution.
+    Population-based method, very robust, no initial guess needed.
+    """
+    print(f"--- Starting Differential Evolution Optimization (bounds={bounds}) ---")
+    result = differential_evolution(
+        obj_func,
+        bounds=[bounds],  # List of tuples for diff evolution
+        strategy='best1bin',
+        maxiter=50,  # Generations
+        popsize=15,  # Population size multiplier
+        tol=0.01,
+        mutation=(0.5, 1),
+        recombination=0.7,
+        disp=True,
+        polish=True  # Final local search
+    )
+    return result
+
 # --- Main Optimization Loop ---
 if __name__ == "__main__":
+    # Enable disk caching of basis functions for optimization runs
+    enable_basis_disk_cache()
+    
     # Data collection for results export
     all_results = {}
     source_names = []
@@ -116,6 +209,7 @@ if __name__ == "__main__":
             duration = float(data['duration'])
             # Load all EDCs and get the ones for the reference method
             all_edcs = dict(np.load(data_path, allow_pickle=True))['edcs_RIMPY-neg10']
+
         
         # Store room info (same for all files)
         if room_info is None:
@@ -153,10 +247,18 @@ if __name__ == "__main__":
                       ref_edcs=all_edcs,
                       receiver_positions=receiver_positions,
                       duration=duration, Fs=Fs,
-                      err_duration_ms=err_duration_ms)
+                      err_duration_ms=err_duration_ms,
+                      source_name=source_name)
 
-        res = minimize_scalar(obj, bounds=(1, 7), method='bounded',
-                              options={'xatol': 1e-3, 'maxiter': 10})
+        # Select and run optimizer
+        if OPTIMIZER == 'minimize_scalar':
+            res = optimize_minimize_scalar(obj, BOUNDS)
+        elif OPTIMIZER == 'basin_hopping':
+            res = optimize_basin_hopping(obj, BOUNDS)
+        elif OPTIMIZER == 'differential_evolution':
+            res = optimize_differential_evolution(obj, BOUNDS)
+        else:
+            raise ValueError(f"Unknown optimizer: {OPTIMIZER}. Choose from: 'minimize_scalar', 'basin_hopping', 'differential_evolution'")
 
         optimal_c = res.x
         print(f"Optimal c = {optimal_c:.3f},  mean RMSE = {res.fun:.6f}")
@@ -164,7 +266,7 @@ if __name__ == "__main__":
         # Get individual RMSE values from final evaluation
         final_mean_rmse, individual_rmses = compute_spatial_rmse(
             optimal_c, room, room_parameters, base_sdn_config, all_edcs,
-            receiver_positions, duration, Fs, err_duration_ms, return_individual=True)
+            receiver_positions, duration, Fs, err_duration_ms, source_name, return_individual=True)
         
         all_results[source_name] = {
             'optimal_c': optimal_c,
@@ -213,7 +315,7 @@ if __name__ == "__main__":
         output_dir = DATA_DIR  # Use the same directory as input data
         os.makedirs(output_dir, exist_ok=True)
         room_name_clean = room_info['name'].lower().replace(' ', '_')
-        output_filename = f"optimization_results_{room_name_clean}_ref_{REFERENCE_METHOD}.txt"
+        output_filename = f"zoptimization_results_{room_name_clean}_ref_{REFERENCE_METHOD}.txt"
         output_path = os.path.join(output_dir, output_filename)
 
         with open(output_path, 'w') as f:

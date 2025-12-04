@@ -7,9 +7,9 @@ from archive.sdn_base import calculate_sdn_base_rir
 import pyroomacoustics as pra
 from scipy import signal
 # import seaborn as sns
-from . import analysis as an
-from rir_calculators import calculate_pra_rir, calculate_rimpy_rir, calculate_sdn_rir, rir_normalisation
-from .plotting_utils import DISPLAY_NAME_MAP
+from analysis import analysis as an
+import rir_calculators as rir_calc
+from analysis.plotting_utils import DISPLAY_NAME_MAP
 
 
 def print_receiver_grid(receiver_positions, room, source_position=None):
@@ -272,7 +272,7 @@ def spatial_error_analysis(room_params: dict, source_pos: Tuple[float, float, fl
                 })
                 max_order = config.get('max_order')
                 # Calculate RIR using the unified function from rir_calculators
-                rir, _ = calculate_pra_rir(current_params, duration, Fs, max_order)
+                rir, _ = rir_calc.calculate_pra_rir(current_params, duration, Fs, max_order)
 
             elif method == 'SDN-Base':
                 # Create a copy of room parameters with current mic position
@@ -285,13 +285,13 @@ def spatial_error_analysis(room_params: dict, source_pos: Tuple[float, float, fl
 
             elif method.startswith('SDN-'):
                 # Handle all SDN methods (including SDN-Test and SDN-Original)
-                _, rir, _, _ = calculate_sdn_rir(room_parameters, method, room, duration, Fs, config)
+                _, rir, _, _ = rir_calc.calculate_sdn_rir(room_parameters, method, room, duration, Fs, config)
             else:
                 print(f"Warning: Unknown method {method}, skipping")
                 continue
 
             # Normalize RIR for all methods consistently, mirroring sdn_experiment_manager
-            rir = rir_normalisation(rir, geom_room, Fs, normalize_to_first_impulse=True)['single_rir']
+            rir = rir_calc.rir_normalisation(rir, geom_room, Fs, normalize_to_first_impulse=True)['single_rir']
 
             rir_methods[method].append(rir)
 

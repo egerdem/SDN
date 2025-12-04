@@ -3,6 +3,9 @@ import pyroomacoustics as pra
 from copy import deepcopy
 import sys
 import os
+import json
+import hashlib
+import re
 
 # Add SDNPy to path (works regardless of where script is run from)
 _script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -21,44 +24,94 @@ from sdn_core import DelayNetwork
 from archive.sdn_base import calculate_sdn_base_rir
 from scipy.signal import find_peaks
 
-# Global Cache for Basis Functions
-# Keys: tuple(room_dims, src_pos, mic_pos, Fs, duration, absorption, mode)
-# Values: (rir_base, rir_shape_or_slopes)
+"""
+Caching of basis functions is OPTIONAL and controlled by USE_BASIS_DISK_CACHE.
+
+By default, disk caching is DISABLED so that quick experiments (e.g. via main.py)
+do not accidentally reuse basis functions across different rooms/configurations.
+
+Optimisation scripts that benefit from persistent caching should call
+`enable_basis_disk_cache()` explicitly.
+"""
+
+# In-memory cache for basis functions
 _BASIS_CACHE = {}
 
-# Cache file path for persistence across runs
+# Flag controlling on-disk cache usage
+USE_BASIS_DISK_CACHE = False
+
+# Cache directory for persistence across runs (used only if USE_BASIS_DISK_CACHE)
 _CACHE_DIR = os.path.join(_script_dir, "results", "basis_cache")
-_CACHE_FILE = os.path.join(_CACHE_DIR, "basis_functions_cache.pkl")
+
+def _hash_cache_key(cache_key):
+    """Create a stable hash for a cache key."""
+    serializable_key = list(cache_key)
+    return hashlib.sha1(json.dumps(serializable_key).encode()).hexdigest()
+
+def _cache_filename_for_key(cache_key, cache_label=None):
+    """Return filename for a given cache key (include label for readability)."""
+    key_hash = _hash_cache_key(cache_key)
+    if cache_label:
+        safe_label = re.sub(r'[^A-Za-z0-9_-]', '_', cache_label)
+        filename = f"basis_{safe_label}_{key_hash[:10]}.pkl"
+    else:
+        filename = f"basis_{key_hash}.pkl"
+    return os.path.join(_CACHE_DIR, filename)
 
 def _load_basis_cache():
     """Load basis function cache from disk."""
-    global _BASIS_CACHE
-    if os.path.exists(_CACHE_FILE):
+    global _BASIS_CACHE, USE_BASIS_DISK_CACHE
+    if not USE_BASIS_DISK_CACHE:
+        return
+    _BASIS_CACHE = {}
+    if not os.path.isdir(_CACHE_DIR):
+        return
+    import pickle
+    count = 0
+    for fname in os.listdir(_CACHE_DIR):
+        if not fname.endswith(".pkl"):
+            continue
+        path = os.path.join(_CACHE_DIR, fname)
         try:
-            import pickle
-            with open(_CACHE_FILE, 'rb') as f:
-                _BASIS_CACHE = pickle.load(f)
-            print(f"  [Cache] Loaded {len(_BASIS_CACHE)} cached basis function sets from disk")
+            with open(path, 'rb') as f:
+                payload = pickle.load(f)
+            cache_key = tuple(payload['cache_key'])
+            _BASIS_CACHE[cache_key] = payload['basis']
+            count += 1
         except Exception as e:
-            print(f"  [Cache] Warning: Could not load cache file: {e}")
-            _BASIS_CACHE = {}
-    else:
-        _BASIS_CACHE = {}
+            print(f"  [Cache] Warning: Could not load basis file {fname}: {e}")
+    if count > 0:
+        print(f"  [Cache] Loaded {count} cached basis function sets from disk")
 
-def _save_basis_cache():
-    """Save basis function cache to disk."""
-    global _BASIS_CACHE
+def _save_basis_cache_entry(cache_key, basis, cache_label=None):
+    """Persist a single basis entry to disk."""
+    if not USE_BASIS_DISK_CACHE:
+        return
     try:
         import pickle
         os.makedirs(_CACHE_DIR, exist_ok=True)
-        with open(_CACHE_FILE, 'wb') as f:
-            pickle.dump(_BASIS_CACHE, f)
-        # print(f"  [Cache] Saved {len(_BASIS_CACHE)} basis function sets to disk")
+        payload = {
+            'cache_key': list(cache_key),
+            'basis': basis,
+        }
+        filename = _cache_filename_for_key(cache_key, cache_label)
+        with open(filename, 'wb') as f:
+            pickle.dump(payload, f)
     except Exception as e:
-        print(f"  [Cache] Warning: Could not save cache file: {e}")
+        print(f"  [Cache] Warning: Could not save basis file: {e}")
 
-# Load cache on module import
-_load_basis_cache()
+def enable_basis_disk_cache():
+    """
+    Enable on-disk caching of basis functions.
+
+    Call this ONLY from long-running optimisation scripts where many evaluations
+    for the same geometry are expected. Quick single-run tests (e.g. main.py)
+    should NOT call this to avoid confusing cross-run reuse.
+    """
+    global USE_BASIS_DISK_CACHE
+    if not USE_BASIS_DISK_CACHE:
+        USE_BASIS_DISK_CACHE = True
+        _load_basis_cache()
 
 def rir_normalisation(rirs_dict, room, Fs, normalize_to_first_impulse=True):
     """
@@ -300,6 +353,7 @@ def calculate_sdn_rir_fast(room_parameters, test_name, room, duration, Fs, confi
     global _BASIS_CACHE
     
     flags = config.get('flags', {})
+    cache_label = config.get('cache_label')
     
     # Determine mode: Scalar or Vector
     is_vector_mode = 'injection_c_vector' in flags
@@ -359,7 +413,7 @@ def calculate_sdn_rir_fast(room_parameters, test_name, room, duration, Fs, confi
             
             rir_slopes = np.array(rir_slopes)
             _BASIS_CACHE[cache_key] = (rir_base, rir_slopes)
-            _save_basis_cache()  # Persist to disk
+            _save_basis_cache_entry(cache_key, (rir_base, rir_slopes), cache_label)
             
         # Reconstruction: R(c) = R(0) + sum(c_i * Slope_i)
         # Use tensordot for weighted sum of arrays
@@ -393,7 +447,7 @@ def calculate_sdn_rir_fast(room_parameters, test_name, room, duration, Fs, confi
             rir_shape = rir_1 - rir_0
             
             _BASIS_CACHE[cache_key] = (rir_0, rir_shape)
-            _save_basis_cache()  # Persist to disk
+            _save_basis_cache_entry(cache_key, (rir_0, rir_shape), cache_label)
             rir_base = rir_0
             
         # Reconstruction: R(c) = R(0) + c * (R(1) - R(0))

@@ -5,9 +5,28 @@ available spatial data files for a room.
 Where ``optimisation_singleC.py`` computes an optimal ``c`` for each source
 position separately, this script finds one global ``c`` that minimises the mean
 EDC error across all sources and receivers.
+
+Now uses FAST caching mechanism to avoid recalculating RIRs on every iteration.
+
+IDENTICAL/SIMILAR FUNCTIONS WITH optimisation_singleC.py:
+----------------------------------------------------------
+1. compute_dataset_rmse() - Core logic is identical to compute_spatial_rmse() 
+   in optimisation_singleC.py. Both functions:
+   - Take a c value and compute SDN RIRs for all receiver positions
+   - Calculate EDCs and compare against reference EDCs
+   - Return mean RMSE (and optionally individual RMSEs)
+   - Use FAST method with caching
+   - Main difference: compute_dataset_rmse() takes a dataset dict, while 
+     compute_spatial_rmse() takes individual parameters
+
 """
 
 import os
+import sys
+
+# Add project root to path BEFORE other imports  
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from functools import partial
 from copy import deepcopy
 
@@ -16,7 +35,7 @@ from scipy.optimize import minimize_scalar
 
 import geometry
 from analysis import analysis as an
-from rir_calculators import calculate_sdn_rir, rir_normalisation
+from rir_calculators import calculate_sdn_rir_fast, rir_normalisation, enable_basis_disk_cache
 
 
 # -----------------------------------------------------------------------------
@@ -33,10 +52,10 @@ ERROR_DURATION_MS = 50  # compare first 50 ms of the EDC
 BOUNDS = (1.0, 7.0)
 
 FILES_TO_PROCESS = [
-    "aes_room_spatial_edc_data_center_source.npz",
+    # "aes_room_spatial_edc_data_center_source.npz",
     "aes_room_spatial_edc_data_top_middle_source.npz",
-    "aes_room_spatial_edc_data_upper_right_source.npz",
-    "aes_room_spatial_edc_data_lower_left_source.npz",
+    # "aes_room_spatial_edc_data_upper_right_source.npz",
+    # "aes_room_spatial_edc_data_lower_left_source.npz",
 ]
 
 
@@ -44,11 +63,12 @@ FILES_TO_PROCESS = [
 # Helper functions
 # -----------------------------------------------------------------------------
 
-def load_dataset(path: str):
+def load_dataset(path: str, source_name: str):
     """Load optimisation data from ``path`` and return a dictionary."""
     with np.load(path, allow_pickle=True) as data:
         room_params = data["room_params"][0]
         dataset = {
+            "name": source_name,  # Add source name to dataset
             "room_params": room_params,
             "source_pos": data["source_pos"],
             "receiver_positions": data["receiver_positions"],
@@ -81,18 +101,23 @@ def compute_dataset_rmse(c_val: float, dataset: dict, err_duration_ms: int,
 
     cfg = deepcopy(base_cfg)
     cfg["flags"]["source_weighting"] = float(np.squeeze(c_val))
+    cfg["use_fast_method"] = True  # Enable fast method
     cfg["label"] = f"SDN-SW-c_{cfg['flags']['source_weighting']:.2f}"
 
     total_rmse = 0.0
     individual_rmses = []
     receivers = dataset["receiver_positions"]
     ref_edcs = dataset["ref_edcs"]
+    source_name = dataset["name"]
 
     for i, (rx, ry) in enumerate(receivers):
         room.set_microphone(rx, ry, room_params["mic z"])
+        
+        # Add cache label for this specific receiver
+        cfg['cache_label'] = f"{source_name}_rx{i:02d}"
 
-        _, rir_sdn, _, _ = calculate_sdn_rir(room_params, "SDN-Opt", room,
-                                             duration, Fs, cfg)
+        _, rir_sdn, _, _ = calculate_sdn_rir_fast(room_params, "SDN-Opt", room,
+                                                   duration, Fs, cfg)
         rir_sdn_normed = rir_normalisation(
             rir_sdn, room, Fs, normalize_to_first_impulse=True
         )["single_rir"]
@@ -110,6 +135,8 @@ def compute_dataset_rmse(c_val: float, dataset: dict, err_duration_ms: int,
             print(f"Receiver {i + 1}/{len(receivers)}: RMSE = {rmse:.6f}")
 
     mean_rmse = total_rmse / len(receivers)
+    # print(f"Mean RMSE for source at {dataset['source_pos']}: {mean_rmse:.6f}\n")
+
     if return_individual:
         return mean_rmse, individual_rmses
     return mean_rmse
@@ -136,13 +163,18 @@ def compute_total_rmse(c_val: float, datasets: list, err_duration_ms: int,
 # Main optimisation
 # -----------------------------------------------------------------------------
 if __name__ == "__main__":
+    # Enable disk caching of basis functions for optimization runs
+    enable_basis_disk_cache()
+    
     datasets = []
-    for fname in FILES_TO_PROCESS:
+    for i, fname in enumerate(FILES_TO_PROCESS):
         fpath = os.path.join(DATA_DIR, fname)
         if not os.path.exists(fpath):
             print(f"Warning: file not found: {fpath}")
             continue
-        datasets.append(load_dataset(fpath))
+        # Extract source name from filename
+        source_name = fname.replace('aes_room_spatial_edc_data_', '').replace('.npz', '').replace('_', ' ').title()
+        datasets.append(load_dataset(fpath, source_name))
 
     base_cfg = {
         "enabled": True,
@@ -161,7 +193,7 @@ if __name__ == "__main__":
         obj,
         bounds=BOUNDS,
         method="bounded",
-        options={"xatol": 1e-3, "maxiter": 20},
+        options={"xatol": 1e-3, "maxiter": 50},
     )
 
     optimal_c = result.x
@@ -202,6 +234,14 @@ if __name__ == "__main__":
             row += f" | {rmse:>15.6f}"
         print(row)
     
+    # Mean row
+    mean_row = f"{'Mean RMSE':<25}"
+    for source_name in source_names:
+        mean_rmse = all_results[source_name]['mean_rmse']
+        mean_row += f" | {mean_rmse:>15.6f}"
+    print("-" * len(header))
+    print(mean_row)
+    
     # Export to file
     output_dir = DATA_DIR  # Use the same directory as input data
     os.makedirs(output_dir, exist_ok=True)
@@ -224,5 +264,8 @@ if __name__ == "__main__":
                 rmse = all_results[source_name]['individual_rmses'][i]
                 row += f" | {rmse:>15.6f}"
             f.write(row + "\n")
+        
+        f.write("-" * len(header) + "\n")
+        f.write(mean_row + "\n")
     
     print(f"\n--- Results exported to: {output_path} ---")

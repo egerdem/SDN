@@ -23,6 +23,9 @@ class DelayNetwork:
                  source_weighting: float = 1,
                  injection_c_vector: List[float] = None,
                  injection_vector: List[float] = None,
+                 specular_mic_pickup: bool = False,  # <--- NEW FLAG
+                 mic_weighting: float = 1.0,
+                 collection_vector: List[float] = None,  # <--- NEW PARAMETER
                  use_identity_scattering: bool = False,
                  specular_scattering: bool = False,
                  specular_increase_coef: float = 0.0,
@@ -74,6 +77,9 @@ class DelayNetwork:
         self.source_weighting = source_weighting
         self.injection_c_vector = injection_c_vector
         self.injection_vector = injection_vector
+        self.specular_mic_pickup = specular_mic_pickup  # <--- STORE FLAG
+        self.mic_weighting = mic_weighting
+        self.collection_vector = collection_vector  # <--- STORE PARAMETER
         # Test flags
         self.use_identity_scattering = use_identity_scattering
         self.specular_scattering = specular_scattering
@@ -187,7 +193,82 @@ class DelayNetwork:
             self.wall_incoming_sums[wall_id] = []
             self.sample_indices[wall_id] = []
 
+    def _get_best_pickup_neighbor(self, wall_id: str) -> str:
+        """
+        Determine the 'specular' neighbor for microphone pickup.
 
+        Using Reciprocity: If the Microphone were a Source, which neighbor
+        would reflect the ray (Mic -> Wall) towards (Wall -> Neighbor)?
+
+        This effectively finds the incoming neighbor 'j' such that the ray
+        j -> k reflects specularly towards the Mic.
+        """
+        wall_node_pos = self.room.walls[wall_id].node_positions
+        mic_pos = self.room.micPos
+
+        # 1. Calculate Incident Vector (Mic -> Wall)
+        # We treat Mic as source to find the specular reflection path
+        vec_inc = wall_node_pos - mic_pos
+
+        # 2. Get Wall Normal
+        # Assuming simple cuboid where walls are axis-aligned.
+        # We can infer normal from the wall name or geometry class if available.
+        # Fallback: We calculate reflection vector R for every neighbor N
+        # such that Angle(Incident, Normal) = Angle(Reflected, Normal).
+        # OR: We maximize dot product between Reflection and Neighbor vector.
+
+        # Since we don't have the normal vector explicitly exposed in all Geometry versions,
+        # we will use a logic similar to 'get_best_reflection_targets' but manually.
+        # However, to avoid complexity without the full geometry code, we can assume
+        # the standard SDN box topology:
+        # e.g., 'left' reflects to 'right', 'floor' to 'ceiling' etc IF incident is normal.
+
+        # Robust method: Iterate neighbors, assume the one that aligns best with
+        # perfect reflection is the target.
+        # Here we use the room's stored angle mappings if available, but they are for source.
+
+        # Let's perform a vector calculation using the wall normal stored in self.room.walls
+        try:
+            normal = self.room.walls[wall_id].normal
+
+            # Normalize incident
+            len_inc = vec_inc.getMagnitude()
+            if len_inc == 0: return list(self.room.walls.keys())[0]  # Safety
+            v_i = np.array([vec_inc.x / len_inc, vec_inc.y / len_inc, vec_inc.z / len_inc])
+
+            # Normalize normal
+            len_n = normal.getMagnitude()
+            n = np.array([normal.x / len_n, normal.y / len_n, normal.z / len_n])
+
+            # Reflection formula: r = i - 2(i.n)n
+            r = v_i - 2 * np.dot(v_i, n) * n
+
+            # Find neighbor matching r
+            best_neighbor = None
+            max_dot = -2.0
+
+            for other_id, other_wall in self.room.walls.items():
+                if other_id == wall_id: continue
+
+                # Vector Wall -> Neighbor
+                vec_neigh = other_wall.node_positions - wall_node_pos
+                len_neigh = vec_neigh.getMagnitude()
+                v_n = np.array([vec_neigh.x / len_neigh, vec_neigh.y / len_neigh, vec_neigh.z / len_neigh])
+
+                # Dot product
+                dot_val = np.dot(r, v_n)
+                if dot_val > max_dot:
+                    max_dot = dot_val
+                    best_neighbor = other_id
+
+            return best_neighbor
+
+        except:
+            # Fallback if normals aren't available or any math error
+            # Return first neighbor
+            for k in self.room.walls:
+                if k != wall_id: return k
+            return ""
     def _print_parameter_summary(self):
         """Print a formatted summary of only the non-default SDN parameters."""
         print("\n" + "=" * 50)
@@ -727,10 +808,65 @@ class DelayNetwork:
             # ─────────────────────────────────────────────────────────────────────────
             # STEP 2e: Calculate node pressure and send to microphone
             # ─────────────────────────────────────────────────────────────────────────
-            # Node pressure formula: p_k(n) = (2/(N-1)) * Σ outgoing_waves (= Σ incoming waves, p_ki^+(n)+ p_Sk(n)/2))
-            node_pressure = self.coef * sum(self.instant_outgoing_waves)
-            # node_pressure = self.coef * sum(incoming_waves)
-            # self.node_pressures[wall_id] = node_pressure # kullanılmıyor ?
+
+            # --- NEW: SPECULAR MIC PICKUP LOGIC ---
+            if self.specular_mic_pickup:
+                # Calculate weights for "Receiver Weighting"
+                # Use outgoing_waves to apply weights AFTER scattering
+                # (equivalent to v^T * p_out)
+
+                # Use the same best reflection target as source weighting (reciprocity)
+                targets = get_best_reflection_targets(wall_id, self.room.angle_mappings, num_targets=2)
+                best_pickup_node = targets[0]
+                weighted_sum = 0.0
+
+                # Check if using collection_vector (5-element vector) or scalar mic_weighting
+                if self.collection_vector is not None:
+                    # Vector mode: Use collection_vector directly
+                    # collection_vector[0] = weight for dominant node
+                    # collection_vector[1-4] = weights for non-dominant nodes
+                    collection_idx = 0  # Track position in collection_vector
+                    
+                    for idx, other_id in enumerate(other_nodes):
+                        val = self.instant_outgoing_waves[idx]
+                        
+                        if other_id == best_pickup_node:
+                            # Dominant node gets first element
+                            weight = self.collection_vector[0] * self.coef
+                            weighted_sum += val * weight
+                        else:
+                            # Non-dominant nodes get elements 1-4
+                            collection_idx += 1  # Move to next non-dominant weight
+                            if collection_idx < len(self.collection_vector):
+                                weight = self.collection_vector[collection_idx] * self.coef
+                            else:
+                                weight = 0.0  # Safety fallback
+                            weighted_sum += val * weight
+                else:
+                    # Scalar mode: Calculate weights from mic_weighting (same as before)
+                    # Scale weights to sum to N-1 (5), then multiply by coef (2/5)
+                    # w_dom = c * (2/5)
+                    # w_non = cn * (2/5)
+                    c_mic = self.mic_weighting
+                    w_dom = c_mic * self.coef
+                    w_non = ((5.0 - c_mic) / 4.0) * self.coef
+
+                    for idx, other_id in enumerate(other_nodes):
+                        val = self.instant_outgoing_waves[idx]
+                        if other_id == best_pickup_node:
+                            weighted_sum += val * w_dom
+                        else:
+                            weighted_sum += val * w_non
+
+                node_pressure = weighted_sum
+
+            else:
+                # Standard SDN: Sum outgoing (or incoming) waves and scale
+                # Node pressure formula: p_k(n) = (2/(N-1)) * Σ outgoing_waves (= Σ incoming waves, p_ki^+(n)+ p_Sk(n)/2))
+                # node_pressure = self.coef * sum(incoming_waves)
+                node_pressure = self.coef * sum(self.instant_outgoing_waves)
+
+
 
             # Send to microphone (using outgoing waves)
             mic_key = f"{wall_id}_to_mic"

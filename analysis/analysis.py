@@ -1066,7 +1066,7 @@ def compare_edc_pairs(rirs_dict, method_pairs, Fs):
         edc2, _, _ = compute_edc(rirs_dict[label2], Fs, label2, plot=False)
         
         # Compare EDCs
-        rms_diff = compute_RMS(edc1, edc2, range=50, Fs=Fs, method="mae", skip_initial_zeros=True)
+        rms_diff = compute_RMS(edc1, edc2, range=50, Fs=Fs, method="rmse", skip_initial_zeros=True)
         
         pair_name = f"{label1} vs {label2}"
         edc_comparisons[pair_name] = rms_diff

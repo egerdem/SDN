@@ -56,9 +56,9 @@ from datetime import datetime
 import hashlib
 
 # Import modules from the main codebase
-import plot_room as pp
-import EchoDensity as ned
-import analysis as an
+
+from analysis import EchoDensity as ned
+from analysis import analysis as an
 from sdn_experiment_manager import Room
 
 
@@ -839,7 +839,7 @@ class ExperimentLoaderManager:
 # Example usage in main:
 if __name__ == "__main__":
 
-    results_dir = 'results'
+    results_dir = '../results'
     IS_SINGULAR = False  # Set to False for batch processing
     IS_BATCH = True  # Set to True for batch processing
 

@@ -85,6 +85,7 @@ DISPLAY_NAME_MAP = {
     'SDN-Test_1': 'SW-SDN (c=-1)',
     'SDN-Test_0': 'SW-SDN (c=0)',
     'SDN-Test2': 'SW-SDN (c=2)',
+    'SDN-Test2.998': 'SW-SDN (c=2.998)',
     'SDN-Test3': 'SW-SDN (c=3)',
     'SDN-Test4': 'SW-SDN (c=4)',
     'SDN-Test5': 'SW-SDN (c=5)',
@@ -100,9 +101,7 @@ DISPLAY_NAME_MAP = {
     'SDN-Test5r': 'SW-SDN-R (c=5)',
     'SDN-Test6r': 'SW-SDN-R (c=6)',
     'SDN-Test7r': 'SW-SDN-R (c=7)',
-    'HO-SDN-N2': 'HO-SDN (N=2)',
-    'HO-SDN-N3': 'HO-SDN (N=3)',
-}
+    }
 
 def get_display_name(method_key: str, method_configs: dict, name_map: dict) -> str:
     """

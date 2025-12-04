@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from typing import List
 import pyroomacoustics as pra
+import textwrap
 
 from .plotting_utils import DISPLAY_NAME_MAP, get_display_name, get_color
 
@@ -592,6 +593,18 @@ def create_unified_interactive_plot(rirs_dict, Fs, room_parameters=None, reflect
     labels = list(rirs_dict.keys())
     actives = [True] * len(labels)
 
+    # Wrap checkbox labels so long experiment names do not overflow the panel
+    max_label_chars = 28
+    wrapped_labels = []
+    label_lookup = {}
+    for label in labels:
+        wrapped = textwrap.fill(label, width=max_label_chars)
+        # Ensure uniqueness even if wrapped strings collide by appending zero-width spaces
+        while wrapped in label_lookup:
+            wrapped += "\u200b"
+        wrapped_labels.append(wrapped)
+        label_lookup[wrapped] = label
+
     # Remove the outer box and title from the checkbox area
     ax_check.set_xticks([])
     ax_check.set_yticks([])
@@ -602,11 +615,12 @@ def create_unified_interactive_plot(rirs_dict, Fs, room_parameters=None, reflect
     # ax_check.set_position([0.85, 0.4, 0.1, 0.2]) # Commented out to let GridSpec and tight_layout manage
     check = CheckButtons(
         ax=ax_check,
-        labels=labels,
+        labels=wrapped_labels,
         actives=actives
     )
 
-    def update_visibility(label):
+    def update_visibility(wrapped_label):
+        label = label_lookup[wrapped_label]
         # Toggle visibility of the corresponding lines in all plots
         rir_line = rir_lines[label]
         edc_line = edc_lines[label]

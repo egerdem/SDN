@@ -4,9 +4,7 @@ import json
 from typing import Dict, List, Tuple
 import geometry
 from analysis import analysis as an
-from analysis import EchoDensity as ned
-from rir_calculators import calculate_pra_rir, calculate_sdn_rir, calculate_ho_sdn_rir, calculate_rimpy_rir, rir_normalisation
-import pyroomacoustics as pra
+from rir_calculators import calculate_pra_rir, calculate_sdn_rir, calculate_ho_sdn_rir, calculate_rimpy_rir, rir_normalisation, calculate_sdn_rir_fast
 from analysis.spatial_analysis import generate_receiver_grid_old, generate_source_positions
 
 def calculate_and_save_data(room_params: dict, source_pos: Tuple[float, float, float],
@@ -14,7 +12,7 @@ def calculate_and_save_data(room_params: dict, source_pos: Tuple[float, float, f
                               duration: float, Fs: int,
                               method_configs: Dict,
                               output_path: str,
-                              update_mode: bool = False):
+                              update_mode):
     """
     Calculate RIRs, EDCs, and NEDs. Can update an existing data file.
     If update_mode is True, it loads existing data and only calculates missing
@@ -78,8 +76,15 @@ def calculate_and_save_data(room_params: dict, source_pos: Tuple[float, float, f
         config = method_configs[method]
 
         # --- Step 1: Check and Calculate RIRs ---
-        if method not in all_rirs:
-            print(f"  RIRs not found for '{method}'. Calculating...")
+        # Check if method exists AND if it should be replaced
+        method_exists = method in all_rirs
+        force_replace = method in METHODS_TO_REPLACE
+        
+        if not method_exists or force_replace:
+            if force_replace and method_exists:
+                print(f"  FORCE REPLACING existing data for '{method}'...")
+            else:
+                print(f"  RIRs not found for '{method}'. Calculating...")
             any_new_data_calculated = True
             current_method_rirs = []
             for i, (rx, ry) in enumerate(receiver_positions):
@@ -105,10 +110,11 @@ def calculate_and_save_data(room_params: dict, source_pos: Tuple[float, float, f
                 elif calculator == 'rimpy':
                     rir, _ = calculate_rimpy_rir(current_params_for_calc, duration, Fs, **config.get('params', {}))
                 elif method.startswith('SDN-'):
+                    print("Calculating SDN...")
                     _, rir, _, _ = calculate_sdn_rir(current_params_for_calc, method, room, duration, Fs, config)
                 elif method.startswith('HO-SDN'):
                     source_signal = config.get('source_signal', 'dirac')
-                    order = config.get('order', 2)
+                    order = config.get('order')
                     rir, _ = calculate_ho_sdn_rir(current_params_for_calc, Fs, duration, source_signal, order=order)
                 else:
                     print(f"    Warning: Unknown or unsupported method {method}, skipping.")
@@ -128,8 +134,12 @@ def calculate_and_save_data(room_params: dict, source_pos: Tuple[float, float, f
             print(f"  RIRs for '{method}' already exist. Skipping calculation.")
 
         # --- Step 2: Check and Calculate EDCs ---
-        if method not in all_edcs and method in all_rirs:
-            print(f"  EDCs not found for '{method}'. Calculating...")
+        edc_exists = method in all_edcs
+        if (not edc_exists or force_replace) and method in all_rirs:
+            if force_replace and edc_exists:
+                print(f"  FORCE REPLACING existing EDCs for '{method}'...")
+            else:
+                print(f"  EDCs not found for '{method}'. Calculating...")
             any_new_data_calculated = True
             edcs_for_method = []
             for rir in all_rirs[method]:
@@ -142,7 +152,7 @@ def calculate_and_save_data(room_params: dict, source_pos: Tuple[float, float, f
                 padded_edcs = [np.pad(e, (0, max_len - len(e)), 'constant', constant_values=e[-1]) for e in edcs_for_method]
                 all_edcs[method] = np.array(padded_edcs)
 
-        elif method in all_edcs:
+        elif edc_exists:
             print(f"  EDCs for '{method}' already exist. Skipping calculation.")
 
         # --- Step 3: Check and Calculate NEDs (BYPASSED) ---
@@ -158,25 +168,19 @@ def calculate_and_save_data(room_params: dict, source_pos: Tuple[float, float, f
         #     print(f"  NEDs for '{method}' already exist. Skipping calculation.")
 
         # --- Step 4: Check and Calculate RT60s ---
-        if method not in all_rt60s and method in all_rirs:
-            print(f"  RT60s not found for '{method}'. Calculating...")
+        rt60_exists = method in all_rt60s
+        if (not rt60_exists or force_replace) and method in all_rirs:
+            if force_replace and rt60_exists:
+                print(f"  FORCE REPLACING existing RT60s for '{method}'...")
+            else:
+                print(f"  RT60s not found for '{method}'. Calculating...")
             any_new_data_calculated = True
-            # neds_for_method = []
-            rt60s_for_method = []
+            rt60_values = []
             for rir in all_rirs[method]:
-                # ned_profile = ned.echoDensityProfile(rir, fs=Fs)
-                # neds_for_method.append(ned_profile)
-            # all_neds[method] = np.array(neds_for_method)
-        # elif method in all_neds:
-            # print(f"  NEDs for '{method}' already exist. Skipping calculation.")
-                if np.any(rir):
-                    rt60 = an.calculate_rt60_from_rir(rir, Fs, plot=False)
-                    # handle cases where rt60 might not be calculable
-                    rt60s_for_method.append(rt60 if rt60 is not None else np.nan)
-                else:
-                    rt60s_for_method.append(np.nan)
-            all_rt60s[method] = np.array(rt60s_for_method)
-        elif method in all_rt60s:
+                rt60 = an.calculate_rt60_from_rir(rir, Fs, plot=False)
+                rt60_values.append(rt60 if rt60 is not None else np.nan)
+            all_rt60s[method] = np.array(rt60_values)
+        elif rt60_exists:
             print(f"  RT60s for '{method}' already exist. Skipping calculation.")
 
 
@@ -208,338 +212,49 @@ def calculate_and_save_data(room_params: dict, source_pos: Tuple[float, float, f
 
 
 if __name__ == "__main__":
-    # --- EXPERIMENT SETUP ---
+    import sys
+    # Ensure root directory is in path to import experiment_configs
+    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+    import experiment_configs as exp_config
+
+    # --- CONFIGURATION PARAMETERS ---
+    UPDATE_MODE = True  # If True, loads existing data and adds new methods
+    
+    # Force replace specific methods even if they already exist in the file
+    # Useful when you need to regenerate data with updated code/parameters
+    METHODS_TO_REPLACE = [
+        'SDN-Test2.998',  # Regenerate using Standard (non-Fast) SDN method
+    ]
     # Set to True to load the existing data file and only run/replace
     # the methods that are marked 'enabled' in this script.
     UPDATE_EXISTING_FILE = True # Set to False to always calculate everything from scratch.
-    ENABLED = False #just a method flag to toggle all methods on/off
-    PROCESS_MULTIPLE_SOURCES = True # Set to True to iterate through multiple source positions
     use_grid = True # Set to True to use a grid of receiver positions, False for single position
 
-    # --- Room Setups ---
-    room_waspaa = {
-        'display_name': 'WASPAA Room',
-        'width': 6, 'depth': 7, 'height': 4,
-        'source x': 3.6, 'source y': 5.3, 'source z': 1.3,
-        'mic x': 1.2, 'mic y': 1.8, 'mic z': 2.4,
-        'absorption': 0.1,
-    }
-    room_aes = {
-        'display_name': 'AES Room',
-        'width': 9, 'depth': 7, 'height': 4,
-        'source x': 4.5, 'source y': 3.5, 'source z': 2,
-        'mic x': 2, 'mic y': 2, 'mic z': 1.5,
-        'absorption': 0.2,
-    }
-    room_journal = {
-        'display_name': 'Journal Room',
-        'width': 3.2, 'depth': 4, 'height': 2.7,
-        'source x': 2, 'source y': 3., 'source z': 2,
-        'mic x': 1, 'mic y': 1, 'mic z': 1.5,
-        'absorption': 0.1,
-    }
+    # Files to process when PROCESS_MULTIPLE_SOURCES is True
+    # Comment out sources you don't want to process
+    FILES_TO_PROCESS = [
+        # "aes_room_spatial_edc_data_center_source.npz",
+        "aes_room_spatial_edc_data_top_middle_source.npz",
+        # "aes_room_spatial_edc_data_upper_right_source.npz",
+        # "aes_room_spatial_edc_data_lower_left_source.npz",
+    ]
+    
+    # Set to True to process multiple sources, False for single source from active_room
+    PROCESS_MULTIPLE_SOURCES = True
 
-    # room_journal = {
-    #     'display_name': 'Journal Room',
-    #     'width': 3.2, 'depth': 4, 'height': 2.7,
-    #     'source x': 1, 'source y': 1.9, 'source z': 1.6,
-    #     'mic x': 2, 'mic y': 1, 'mic z': 1.5,
-    #     'absorption': 0.1,
-    # }
+    # Use active room from config
+    active_room = exp_config.active_room
 
-    # Choose which room configuration to use for this run
-    active_room = room_aes
-    # active_room = room_journal
-    # active_room = room_waspaa
-
-    # Define the methods to be calculated, based on main.py
-    method_configs = {
-        'ISM-pra': {
-            'enabled': False,
-            'calculator': 'pra',
-            'params': {'max_order': 100},
-            'info': '',
-            'label': "",
-        },
-
-        'ISM-pra-rand10': {
-            'enabled': False,
-            'calculator': 'pra',
-            'params': {
-                'max_order': 100,
-                'use_rand_ism': True,
-                'max_rand_disp': 0.1
-            },
-            'info': 'pra 100 rand10',
-            'label': "",
-        },
-
-        'SDN-Test1': { # Renamed from Test0 to match paper_figures.py
-            'enabled': ENABLED,
-            'info': "c1 original",
-            'flags': {
-                'specular_source_injection': True,
-                'source_weighting': 1,
-            },
-            'label': "SDN"
-        },
-
-        'SDN-Test_3r': {
-            'enabled': ENABLED,
-            'info': "c -3",
-            'flags': {
-                'specular_source_injection': True,
-                'source_weighting': -3,
-                'specular_source_injection_random': True,
-            },
-            'label': "SDN"
-        },
-
-        'SDN-Test_2r': {
-            'enabled': ENABLED,
-            'info': "c -2",
-            'flags': {
-                'specular_source_injection': True,
-                'source_weighting': -2,
-                'specular_source_injection_random': True,
-            },
-            'label': "SDN"
-        },
-
-        'SDN-Test_1r': {
-            'enabled': ENABLED,
-            'info': "c -1",
-            'flags': {
-                'specular_source_injection': True,
-                'source_weighting': -1,
-                'specular_source_injection_random': True,
-            },
-            'label': "SDN"
-        },
-
-        'SDN-Test_0r': {
-            'enabled': ENABLED,
-            'info': "c 0",
-            'flags': {
-                'specular_source_injection': True,
-                'source_weighting': 0,
-                'specular_source_injection_random': True,
-            },
-            'label': "SDN"
-        },
-
-        'SDN-Test2r': {
-            'enabled': ENABLED,
-            'info': "c2",
-            'flags': {
-                'specular_source_injection': True,
-                'source_weighting': 2,
-                'specular_source_injection_random': True,
-            },
-            'label': "SDN"
-        },
-
-        'SDN-Test3r': {
-            'enabled': ENABLED,
-            'info': "c3",
-            'flags': {
-                'specular_source_injection': True,
-                'source_weighting': 3,
-                'specular_source_injection_random': True,
-            },
-            'label': "SDN"
-        },
-        'SDN-Test4r': {
-            'enabled': ENABLED,
-            'info': "c4",
-            'flags': {
-                'specular_source_injection': True,
-                'source_weighting': 4,
-                'specular_source_injection_random': True,
-            },
-            'label': "SDN"
-        },
-        'SDN-Test5r': {
-            'enabled': ENABLED,
-            'info': "c5",
-            'flags': {
-                'specular_source_injection': True,
-                'source_weighting': 5,
-                'specular_source_injection_random': True,
-            },
-            'label': "SDN Test 5"
-        },
-        'SDN-Test6r': {
-            'enabled': ENABLED,
-            'info': "c6",
-            'flags': {
-                'specular_source_injection': True,
-                'source_weighting': 6,
-                'specular_source_injection_random': True,
-            },
-            'label': "SDN Test 6"
-        },
-        'SDN-Test7r': {
-            'enabled': ENABLED,
-            'info': "c7",
-            'flags': {
-                'specular_source_injection': True,
-                'source_weighting': 7,
-                'specular_source_injection_random': True,
-            },
-            'label': "SDN Test 7"
-        },
-
-        'SDN-Test_3': {
-            'enabled': ENABLED,
-            'info': "c -3",
-            'flags': {
-                'specular_source_injection': True,
-                'source_weighting': -3,
-            },
-            'label': "SDN"
-        },
-
-        'SDN-Test_2': {
-            'enabled': ENABLED,
-            'info': "c -2",
-            'flags': {
-                'specular_source_injection': True,
-                'source_weighting': -2,
-            },
-            'label': "SDN"
-        },
-
-        'SDN-Test_1': {
-            'enabled': True,
-            'info': "c -1",
-            'flags': {
-                'specular_source_injection': True,
-                'source_weighting': -1,
-            },
-            'label': "SDN"
-        },
-
-        'SDN-Test_0': {
-            'enabled': True,
-            'info': "c 0",
-            'flags': {
-                'specular_source_injection': True,
-                'source_weighting': 0,
-            },
-            'label': "SDN"
-        },
-
-        'SDN-Test2': {
-            'enabled': ENABLED,
-            'info': "c2",
-            'flags': {
-                'specular_source_injection': True,
-                'source_weighting': 2,
-            },
-            'label': "SDN"
-        },
-
-        'SDN-Test3': {
-            'enabled': ENABLED,
-            'info': "c3",
-            'flags': {
-                'specular_source_injection': True,
-                'source_weighting': 3,
-            },
-            'label': "SDN"
-        },
-        'SDN-Test4': {
-            'enabled': ENABLED,
-            'info': "c4",
-            'flags': {
-                'specular_source_injection': True,
-                'source_weighting': 4,
-            },
-            'label': "SDN"
-        },
-        'SDN-Test5': {
-            'enabled': ENABLED,
-            'info': "c5",
-            'flags': {
-                'specular_source_injection': True,
-                'source_weighting': 5,
-            },
-            'label': "SDN Test 5"
-        },
-        'SDN-Test6': {
-            'enabled': ENABLED,
-            'info': "c6",
-            'flags': {
-                'specular_source_injection': True,
-                'source_weighting': 6,
-            },
-            'label': "SDN Test 6"
-        },
-        'SDN-Test7': {
-            'enabled': ENABLED,
-            'info': "c7",
-            'flags': {
-                'specular_source_injection': True,
-                'source_weighting': 7,
-            },
-            'label': "SDN Test 7"
-        },
-
-        'HO-SDN-N2': {
-            'enabled': ENABLED,
-            'info': 'HO-SDN N=2',
-            'source_signal': 'dirac',
-            'order': 2,
-            'label': 'HO-SDN N2'
-        },
-        'HO-SDN-N3': {
-            'enabled': ENABLED,
-            'info': 'HO-SDN N=3',
-            'source_signal': 'dirac',
-            'order': 3,
-            'label': 'HO-SDN N3'
-        },
-
-        'RIMPY-neg': {
-            'enabled': ENABLED,
-            'calculator': 'rimpy',
-            'params': {'reflection_sign': -1},
-            'info': 'Negative Reflection',
-            'label': 'RIMPY'
-        },
-
-        'RIMPY-neg10': {
-            'enabled': ENABLED,
-            'calculator': 'rimpy',
-            'params': {
-                'reflection_sign': -1,
-                'randDist': 0.1
-            },
-            'info': 'Negative Reflection + Rand10cm',
-            'label': 'RIMPY-rand10-neg'
-        },
-
-        'Test_trial': {
-            'enabled': False,
-            'info': "testing",
-            'flags': {
-                'specular_source_injection': True,
-                'source_weighting': -20,
-            },
-            'label': "SDN"
-        },
-    }
+    # Merge method configurations
+    method_configs = {}
+    method_configs.update(exp_config.ism_methods)
+    method_configs.update(exp_config.sdn_tests)
+    method_configs.update(exp_config.ho_sdn_tests)
 
     # Define simulation parameters
-    Fs = 44100
+    Fs = exp_config.Fs
 
-    if active_room['display_name'] == 'Journal Room':
-        duration = 1.2
-    elif active_room['display_name'] == 'WASPAA Room':
-        duration = 1.8
-    elif active_room['display_name'] == 'AES Room':
-        duration = 1
+    duration = exp_config.duration
 
     # --- Source and Receiver Setup ---
     # Common receiver setup for both single and multi-source runs
@@ -553,15 +268,38 @@ if __name__ == "__main__":
 
     if PROCESS_MULTIPLE_SOURCES:
         print("\n--- PROCESSING MULTIPLE SOURCES ---")
-        source_list = generate_source_positions(active_room)
-        # source_list = source_pos_new = [(7.5, 6.0, 2, 'Upper_Right_SourceV2_7d5_6_2')]
-
+        
+        # Generate all possible sources
+        all_sources = generate_source_positions(active_room)
+        
+        # Filter based on FILES_TO_PROCESS
+        source_list = []
+        for src_x, src_y, src_z, src_name in all_sources:
+            # Build expected filename for this source
+            room_name = active_room.get('display_name', 'unknown_room')
+            filename_suffix = room_name.lower().replace(' ', '_')
+            expected_filename = f"{filename_suffix}_spatial_edc_data_{src_name.lower()}.npz"
+            
+            # Only include if in FILES_TO_PROCESS
+            if expected_filename in FILES_TO_PROCESS:
+                source_list.append((src_x, src_y, src_z, src_name))
+                print(f"  Will process: {src_name} -> {expected_filename}")
+            else:
+                print(f"  Skipping: {src_name} (not in FILES_TO_PROCESS)")
+        
+        if not source_list:
+            print("WARNING: No sources to process after filtering. Check FILES_TO_PROCESS.")
+        
         for src_x, src_y, src_z, src_name in source_list:
             source_position = (src_x, src_y, src_z)
             print(f"\nProcessing for source: '{src_name}' at {source_position}")
 
             # Define a unique output path for this specific source
-            output_dir = "results/paper_data/"
+            # Use absolute path relative to project root
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.abspath(os.path.join(script_dir, '..'))
+            output_dir = os.path.join(project_root, "results", "paper_data")
+            
             room_name = active_room.get('display_name', 'unknown_room')
             filename_suffix = room_name.lower().replace(' ', '_')
             output_filename = f"{filename_suffix}_spatial_edc_data_{src_name.lower()}.npz"
@@ -584,8 +322,12 @@ if __name__ == "__main__":
         source_position = (active_room['source x'], active_room['source y'], active_room['source z'])
 
         # Define output path
-        output_dir = "results/paper_data"
-        room_name = active_room.get('display_name', 'unknown_room')
+        # Use absolute path relative to project root
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.abspath(os.path.join(script_dir, '..'))
+        output_dir = os.path.join(project_root, "results", "paper_data")
+        
+        room_name = active_room.get('display_name')
         filename_suffix = room_name.lower().replace(' ', '_')
         output_filename = f"{filename_suffix}_spatial_edc_data.npz"
         output_path = os.path.join(output_dir, output_filename)

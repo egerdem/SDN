@@ -4,14 +4,14 @@ import numpy as np
 from datetime import datetime
 import hashlib
 import sys
-import spatial_analysis as sa
+from analysis import spatial_analysis as sa
 # import sdn_manager_load_sims as sml
 from rir_calculators import rir_normalisation
 # Import modules for core functionality
 import geometry
-import plot_room as pp
-import EchoDensity as ned
-import analysis as an
+from analysis import plot_room as pp
+from analysis import EchoDensity as ned
+from analysis import analysis as an
 #from sdn_core import DelayNetwork
 
 # Set matplotlib backend to match main script
