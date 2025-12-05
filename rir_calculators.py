@@ -6,14 +6,16 @@ import os
 import json
 import hashlib
 import re
+from pathlib import Path
 
-# Add SDNPy to path (works regardless of where script is run from)
-_script_dir = os.path.dirname(os.path.abspath(__file__))
-_sdnpy_path = os.path.join(_script_dir, 'SDN-Simplest_Hybrid_HO-SDN', 'SDNPy')
-if os.path.exists(_sdnpy_path):
-    sys.path.insert(0, _sdnpy_path)
-else:
-    raise ImportError(f"SDNPy directory not found at: {_sdnpy_path}")
+_script_dir = Path(__file__).resolve().parent
+sdnpy_dir = _script_dir / 'SDN-Simplest_Hybrid_HO-SDN' / 'SDNPy'  # directory that contains `src/`
+
+if not (sdnpy_dir / 'src').is_dir():
+    raise ImportError(f"Expected SDNPy/src at {sdnpy_dir}, but it wasn't found.")
+
+# Make `src` importable
+sys.path.insert(0, str(sdnpy_dir))
 
 from src import Simulation_HO_SDN_centroid as sim_HO_SDN_centroid
 from src import Geometry as geom

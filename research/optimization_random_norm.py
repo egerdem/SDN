@@ -128,7 +128,7 @@ if __name__ == "__main__":
 
     # List of data files to process. Each will be optimized independently.
     FILES_TO_PROCESS = [
-        "aes_room_spatial_edc_data_center_source.npz",
+        "aes_quarter_center_source.npz",
         # "aes_room_spatial_edc_data_top_middle_source.npz",
         # "aes_room_spatial_edc_data_upper_right_source.npz",
         # "aes_room_spatial_edc_data_lower_left_source.npz",

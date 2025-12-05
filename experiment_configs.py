@@ -83,12 +83,12 @@ testx = False
 # SDN Tests
 RUN_SDN_Test0 = False
 RUN_SDN_Test1 = True  # c=1 original
-RUN_SDN_Test2 = False
-RUN_SDN_Test3 = False
+RUN_SDN_Test2 = True
+RUN_SDN_Test3 = True
 RUN_SDN_Test2_998 = False # Test2.998
 RUN_SDN_Test4_71 = False # Test2.998
-RUN_SDN_Test4 = False
-RUN_SDN_Test5 = False
+RUN_SDN_Test4 = True
+RUN_SDN_Test5 = True
 RUN_SDN_Test6 = False
 RUN_SDN_Test7 = False
 
