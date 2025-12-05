@@ -3,7 +3,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import geometry
 import matplotlib
-matplotlib.use('Qt5Agg')  # Set the backend to Qt5
+import platform
+if platform.system() == 'Darwin':
+    matplotlib.use('Qt5Agg')
+else:
+    matplotlib.use('Agg')
 
 Fs = 44100
 # Define the Room

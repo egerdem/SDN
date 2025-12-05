@@ -4,7 +4,11 @@ from typing import Dict, List, Optional, Tuple, Union
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib
-matplotlib.use('Qt5Agg')  # Set the backend to Qt5
+import platform
+if platform.system() == 'Darwin':
+    matplotlib.use('Qt5Agg')  # Set the backend to Qt5 on macOS
+else:
+    matplotlib.use('Agg') # Use non-interactive backend on other platforms (e.g. Linux/Headless)
 
 
 class Room:
