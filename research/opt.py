@@ -56,7 +56,7 @@ def generate_basis_rirs(room_params, source_pos, receiver_positions, duration, F
 
     # 1. Calculate Baseline RIR (c = [0, 0, 0, 0, 0, 0])
     cfg = deepcopy(base_cfg)
-    cfg["flags"]["injection_c_vector"] = [0.0] * num_walls
+    cfg["flags"]["node_weighting_vector"] = [0.0] * num_walls
 
     baseline_rirs = []
 
@@ -74,7 +74,7 @@ def generate_basis_rirs(room_params, source_pos, receiver_positions, duration, F
 
     # Helper to run for all receivers given a c_vector
     def run_for_all_mics(c_vec):
-        cfg["flags"]["injection_c_vector"] = c_vec
+        cfg["flags"]["node_weighting_vector"] = c_vec
         rirs = []
         for i, (rx, ry) in enumerate(receiver_positions):
             room.set_microphone(rx, ry, room_params['mic z'])

@@ -7,19 +7,21 @@ from archive.sdn_base import calculate_sdn_base_rir
 import pyroomacoustics as pra
 from scipy import signal
 # import seaborn as sns
-from analysis import analysis as an
+import analysis as an
 import rir_calculators as rir_calc
 from analysis.plotting_utils import DISPLAY_NAME_MAP
 
 
-def print_receiver_grid(receiver_positions, room, source_position=None):
+def print_receiver_grid(receiver_positions, room, source_position=None, save=False, source_name=""):
     if source_position is None:
         source_position = room["source x"], room["source y"], room["source z"]
 
     # Print and visualize the receiver grid
     print("\nReceiver Grid Coordinates:")
     grid_size = int(np.sqrt(len(receiver_positions)))
-    for i, (rx, ry) in enumerate(receiver_positions):
+
+    for i, pos in enumerate(receiver_positions):
+        rx, ry = pos[:2]
         print(f"Position {i:2d}: ({rx:.2f}, {ry:.2f}), grid index: row={i // grid_size}, col={i % grid_size}")
 
     # Visualize the receiver grid
@@ -29,17 +31,25 @@ def print_receiver_grid(receiver_positions, room, source_position=None):
     plt.scatter(rx_values, ry_values, c='blue', s=100, alpha=0.7)
 
     # Add position indices
-    for i, (rx, ry) in enumerate(receiver_positions):
+    for i, pos in enumerate(receiver_positions):
+        rx, ry = pos[:2]
         plt.text(rx, ry, f"{i}", fontsize=9, ha='center', va='center')
 
     # Add grid indices
-    for i, (rx, ry) in enumerate(receiver_positions):
+    for i, pos in enumerate(receiver_positions):
+        rx, ry = pos[:2]
         row, col = i // grid_size, i % grid_size
         # plt.text(rx, ry+0.2, f"({row},{col})", fontsize=8, ha='center', va='center', color='red')
         plt.text(rx, ry + 0.2, f"{rx:.2f}, {ry:.2f}", fontsize=8, ha='center', va='center', color='black')
 
     # Add source position
     plt.plot(source_position[0], source_position[1], 'ro', markersize=15)
+    
+    # Add source coordinates text above the source circle
+    source_x, source_y, source_z = source_position[0], source_position[1], source_position[2]
+    plt.text(source_x, source_y + 0.3, f'({source_x:.2f}, {source_y:.2f}, {source_z:.2f})', 
+             fontsize=10, ha='center', va='bottom', color='red', weight='bold',
+             bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor='red', alpha=0.8))
 
     # Add room boundaries
     plt.plot([0, room['width']], [0, 0], 'k-', linewidth=2)
@@ -53,8 +63,9 @@ def print_receiver_grid(receiver_positions, room, source_position=None):
     plt.grid(True, alpha=0.3)
     plt.gca().set_aspect('equal', adjustable='box')
     plt.legend()
-    # plt.savefig('receiver_grid_positions.png')
-    # plt.close()
+    if save:
+        plt.savefig(f'{source_name}_receiver_grid_old_positions.png')
+        plt.close()
     plt.show()
 
 def generate_receiver_grid_old(room_width: float, room_depth: float, margin = 1, center_margin = None, n_points: int = 50) -> List[Tuple[float, float]]:
@@ -98,7 +109,27 @@ def generate_receiver_grid_tr(room_width: float, room_depth: float, margin=1, n_
     print(f"Receiver grid: {X.shape} positions, margin={margin}, center margin={margin_from_center}")
     return list(zip(X.flatten(), Y.flatten()))
 
-
+def generate_full_receiver_grid(room_width: float, room_depth: float, height: float, n_x: int = 4, n_y: int = 4, margin: float = 0.5) -> List[Tuple[float, float, float]]:
+    """
+    Generate a grid of receiver positions covering the entire room.
+    
+    Args:
+        room_width: Width of room
+        room_depth: Depth of room
+        height: Height of receivers
+        n_x: Number of points along width
+        n_y: Number of points along depth
+        margin: Distance from walls
+    """
+    x = np.linspace(margin, room_width - margin, n_x)
+    y = np.linspace(margin, room_depth - margin, n_y)
+    
+    receivers = []
+    for xi in x:
+        for yi in y:
+            receivers.append((xi, yi, height))
+            
+    return receivers
 def generate_source_positions(room_params, name = None):
     """Create a list of source positions within the room.
 
@@ -177,7 +208,7 @@ def plot_rirs(rir_methods: Dict, receiver_positions: List[Tuple[float, float]],
     colors = plt.cm.tab10(np.linspace(0, 1, n_methods))
 
     for pos_idx, ax in zip(selected_positions, axes):
-        rx, ry = receiver_positions[pos_idx]
+        rx, ry = receiver_positions[pos_idx][:2]
 
         for method_idx, (method, rirs) in enumerate(rir_methods.items()):
             time = np.arange(len(rirs[pos_idx])) / Fs * 1000  # Convert to milliseconds
@@ -255,7 +286,8 @@ def spatial_error_analysis(room_params: dict, source_pos: Tuple[float, float, fl
         rir_methods[method] = []
         config = method_configs[method]
         
-        for rx, ry in receiver_positions:
+        for pos in receiver_positions:
+            rx, ry = pos[:2]
             room.set_microphone(rx, ry, room_params['mic z'])
             print(f"Receiver Position: ({rx:.2f}, {ry:.2f}")
             # This geom_room is needed for normalization later
@@ -308,7 +340,8 @@ def spatial_error_analysis(room_params: dict, source_pos: Tuple[float, float, fl
             comparison_key = f'{reference_method}_vs_{method}'
             error_maps[comparison_key] = {'X': X, 'Y': Y, 'errors': []}
 
-    for pos_idx, (rx, ry) in enumerate(receiver_positions):
+    for pos_idx, pos in enumerate(receiver_positions):
+        rx, ry = pos[:2]
         print(f"\n--- Results for Receiver Position {pos_idx}: ({rx:.2f}m, {ry:.2f}m) ---")
         table_data = []
         ref_rir = rir_methods[reference_method][pos_idx]
@@ -496,7 +529,7 @@ if __name__ == "__main__":
             'info': ''  # Empty info for ISM
         },
         'SDN-Test1': {
-            'enabled': True,
+            'enabled': False,
                 'label': "",
                 'flags': {
                     'specular_source_injection': True,

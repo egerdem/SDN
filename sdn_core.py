@@ -21,8 +21,8 @@ class DelayNetwork:
     def __init__(self, room: Room, Fs: int = 44100, c: float = 343.0, source_pressure_injection_coeff: float = 0.5,
                  coef: float = 2.0/5,
                  source_weighting: float = 1,
-                 injection_c_vector: List[float] = None,
-                 injection_vector: List[float] = None,
+                 node_weighting_vector: List[float] = None,
+                 source_injection_vector: List[float] = None,
                  specular_mic_pickup: bool = False,  # <--- NEW FLAG
                  mic_weighting: float = 1.0,
                  collection_vector: List[float] = None,  # <--- NEW PARAMETER
@@ -75,8 +75,8 @@ class DelayNetwork:
              
         self.coef = coef
         self.source_weighting = source_weighting
-        self.injection_c_vector = injection_c_vector
-        self.injection_vector = injection_vector
+        self.node_weighting_vector = node_weighting_vector
+        self.source_injection_vector = source_injection_vector
         self.specular_mic_pickup = specular_mic_pickup  # <--- STORE FLAG
         self.mic_weighting = mic_weighting
         self.collection_vector = collection_vector  # <--- STORE PARAMETER
@@ -705,10 +705,18 @@ class DelayNetwork:
                     if self.specular_source_injection or self.specular_source_injection_random:
                         if psk != 0.0: # change the source injection distribution. new approach.
 
-                            if self.injection_c_vector is not None:
-                                c = self.injection_c_vector[self.injection_index]
-                            elif self.injection_vector is not None:
-                                c = self.injection_vector[0]  # First element always for dominant node
+                            if self.node_weighting_vector is not None:
+                                c = self.node_weighting_vector[self.injection_index]
+                            elif self.source_injection_vector is not None:
+                                # Check if source_injection_vector is a list of lists (per-wall vectors)
+                                if isinstance(self.source_injection_vector[0], (list, np.ndarray)):
+                                     # We have a 6x5 matrix. Use the vector for the current wall (injection_index)
+                                     # The vector is [c, cn, cn, cn, cn]
+                                     current_vec = self.source_injection_vector[self.injection_index]
+                                     c = current_vec[0] # First element is dominant
+                                else:
+                                     # Standard single vector shared by all
+                                     c = self.source_injection_vector[0]
                             else:
                                 c = self.source_weighting
 
@@ -721,21 +729,27 @@ class DelayNetwork:
                                 p_tilde = pki_pressure + c*psk
 
                             else:
-                                # Only calculate cn = (5-c)/4 if we're not using injection_vector
-                                if self.injection_vector is not None:
+                                # Only calculate cn = (5-c)/4 if we're not using source_injection_vector
+                                if self.source_injection_vector is not None:
+                                    # Handle per-wall vectors vs shared vector
+                                    if isinstance(self.source_injection_vector[0], (list, np.ndarray)):
+                                        current_vec = self.source_injection_vector[self.injection_index]
+                                    else:
+                                        current_vec = self.source_injection_vector
+                                        
                                     # Use non_dominant_index to get values from the injection vector
-                                    if self.non_dominant_index < len(self.injection_vector):
-                                        cn = self.injection_vector[self.non_dominant_index]
+                                    if self.non_dominant_index < len(current_vec):
+                                        cn = current_vec[self.non_dominant_index]
                                         self.non_dominant_index += 1  # Increment for next non-dominant node
                                 else:
-                                    # Original calculation only used when no injection_vector
+                                    # Original calculation only used when no source_injection_vector
                                     cn = (5 - c) / 4
                                 
                                 psk_in.append(cn)
                                 p_tilde = pki_pressure + cn * psk # or pki_pressure + 0 * psk
                             
                             # Check total injection count at the end of the loop
-                            # only used if there is injection_vector?
+                            # only used if there is source_injection_vector?
                             if iter == self.total_injection_count-1:
                                 self.injection_index += 1
                                 self.non_dominant_index = 1  # Reset for next round of source injection

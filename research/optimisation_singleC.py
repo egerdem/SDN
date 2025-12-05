@@ -50,7 +50,7 @@ err_duration_ms = 50  # 50 ms
 
 # --- Optimizer Selection ---
 OPTIMIZER = 'minimize_scalar'  # Options: 'minimize_scalar', 'basin_hopping', 'differential_evolution'
-BOUNDS = (1.0, 7.0)  # Bounds for c parameter
+BOUNDS = (-3.0, 7.0)  # Bounds for c parameter
 
 # List of data files to process. Each will be optimized independently.
 FILES_TO_PROCESS = [

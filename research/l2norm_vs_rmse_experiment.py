@@ -12,8 +12,16 @@ from analysis import analysis as an
 # Use standard calculator as FAST method caches based on wall ID, not arbitrary vectors
 from rir_calculators import calculate_sdn_rir, rir_normalisation
 
+# For reproducibility, set random seed
+np.random.seed(seed=42)
+
 # --- Config ---
-DATA_FILE = "aes_room_spatial_edc_data_center_source.npz"
+# DATA_FILE = "aes_room_spatial_edc_data_center_source.npz"
+# DATA_FILE = "aes_room_spatial_edc_data_upper_right_source.npz"
+# DATA_FILE = "aes_room_spatial_edc_data_top_middle_source.npz"
+DATA_FILE = "aes_room_spatial_edc_data_lower_left_source.npz"
+# "aes_room_spatial_edc_data_lower_left_source.npz",
+
 NUM_TRIALS = 100  # More trials to see the trend clearly
 REFERENCE_METHOD = "RIMPY-neg10"
 ERROR_DURATION_MS = 50
@@ -92,6 +100,9 @@ def run_experiment():
     room.set_source(*dataset["source_pos"], signal=impulse["signal"], Fs=Fs)
     room.wallAttenuation = [room_params["reflection"]] * 6
 
+    import time
+    start_time = time.time()
+
     # --- Run Trials ---
     for i in range(NUM_TRIALS):
         # 1. Generate Random Vector (Sum=5)
@@ -108,7 +119,15 @@ def run_experiment():
 
         # 4. Run Simulation (Subset of receivers for speed)
         # We test corners + center to get a robust average
-        test_indices = [0, 5, 10, 15]
+        # Ensure we don't go out of bounds
+        num_receivers = len(dataset["receiver_positions"])
+        # test_indices = [0, 5, 10, 15] 
+        # Pick 4 indices spread out or all if small
+        if num_receivers > 4:
+             test_indices = np.linspace(0, num_receivers-1, 5, dtype=int).tolist()
+        else:
+             test_indices = range(num_receivers)
+             
         receivers = dataset["receiver_positions"]
         ref_edcs = dataset["ref_edcs"]
 
@@ -132,8 +151,10 @@ def run_experiment():
         results_l2.append(l2_norm)
         results_rmse.append(avg_rmse)
 
-        if (i + 1) % 10 == 0:
-            print(f"Trial {i + 1}/{NUM_TRIALS}: L2={l2_norm:.3f} -> RMSE={avg_rmse:.4f}")
+        print(f"Trial {i + 1}/{NUM_TRIALS}: L2={l2_norm:.3f} -> RMSE={avg_rmse:.4f} (Vec={np.round(vec, 2)})", flush=True)
+
+    elapsed_time = time.time() - start_time
+    print(f"Experiment took {elapsed_time/60:.2f} minutes.")
 
     # --- Add Reference Points ---
     # 1. Original SDN (Uniform)

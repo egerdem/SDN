@@ -93,7 +93,7 @@ config = {'enabled': True,
           'info': "",
           'flags': {
               'specular_source_injection': True,
-              'injection_c_vector': np.full(6, 5.0),  # Initial value, will be updated
+              'node_weighting_vector': np.full(6, 5.0),  # Initial value, will be updated
           },
           'label': "SDN"
           }
@@ -106,8 +106,8 @@ sdn = DelayNetwork(room, Fs=Fs, label=config['label'], **config['flags'])
 # ------------------------------------------------------------------
 def calculate_rir_with_new_c_vector(sdn, c_vec):
     """Calculate RIR with updated c_vector without recreating the network"""
-    # Update the injection_c_vector in the SDN
-    sdn.injection_c_vector = c_vec
+    # Update the node_weighting_vector in the SDN
+    sdn.node_weighting_vector = c_vec
     # Reset injection index to 0 for the new calculation
     sdn.injection_index = 0
     

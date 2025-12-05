@@ -345,7 +345,7 @@ def calculate_sdn_rir_fast(room_parameters, test_name, room, duration, Fs, confi
     Calculate RIR using FAST SDN (Analytic Reconstruction).
     Uses caching to store Basis Functions (R(0) and R(1)-R(0)).
     
-    Handles both scalar 'source_weighting' and vector 'injection_c_vector'.
+    Handles both scalar 'source_weighting' and vector 'node_weighting_vector'.
     
     Args:
         Same as calculate_sdn_rir
@@ -356,11 +356,11 @@ def calculate_sdn_rir_fast(room_parameters, test_name, room, duration, Fs, confi
     cache_label = config.get('cache_label')
     
     # Determine mode: Scalar or Vector
-    is_vector_mode = 'injection_c_vector' in flags
+    is_vector_mode = 'node_weighting_vector' in flags
     
     if is_vector_mode:
         mode_key = "vector"
-        requested_c = flags.get('injection_c_vector')
+        requested_c = flags.get('node_weighting_vector')
         # Ensure it's a list/array of 6 floats
         if not isinstance(requested_c, (list, np.ndarray)) or len(requested_c) != 6:
              assert False, f"Fast SDN Vector mode requires list of 6 coefficients. Got {requested_c}. Fallback to scalar 1.0"
@@ -388,7 +388,7 @@ def calculate_sdn_rir_fast(room_parameters, test_name, room, duration, Fs, confi
             # 1. Baseline (All c=0)
             cfg_base = deepcopy(config)
             
-            cfg_base['flags']['injection_c_vector'] = [0.0] * 6
+            cfg_base['flags']['node_weighting_vector'] = [0.0] * 6
             
             _, rir_base, _, _ = calculate_sdn_rir(room_parameters, test_name, room, duration, Fs, cfg_base)
             
@@ -402,7 +402,7 @@ def calculate_sdn_rir_fast(room_parameters, test_name, room, duration, Fs, confi
                 c_vec[i] = 1.0
                 
                 cfg_i = deepcopy(config)
-                cfg_i['flags']['injection_c_vector'] = c_vec
+                cfg_i['flags']['node_weighting_vector'] = c_vec
                 cfg_i['label'] = f"Basis_{i}"
                 
                 _, rir_i, _, _ = calculate_sdn_rir(room_parameters, f"Basis{i}", room, duration, Fs, cfg_i)

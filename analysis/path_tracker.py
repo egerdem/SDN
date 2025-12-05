@@ -2,7 +2,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import List, Dict, Tuple
 import numpy as np
-from .spatial_analysis import generate_receiver_grid_old, generate_source_positions, print_receiver_grid
+from spatial_analysis import generate_receiver_grid_old, generate_source_positions, print_receiver_grid
 
 @dataclass
 class Path:

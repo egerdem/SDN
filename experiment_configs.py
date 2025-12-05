@@ -7,7 +7,7 @@ Used by:
 - research/generate_paper_data.py (Data generation)
 - research/paper_figures_spatial.py (Visualization)
 """
-
+import matplotlib.pyplot as plt
 import numpy as np
 from rir_calculators import calculate_pra_rir, calculate_rimpy_rir, calculate_sdn_rir, calculate_sdn_rir_fast, calculate_ho_sdn_rir
 
@@ -82,15 +82,18 @@ testx = False
 
 # SDN Tests
 RUN_SDN_Test0 = False
-RUN_SDN_Test1 = False  # c=1 original
+RUN_SDN_Test1 = True  # c=1 original
 RUN_SDN_Test2 = False
 RUN_SDN_Test3 = False
-RUN_SDN_Test2_998 = True # Test2.998
+RUN_SDN_Test2_998 = False # Test2.998
 RUN_SDN_Test4_71 = False # Test2.998
 RUN_SDN_Test4 = False
 RUN_SDN_Test5 = False
 RUN_SDN_Test6 = False
 RUN_SDN_Test7 = False
+
+RUN_SDN_Test_2 = False
+RUN_SDN_Test_3 = False
 
 RUN_SDN_Test_micX = False
 RUN_SDN_Test2_mic = False
@@ -201,6 +204,17 @@ ism_methods = {
 # SDN Tests
 sdn_tests = {
 
+    'SDN-TestX': {
+                    'enabled': testx,
+                    'info': "cx",
+                    'calculator': 'sdn',
+                    'flags': {
+                    'specular_source_injection': True,
+                'source_injection_vector': [1.836, 1.467, 1.203, 1.385, 0.109],
+                    },
+                    'label': "SDN Test X"
+                },
+
     'SDN-Test2_mic': {
                     'enabled': RUN_SDN_Test2_mic,
                     'info': "c2",
@@ -252,7 +266,7 @@ sdn_tests = {
         'calculator': 'sdn',
         'flags': {
             'specular_source_injection': True,
-            'injection_vector': [np.sqrt(5),0,0,0,0],
+            'source_injection_vector': [np.sqrt(5),0,0,0,0],
             'specular_mic_pickup': True,
             'collection_vector': [0, 0, np.sqrt(5), 0, 0],  # [dominant, non-dom1, non-dom2, non-dom3, non-dom4]
         },
@@ -266,7 +280,7 @@ sdn_tests = {
         'calculator': 'sdn',
         'flags': {
             'specular_source_injection': True,
-            'injection_vector': [2.5, 2.5, 0,0,0],
+            'source_injection_vector': [2.5, 2.5, 0,0,0],
         },
         'label': "SDN"
     },
@@ -277,7 +291,7 @@ sdn_tests = {
             'calculator': 'sdn',
             'flags': {
                 'specular_source_injection': True,
-                'injection_vector': [5/3,5/3,5/3,0,0],
+                'source_injection_vector': [5/3,5/3,5/3,0,0],
             },
             'label': "SDN"
         },
@@ -288,7 +302,7 @@ sdn_tests = {
         'calculator': 'sdn',
         'flags': {
             'specular_source_injection': True,
-            'injection_c_vector':[4.35,6.05,2.85,4.02,1.68,2.17]
+            'node_weighting_vector':[4.35,6.05,2.85,4.02,1.68,2.17]
         }, 
         'label': "SDN"
     },
@@ -298,7 +312,7 @@ sdn_tests = {
         'calculator': 'sdn',
         'flags': {
             'specular_source_injection': True,
-            'injection_c_vector':[4.79,6.20,1.00,7.00,1.00,2.09]
+            'node_weighting_vector':[4.79,6.20,1.00,7.00,1.00,2.09]
         }, 
         'label': "SDN"
     },
@@ -460,6 +474,21 @@ sdn_tests = {
         'label': "SDN Test 7"
     },
 
+    'SDN-Test_2': {'enabled': RUN_SDN_Test_2,
+               'info': "c-2",
+               'flags': {
+                   'specular_source_injection': True,
+                   'source_weighting': -2,
+               }, 'label': "SDN"},
+
+    'SDN-Test_3': {'enabled': RUN_SDN_Test_3,
+                   'info': "c-3",
+                   'flags': {
+                       'specular_source_injection': True,
+                       'source_weighting': -3,
+                   }, 'label': "SDN"},
+
+
     'Test1b': {'enabled': RUN_SDN_Test1b,
                'info': "c1 orj SN",
                'flags': {
@@ -573,3 +602,4 @@ ho_sdn_tests = {
         'label': "HO-SDN N3"
     }
 }
+

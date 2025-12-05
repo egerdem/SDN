@@ -3,7 +3,7 @@ Optimises a 6-element source weighting vector ``c`` for an SDN model
 by minimising the EDC RMSE averaged over all available spatial data
 files.
 
-Each element of the vector corresponds to the ``injection_c_vector``
+Each element of the vector corresponds to the ``node_weighting_vector``
 parameter used during specular source injection.  All six values share
 the same optimisation bounds of 1 to 7 (future work may extend this to
 -3 to 7).
@@ -96,7 +96,7 @@ def compute_dataset_rmse(c_vec: np.ndarray, dataset: dict, err_duration_ms: int,
 
     cfg = deepcopy(base_cfg)
     c_list = [float(v) for v in np.squeeze(c_vec)]
-    cfg["flags"]["injection_c_vector"] = c_list
+    cfg["flags"]["node_weighting_vector"] = c_list
     cfg["label"] = "SDN-SW-cvec_" + "-".join(f"{v:.2f}" for v in c_list)
 
     total_rmse = 0.0
@@ -223,7 +223,7 @@ if __name__ == "__main__":
         # reg_weight=0.0,  # Regularization weight
     )
 
-    # x0 = np.full(6, 1.24)
+    # x0 = np.full(6, 1.)
     # x0 = np.array([3.21,7.00,3.14,1.09,7.00,1.02])
 
     # TWO-STAGE NELDER-MEAD APPROACH
@@ -282,7 +282,7 @@ if __name__ == "__main__":
     #     obj,
     #     x0,
     #     minimizer_kwargs=minimizer_kwargs,
-    #     niter=5,  # Number of basin-hopping iterations
+    #     niter=10,  # Number of basin-hopping iterations
     #     callback=print_fun,
     # )
 

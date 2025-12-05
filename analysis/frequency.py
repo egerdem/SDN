@@ -1,4 +1,4 @@
-from scipy.signal import gaussian
+from scipy.signal.windows import gaussian
 import numpy as np
 import matplotlib.pyplot as plt
 

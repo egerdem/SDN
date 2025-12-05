@@ -1,0 +1,201 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2761
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\froman\fcharset0 TimesNewRomanPSMT;\f1\fswiss\fcharset0 Helvetica;\f2\froman\fcharset0 TimesNewRomanPS-BoldMT;
+\f3\froman\fcharset0 TimesNewRomanPS-ItalicMT;\f4\fmodern\fcharset0 CourierNewPSMT;}
+{\colortbl;\red255\green255\blue255;\red0\green0\blue0;\red109\green109\blue109;}
+{\*\expandedcolortbl;;\cssrgb\c0\c0\c0;\cssrgb\c50196\c50196\c50196;}
+{\*\listtable{\list\listtemplateid1\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid1\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid1}
+{\list\listtemplateid2\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid101\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{circle\}}{\leveltext\leveltemplateid102\'01\uc0\u9702 ;}{\levelnumbers;}\fi-360\li1440\lin1440 }{\listname ;}\listid2}
+{\list\listtemplateid3\listhybrid{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{disc\}}{\leveltext\leveltemplateid201\'01\uc0\u8226 ;}{\levelnumbers;}\fi-360\li720\lin720 }{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{circle\}}{\leveltext\leveltemplateid202\'01\uc0\u9702 ;}{\levelnumbers;}\fi-360\li1440\lin1440 }{\listname ;}\listid3}
+{\list\listtemplateid4\listhybrid{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{disc\}}{\leveltext\leveltemplateid301\'01\uc0\u8226 ;}{\levelnumbers;}\fi-360\li720\lin720 }{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{circle\}}{\leveltext\leveltemplateid302\'01\uc0\u9702 ;}{\levelnumbers;}\fi-360\li1440\lin1440 }{\listname ;}\listid4}}
+{\*\listoverridetable{\listoverride\listid1\listoverridecount0\ls1}{\listoverride\listid2\listoverridecount0\ls2}{\listoverride\listid3\listoverridecount0\ls3}{\listoverride\listid4\listoverridecount0\ls4}}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\deftab720
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs32 \cf0 \expnd0\expndtw0\kerning0
+In the reference implementation for Scattering Delay Networks (SDN), the -0.6 value in the scattering matrix is used in the computations along the paths, as part of the scattering operation. The scattering matrix S, calculated as:
+\f1 \
+
+\f0 S=2N\uc0\u8722 11(N\u8722 1)\'d7(N\u8722 1)\u8722 I,S = \\frac\{2\}\{N-1\}1_\{(N-1) \\times (N-1)\} - I,S=N\u8722 12 1(N\u8722 1)\'d7(N\u8722 1) \u8722 I,
+\f1 \
+
+\f0 is applied to the incoming pressure wave variables to compute the outgoing wave variables at each node. This is a fundamental part of how energy is redistributed among connected nodes, ensuring the energy-preserving (unitary) nature of the SDN model.
+\f1 \
+\pard\pardeftab720\partightenfactor0
+
+\f2\b\fs36 \cf0 How -0.6 is applied:
+\f1\b0\fs32 \
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls1\ilvl0
+\f2\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	1	}\expnd0\expndtw0\kerning0
+Incoming Waves
+\f0\b0 : Each SDN node receives incoming wave variables (p+p^+p+) from its connected neighbors.
+\f1 \
+\ls1\ilvl0
+\f2\b \kerning1\expnd0\expndtw0 {\listtext	2	}\expnd0\expndtw0\kerning0
+Scattering Operation
+\f0\b0 : The scattering matrix SSS determines how these incoming waves are mixed and reflected back to the neighboring nodes. The value -0.6 represents the self-connection term, which is subtracted from the incoming wave variables. This effectively governs the proportion of the wave reflected back to the node itself, ensuring that the energy is distributed correctly across the network.
+\f1 \
+\ls1\ilvl0
+\f2\b \kerning1\expnd0\expndtw0 {\listtext	3	}\expnd0\expndtw0\kerning0
+Propagation
+\f0\b0 : After the scattering operation, the outgoing wave variables (p\uc0\u8722 p^-p\u8722 ) are propagated through the bidirectional delay lines to the connected nodes.
+\f1 \
+\pard\pardeftab720\partightenfactor0
+
+\f0 \cf0 In summary, the -0.6 value is intrinsic to the energy redistribution process within the SDN model. It ensures that the scattering process adheres to the energy-conserving principles required for realistic room acoustic simulation. If this scattering matrix is bypassed or altered, the accuracy of the modeled reverberation would be compromised.
+\f1 \
+\pard\pardeftab720\partightenfactor0
+
+\f2\b\fs36 \cf0 \'a0
+\f1\b0\fs32 \
+
+\f2\b\fs36 Key Definitions
+\f1\b0\fs32 \
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls2\ilvl0
+\f2\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	1	}\expnd0\expndtw0\kerning0
+Incoming Delay Lines
+\f0\b0 : These are the wave signals coming 
+\f3\i into
+\f0\i0  the current node from other connected nodes.
+\f1 \
+\pard\tx940\tx1440\pardeftab720\li1440\fi-1440\partightenfactor0
+\ls2\ilvl1
+\f0 \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u9702 	}\expnd0\expndtw0\kerning0
+Example: 
+\f4\fs26\fsmilli13333 incoming_delay_lines = [Node1 to Node2, Node3 to Node2, Node4 to Node2, Node5 to Node2, Node6 to Node2]
+\f1\fs32 \
+\pard\tx940\tx1440\pardeftab720\li1440\fi-1440\partightenfactor0
+\ls2\ilvl1
+\f2\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u9702 	}\expnd0\expndtw0\kerning0
+Length:
+\f0\b0  Matches the number of connections to the current node.
+\f1 \
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls2\ilvl0
+\f2\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	2	}\expnd0\expndtw0\kerning0
+Outgoing Delay Lines
+\f0\b0 : These are the wave signals propagating 
+\f3\i out
+\f0\i0  from the current node to other connected nodes.
+\f1 \
+\pard\tx940\tx1440\pardeftab720\li1440\fi-1440\partightenfactor0
+\ls2\ilvl1
+\f0 \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u9702 	}\expnd0\expndtw0\kerning0
+Example: 
+\f4\fs26\fsmilli13333 outgoing_delay_lines = [Node2 to Node1, Node2 to Node3, Node2 to Node4, Node2 to Node5, Node2 to Node6]
+\f1\fs32 \
+\pard\tx940\tx1440\pardeftab720\li1440\fi-1440\partightenfactor0
+\ls2\ilvl1
+\f2\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u9702 	}\expnd0\expndtw0\kerning0
+Length:
+\f0\b0  Matches the number of connections from the current node.
+\f1 \
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls2\ilvl0
+\f2\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	3	}\expnd0\expndtw0\kerning0
+Scattering Matrix
+\f0\b0 : Governs how incoming waves are distributed to outgoing waves.
+\f1 \
+\pard\tx940\tx1440\pardeftab720\li1440\fi-1440\partightenfactor0
+\ls2\ilvl1
+\f0 \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u9702 	}\expnd0\expndtw0\kerning0
+S[i][j]S[i][j]S[i][j]: The coefficient used to compute the contribution of the jthj^\{th\}jth incoming wave to the ithi^\{th\}ith outgoing wave.
+\f1 \
+\pard\tx940\tx1440\pardeftab720\li1440\fi-1440\partightenfactor0
+\ls2\ilvl1
+\f2\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u9702 	}\expnd0\expndtw0\kerning0
+Rows
+\f0\b0 : Correspond to 
+\f2\b outgoing delay lines
+\f0\b0  (where the wave is sent).
+\f1 \
+\ls2\ilvl1
+\f2\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u9702 	}\expnd0\expndtw0\kerning0
+Columns
+\f0\b0 : Correspond to 
+\f2\b incoming delay lines
+\f0\b0  (where the wave came from).
+\f1 \
+\pard\pardeftab720\qc\partightenfactor0
+
+\f0 \cf3 \
+\pard\pardeftab720\partightenfactor0
+
+\f2\b\fs36 \cf0 Understanding the Indices
+\f1\b0\fs32 \
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls3\ilvl0
+\f2\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Incoming Index j:
+\f1\b0 \
+\pard\tx940\tx1440\pardeftab720\li1440\fi-1440\partightenfactor0
+\ls3\ilvl1
+\f0 \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u9702 	}\expnd0\expndtw0\kerning0
+Refers to the index in 
+\f4\fs26\fsmilli13333 incoming_delay_lines
+\f0\fs32  (e.g., j=0 corresponds to "Node1 to Node2").
+\f1 \
+\ls3\ilvl1
+\f0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u9702 	}\expnd0\expndtw0\kerning0
+Each column in the scattering matrix corresponds to a specific 
+\f2\b incoming delay line
+\f0\b0 .
+\f1 \
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls3\ilvl0
+\f2\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Outgoing Index i:
+\f1\b0 \
+\pard\tx940\tx1440\pardeftab720\li1440\fi-1440\partightenfactor0
+\ls3\ilvl1
+\f0 \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u9702 	}\expnd0\expndtw0\kerning0
+Refers to the index in 
+\f4\fs26\fsmilli13333 outgoing_delay_lines
+\f0\fs32  (e.g., i=0 corresponds to "Node2 to Node1").
+\f1 \
+\ls3\ilvl1
+\f0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u9702 	}\expnd0\expndtw0\kerning0
+Each row in the scattering matrix corresponds to a specific 
+\f2\b outgoing delay line
+\f0\b0 .
+\f1 \
+\pard\pardeftab720\qc\partightenfactor0
+
+\f0 \cf3 \
+\pard\pardeftab720\partightenfactor0
+
+\f2\b\fs36 \cf0 How S[i][j] Works
+\f1\b0\fs32 \
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls4\ilvl0
+\f0 \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+S[i][j] The scattering matrix element determines 
+\f2\b how much of the wave coming from the jth incoming line is sent to the ith outgoing line
+\f0\b0 .
+\f1 \
+\ls4\ilvl0
+\f0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+For example:
+\f1 \
+\pard\tx940\tx1440\pardeftab720\li1440\fi-1440\partightenfactor0
+\ls4\ilvl1
+\f0 \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u9702 	}\expnd0\expndtw0\kerning0
+S[0][0]: Contribution of the wave from 
+\f4\fs26\fsmilli13333 Node1 to Node2
+\f0\fs32  to the outgoing wave 
+\f4\fs26\fsmilli13333 Node2 to Node1
+\f0\fs32 .
+\f1 \
+\ls4\ilvl1
+\f0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u9702 	}\expnd0\expndtw0\kerning0
+S[1][0] Contribution of the wave from 
+\f4\fs26\fsmilli13333 Node1 to Node2
+\f0\fs32  to the outgoing wave 
+\f4\fs26\fsmilli13333 Node2 to Node3
+\f0\fs32 .
+\f1 \
+\pard\pardeftab720\partightenfactor0
+\cf0 \'a0\
+}

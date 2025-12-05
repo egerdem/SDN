@@ -5,7 +5,7 @@ from typing import Dict, List, Tuple
 import geometry
 from analysis import analysis as an
 from rir_calculators import calculate_pra_rir, calculate_sdn_rir, calculate_ho_sdn_rir, calculate_rimpy_rir, rir_normalisation, calculate_sdn_rir_fast
-from analysis.spatial_analysis import generate_receiver_grid_old, generate_source_positions
+from analysis.spatial_analysis import generate_receiver_grid_old, generate_source_positions, generate_full_receiver_grid
 
 def calculate_and_save_data(room_params: dict, source_pos: Tuple[float, float, float],
                               receiver_positions: List[Tuple[float, float]],
@@ -87,7 +87,8 @@ def calculate_and_save_data(room_params: dict, source_pos: Tuple[float, float, f
                 print(f"  RIRs not found for '{method}'. Calculating...")
             any_new_data_calculated = True
             current_method_rirs = []
-            for i, (rx, ry) in enumerate(receiver_positions):
+            for i, pos in enumerate(receiver_positions):
+                rx, ry = pos[:2]
                 print(f"    ... receiver {i+1}/{len(receiver_positions)} at ({rx:.2f}, {ry:.2f})")
 
                 # Set microphone on the main room object for this iteration.
@@ -111,7 +112,7 @@ def calculate_and_save_data(room_params: dict, source_pos: Tuple[float, float, f
                     rir, _ = calculate_rimpy_rir(current_params_for_calc, duration, Fs, **config.get('params', {}))
                 elif method.startswith('SDN-'):
                     print("Calculating SDN...")
-                    _, rir, _, _ = calculate_sdn_rir(current_params_for_calc, method, room, duration, Fs, config)
+                    _, rir, _, _ = calculate_sdn_rir_fast(current_params_for_calc, method, room, duration, Fs, config)
                 elif method.startswith('HO-SDN'):
                     source_signal = config.get('source_signal', 'dirac')
                     order = config.get('order')
@@ -223,24 +224,41 @@ if __name__ == "__main__":
     # Force replace specific methods even if they already exist in the file
     # Useful when you need to regenerate data with updated code/parameters
     METHODS_TO_REPLACE = [
-        'SDN-Test2.998',  # Regenerate using Standard (non-Fast) SDN method
+    #     'SDN-Test2.998',  # Regenerate using Standard (non-Fast) SDN method
     ]
     # Set to True to load the existing data file and only run/replace
     # the methods that are marked 'enabled' in this script.
-    UPDATE_EXISTING_FILE = True # Set to False to always calculate everything from scratch.
+    UPDATE_EXISTING_FILE = False # Set to False to always calculate everything from scratch.
     use_grid = True # Set to True to use a grid of receiver positions, False for single position
+    
+    # --- GRID SELECTION ---
+    # Options: "full", "quarter"
+    GRID_SELECTION = "full" 
 
     # Files to process when PROCESS_MULTIPLE_SOURCES is True
-    # Comment out sources you don't want to process
+    # HOW TO USE:
+    # This list determines which files creation will be ATTEMPTED.
+    # To generate a new file (e.g., for Center Source), UNCOMMENT its name below.
+    # The script acts as a "whitelist": it will only generate files listed here.
     FILES_TO_PROCESS = [
-        # "aes_room_spatial_edc_data_center_source.npz",
-        "aes_room_spatial_edc_data_top_middle_source.npz",
-        # "aes_room_spatial_edc_data_upper_right_source.npz",
-        # "aes_room_spatial_edc_data_lower_left_source.npz",
+        # "aes_room_center_source.npz",
+        # "aes_room_top_middle_source.npz",
+        # "aes_room_upper_right_source.npz",
+        # "aes_room_lower_left_source.npz",
+        
+        # New FULL GRID files (GRID_SELECTION = "full"):
+        "aes_FULLGRID_center_source.npz",
+        # "aes_FULLGRID_top_middle_source.npz",
+        # "aes_FULLGRID_upper_right_source.npz",
+        # "aes_FULLGRID_lower_left_source.npz",
+        # "aes_FULLGRID_lower_left_source.npz",
+        
+        # Legacy files (GRID_SELECTION = "quarter"):
+        # "aes_room_lower_left_source.npz",
     ]
     
     # Set to True to process multiple sources, False for single source from active_room
-    PROCESS_MULTIPLE_SOURCES = True
+    PROCESS_MULTIPLE_SOURCES = True 
 
     # Use active room from config
     active_room = exp_config.active_room
@@ -259,11 +277,32 @@ if __name__ == "__main__":
     # --- Source and Receiver Setup ---
     # Common receiver setup for both single and multi-source runs
     if use_grid:
-        # Correctly use half the room dimensions for the grid, as in spatial_analysis.py
-        receiver_positions = generate_receiver_grid_old(active_room['width'] / 2, active_room['depth'] / 2, margin=0.5, n_points=16)
-        print(f"Running in MULTI-POSITION (QUARTER-GRID) mode for room '{active_room['display_name']}'")
+        if GRID_SELECTION == "full":
+             # Full grid covering the whole room
+             receiver_positions = generate_full_receiver_grid(
+                 active_room['width'], 
+                 active_room['depth'], 
+                 height=active_room['mic z'], 
+                 n_x=4, 
+                 n_y=4, 
+                 margin=0.5
+             )
+             grid_tag = "FULLGRID" 
+             print(f"Running in MULTI-POSITION (FULL-GRID) mode for room '{active_room['display_name']}'")
+        
+        elif GRID_SELECTION == "quarter":
+             # Original corner/quadrant grid
+             # Correctly use half the room dimensions for the grid, as in spatial_analysis.py
+             receiver_positions = generate_receiver_grid_old(active_room['width'] / 2, active_room['depth'] / 2, margin=0.5, n_points=16)
+             grid_tag = "room" # Matches legacy 'aes_room_spatial...'
+             print(f"Running in MULTI-POSITION (QUARTER-GRID) mode for room '{active_room['display_name']}'")
+        
+        else:
+            raise ValueError(f"Unknown GRID_SELECTION: {GRID_SELECTION}")
+             
     else:
-        receiver_positions = [(active_room['mic x'], active_room['mic y'])]
+        receiver_positions = [(active_room['mic x'], active_room['mic y'], active_room['mic z'])]
+        grid_tag = "single"
         print(f"\nRunning in SINGLE-POSITION mode for room '{active_room['display_name']}'")
 
     if PROCESS_MULTIPLE_SOURCES:
@@ -277,8 +316,17 @@ if __name__ == "__main__":
         for src_x, src_y, src_z, src_name in all_sources:
             # Build expected filename for this source
             room_name = active_room.get('display_name', 'unknown_room')
-            filename_suffix = room_name.lower().replace(' ', '_')
-            expected_filename = f"{filename_suffix}_spatial_edc_data_{src_name.lower()}.npz"
+            
+            # Construct filename base
+            # If using full grid: "aes_FULLGRID"
+            # If using old grid: "aes_quarter" (legacy quarterbehavior)
+            if use_grid and grid_tag != "quarter":
+                 room_prefix = room_name.split()[0].lower() # "aes"
+                 filename_base = f"{room_prefix}_{grid_tag}"
+            else:
+                 filename_base = room_name.lower().replace(' ', '_')
+
+            expected_filename = f"{filename_base}_{src_name.lower()}.npz"
             
             # Only include if in FILES_TO_PROCESS
             if expected_filename in FILES_TO_PROCESS:
@@ -301,8 +349,15 @@ if __name__ == "__main__":
             output_dir = os.path.join(project_root, "results", "paper_data")
             
             room_name = active_room.get('display_name', 'unknown_room')
-            filename_suffix = room_name.lower().replace(' ', '_')
-            output_filename = f"{filename_suffix}_spatial_edc_data_{src_name.lower()}.npz"
+            
+            # Reconstruct filename (logic must match above)
+            if use_grid and grid_tag != "quarter":
+                 room_prefix = room_name.split()[0].lower()
+                 filename_base = f"{room_prefix}_{grid_tag}"
+            else:
+                 filename_base = room_name.lower().replace(' ', '_')
+                 
+            output_filename = f"{filename_base}_{src_name.lower()}.npz"
             output_path = os.path.join(output_dir, output_filename)
 
             # Run the calculation and saving process for the current source
@@ -321,6 +376,18 @@ if __name__ == "__main__":
         # Original behavior: use the single source from the config
         source_position = (active_room['source x'], active_room['source y'], active_room['source z'])
 
+        # Try to identify source name from known sources
+        src_name = "custom_source"
+        all_possible = generate_source_positions(active_room)
+        for sx, sy, sz, sname in all_possible:
+             if np.allclose([sx, sy, sz], source_position, atol=1e-3):
+                 src_name = sname
+                 print(f"  Identified source as: {src_name}")
+                 break
+        
+        if src_name == "custom_source":
+             print("  Source does not match any known named position. Using 'custom_source'.")
+
         # Define output path
         # Use absolute path relative to project root
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -328,8 +395,15 @@ if __name__ == "__main__":
         output_dir = os.path.join(project_root, "results", "paper_data")
         
         room_name = active_room.get('display_name')
-        filename_suffix = room_name.lower().replace(' ', '_')
-        output_filename = f"{filename_suffix}_spatial_edc_data.npz"
+        
+        # Reconstruct filename logic for single source too
+        if use_grid and grid_tag != "quarter":
+             room_prefix = room_name.split()[0].lower()
+             filename_base = f"{room_prefix}_{grid_tag}"
+        else:
+             filename_base = room_name.lower().replace(' ', '_')
+             
+        output_filename = f"{filename_base}_{src_name.lower()}.npz"
         output_path = os.path.join(output_dir, output_filename)
 
         # Run the calculation and saving process
@@ -343,4 +417,5 @@ if __name__ == "__main__":
             output_path=output_path,
             update_mode=UPDATE_EXISTING_FILE
         )
+
 

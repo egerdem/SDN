@@ -426,10 +426,10 @@ if __name__ == "__main__":
     # files_to_process = ["journal_room_spatial_edc_data.npz"]  # Single file for now, can be expanded later
 
     files_to_process = [
-        # "aes_room_spatial_edc_data_center_source.npz",
+        "aes_room_spatial_edc_data_center_source.npz",
         "aes_room_spatial_edc_data_top_middle_source.npz",
-        # "aes_room_spatial_edc_data_upper_right_source.npz",
-        # "aes_room_spatial_edc_data_lower_left_source.npz",
+        "aes_room_spatial_edc_data_upper_right_source.npz",
+        "aes_room_spatial_edc_data_lower_left_source.npz",
     ]
 
     # --- ANALYSIS PARAMETERS ---
@@ -439,9 +439,10 @@ if __name__ == "__main__":
     # REFERENCE_METHOD = 'ISM-pra-rand10'
     # REFERENCE_METHOD = 'ISM'
     # Specify which methods to plot. Leave empty or set to None to plot all.
-    # METHODS_TO_PLOT = ['SDN-Test1', 'SDN-Test3', 'SDN-Test2.998', 'SDN-fast2_998',"SDN-c_center"]
+    METHODS_TO_PLOT = ['SDN-Test_3', 'SDN-Test_2', 'SDN-Test1', 'SDN-Test2', 'SDN-Test3', 'SDN-Test4','SDN-Test5',
+                       'SDN-Test6', 'SDN-Test7']
     # METHODS_TO_PLOT = ["SDN-c_center", "SDN-c_lower_left", 'SDN-Test2.998', "SDN-c_upper_right"]
-    METHODS_TO_PLOT = ['SDN-Test2.998']
+    # METHODS_TO_PLOT = ['SDN-Test2.998']
     # METHODS_TO_PLOT = ['SDN-fast4_71'] #not fast actually, fyi. name wrong.
     # METHODS_TO_PLOT = None
 
