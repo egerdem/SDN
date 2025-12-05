@@ -228,7 +228,7 @@ if __name__ == "__main__":
     ]
     # Set to True to load the existing data file and only run/replace
     # the methods that are marked 'enabled' in this script.
-    UPDATE_EXISTING_FILE = False # Set to False to always calculate everything from scratch.
+    UPDATE_EXISTING_FILE = True # Set to False to always calculate everything from scratch.
     use_grid = True # Set to True to use a grid of receiver positions, False for single position
     
     # --- GRID SELECTION ---
