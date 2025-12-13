@@ -19,8 +19,7 @@ import matplotlib
 import platform
 if platform.system() == 'Darwin':
     matplotlib.use('Qt5Agg')
-else:
-    matplotlib.use('Agg')
+
 
 # Note: Visualization functionality has been moved to sdn_experiment_visualizer.py
 # For visualization, import and use the SDNExperimentVisualizer class

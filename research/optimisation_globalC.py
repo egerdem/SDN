@@ -52,12 +52,19 @@ ERROR_DURATION_MS = 50  # compare first 50 ms of the EDC
 BOUNDS = (1.0, 7.0)
 
 FILES_TO_PROCESS = [
-    "aes_room_spatial_edc_data_center_source.npz",
-    "aes_room_spatial_edc_data_top_middle_source.npz",
-    # "aes_room_spatial_edc_data_upper_right_source.npz",
-    "aes_room_spatial_edc_data_lower_left_source.npz",
+
+    "cube6_FULLGRID_center_source.npz",
+    "cube6_FULLGRID_top_middle_source.npz",
+    "cube6_FULLGRID_upper_right_source.npz",
+    "cube6_FULLGRID_lower_left_source.npz",
+
+    # "aes_FULLGRID_center_source.npz",
+    # "aes_FULLGRID_top_middle_source.npz",
+    # "aes_FULLGRID_upper_right_source.npz",
+    # "aes_FULLGRID_lower_left_source.npz",
 ]
 
+grid_name = "fullgrid"
 
 # -----------------------------------------------------------------------------
 # Helper functions
@@ -94,8 +101,8 @@ def compute_dataset_rmse(c_val: float, dataset: dict, err_duration_ms: int,
     num_samples = int(Fs * duration)
     impulse = geometry.Source.generate_signal("dirac", num_samples)
     room.set_source(*dataset["source_pos"], signal=impulse["signal"], Fs=Fs)
-    room.set_microphone(room_params["mic x"], room_params["mic y"],
-                        room_params["mic z"])
+    # room.set_microphone(room_params["mic x"], room_params["mic y"],
+    #                     room_params["mic z"])
     room_params["reflection"] = np.sqrt(1 - room_params["absorption"])
     room.wallAttenuation = [room_params["reflection"]] * 6
 
@@ -110,7 +117,9 @@ def compute_dataset_rmse(c_val: float, dataset: dict, err_duration_ms: int,
     ref_edcs = dataset["ref_edcs"]
     source_name = dataset["name"]
 
-    for i, (rx, ry) in enumerate(receivers):
+    for i, pos in enumerate(receivers):
+        rx, ry = pos[:2]
+
         room.set_microphone(rx, ry, room_params["mic z"])
         
         # Add cache label for this specific receiver
@@ -227,8 +236,8 @@ if __name__ == "__main__":
     print("-" * len(header))
     
     for i in range(len(datasets[0]['receiver_positions'])):
-        rx, ry = datasets[0]['receiver_positions'][i]
-        row = f"Receiver {i+1:2d} ({rx:.2f},{ry:.2f})"
+        rx, ry, rz = datasets[0]['receiver_positions'][i]
+        row = f"Receiver {i+1:2d} ({rx:.2f},{ry:.2f}, {rz:.2f})"
         for source_name in source_names:
             rmse = all_results[source_name]['individual_rmses'][i]
             row += f" | {rmse:>15.6f}"
@@ -245,11 +254,12 @@ if __name__ == "__main__":
     # Export to file
     output_dir = DATA_DIR  # Use the same directory as input data
     os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, f"optimization_globSINGLE_c_{optimal_c:.3f}_ref_{REFERENCE_METHOD}.txt")
+    room_name_clean = room_info.get('display_name').lower().replace(' ', '_')
+    output_path = os.path.join(output_dir, f"optimization_globSINGLE_{room_name_clean}_c_{optimal_c:.3f}_{grid_name}_ref_{REFERENCE_METHOD}.txt")
     
     with open(output_path, 'w') as f:
         f.write("--- SDN GLOBAL SOURCE-WEIGHTING OPTIMIZATION RESULTS ---\n")
-        f.write(f"Room: {room_info.get('display_name', 'AES Room')} ({room_info['width']}x{room_info['depth']}x{room_info['height']} m)\n")
+        f.write(f"Room: {room_info.get('display_name')} ({room_info['width']}x{room_info['depth']}x{room_info['height']} m)\n")
         f.write(f"Absorption: {room_info['absorption']}, Reference Method: {REFERENCE_METHOD}\n")
         f.write(f"Global Optimal c: {optimal_c:.4f}, Global Mean RMSE: {result.fun:.6f}\n")
         f.write("="*100 + "\n\n")
@@ -258,8 +268,8 @@ if __name__ == "__main__":
         f.write("-" * len(header) + "\n")
         
         for i in range(len(datasets[0]['receiver_positions'])):
-            rx, ry = datasets[0]['receiver_positions'][i]
-            row = f"Receiver {i+1:2d} ({rx:.2f},{ry:.2f})"
+            rx, ry, rz = datasets[0]['receiver_positions'][i]
+            row = f"Receiver {i+1:2d} ({rx:.2f},{ry:.2f}, {rz:.2f})"
             for source_name in source_names:
                 rmse = all_results[source_name]['individual_rmses'][i]
                 row += f" | {rmse:>15.6f}"

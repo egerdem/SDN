@@ -47,14 +47,25 @@ room_journal = {
     'absorption': 0.1,
 }
 
+room_cube6 = {
+        'display_name': 'Cube6 Room',
+        'width': 6, 'depth': 6, 'height': 6,
+        'source x': 3, 'source y': 3, 'source z': 3,
+        'mic z': 3,
+        'absorption': 0.2,
+    }
+
 # Default Active Room
 active_room = room_aes
+# active_room = room_cube6
 
 if active_room['display_name'] == 'Journal Room':
     duration = 1.2
 elif active_room['display_name'] == 'WASPAA Room':
     duration = 1.8
 elif active_room['display_name'] == 'AES Room':
+    duration = 1
+elif active_room['display_name'] == 'Cube6 Room':
     duration = 1
 else:
     assert  False, "Unknown room selected!"
@@ -68,10 +79,11 @@ Fs = 44100
 # Reference methods - ISM
 PLOT_ISM_with_pra = False
 PLOT_ISM_with_pra_rand10 = False
+PLOT_ISM_with_pra_rand10_airabsorb = False
 PLOT_ISM_rimPy_pos = False
 PLOT_ISM_rimPy_pos_rand10 = False
 PLOT_ISM_rimPy_neg = False
-PLOT_ISM_rimPy_neg_rand10 = False  #
+PLOT_ISM_rimPy_neg_rand10 = False    #
 
 # tests
 wall1, wall2, wall3, wall4, wall5, wall6 = False, False, False, False, False, False
@@ -80,20 +92,25 @@ t1,t2,t3,t4,t5 = False, False, False, False, False
 fast1, fast2 = False, False
 testx = False
 
+TR = False  # Set to True to enable all SDN tests by default
 # SDN Tests
+
+
+RUN_SDN_Test1_spec = True
+
+RUN_SDN_Test_2 = TR
+RUN_SDN_Test_3 = TR
 RUN_SDN_Test0 = False
 RUN_SDN_Test1 = True  # c=1 original
-RUN_SDN_Test2 = True
-RUN_SDN_Test3 = True
+RUN_SDN_Test2 = TR
+RUN_SDN_Test3 = TR
+RUN_SDN_Test4 = TR
+RUN_SDN_Test5 = TR
+RUN_SDN_Test6 = TR
+RUN_SDN_Test7 = TR
+
 RUN_SDN_Test2_998 = False # Test2.998
 RUN_SDN_Test4_71 = False # Test2.998
-RUN_SDN_Test4 = True
-RUN_SDN_Test5 = True
-RUN_SDN_Test6 = False
-RUN_SDN_Test7 = False
-
-RUN_SDN_Test_2 = False
-RUN_SDN_Test_3 = False
 
 RUN_SDN_Test_micX = False
 RUN_SDN_Test2_mic = False
@@ -162,15 +179,32 @@ ism_methods = {
         'info': 'pra 100',
         'function': calculate_pra_rir,
         'calculator': 'pra',
-        'params': {'max_order': 100, 'use_rand_ism': False}
+        'params': {'max_order': 100, 'use_rand_ism': False, 'air_absorption': False}
+    },
+    'ISM-pra-air': {
+        'enabled': False,  # Enable this for air absorption
+        'info': 'pra 100 + air absorption',
+        'function': calculate_pra_rir,
+        'calculator': 'pra',
+        'params': {'max_order': 100, 'use_rand_ism': False, 'air_absorption': True}
     },
     'ISM-pra-rand10': {
         'enabled': PLOT_ISM_with_pra_rand10,
         'info': 'pra 100 + 10cm randomness',
         'function': calculate_pra_rir,
         'calculator': 'pra',
-        'params': {'max_order': 100, 'use_rand_ism': True, 'max_rand_disp': 0.1}
+        'params': {'max_order': 100, 'use_rand_ism': True, 'max_rand_disp': 0.1, 'air_absorption': False}
     },
+
+    'ISM-pra-rand10-airabsorb': {
+        'enabled': PLOT_ISM_with_pra_rand10_airabsorb,
+        'info': 'pra 100 + 10cm randomness + air',
+        'function': calculate_pra_rir,
+        'calculator': 'pra',
+        'params': {'max_order': 100, 'use_rand_ism': True, 'max_rand_disp': 0.1, 'air_absorption': True}
+    },
+
+
     'RIMPY-pos': {
         'enabled': PLOT_ISM_rimPy_pos,
         'info': 'Positive Reflection',
@@ -203,6 +237,18 @@ ism_methods = {
 
 # SDN Tests
 sdn_tests = {
+
+'SDN-Test1_spec': {
+        'enabled': RUN_SDN_Test1_spec,
+        'info': "c1 original",
+        'calculator': 'sdn',
+        'flags': {
+            # "use_identity_scattering": True,
+            "specular_scattering": True,
+                    },
+        'label': "SDN"
+    },
+
 
     'SDN-TestX': {
                     'enabled': testx,
@@ -566,35 +612,35 @@ sdn_tests = {
 
 # HO-SDN Tests (Reference Implementation)
 ho_sdn_tests = {
-    'N1': {
+    'HO-SDN-N1': {
         'enabled': RUN_HO_N1,
         'info': "Dirac",
         'source_signal': 'dirac',
         'order': 1,
         'label': "HO-SDN N1"
     },
-    'N2': {
+    'HO-SDN-N2': {
         'enabled': RUN_HO_N2,
         'info': "Dirac",
         'source_signal': 'dirac',
         'order': 2,
         'label': "HO-SDN N2"
     },
-    'N2g': {
+    'HO-SDN-N2g': {
         'enabled': RUN_HO_N2g,
         'info': "Gaussian",
         'source_signal': 'gaussian',
         'order': 2,
         'label': "HO-SDN N2"
     },
-    'N3': {
+    'HO-SDN-N3': {
         'enabled': RUN_HO_N3,
         'info': "Dirac",
         'source_signal': 'dirac',
         'order': 3,
         'label': "HO-SDN N3"
     },
-    'N3g': {
+    'HO-SDN-N3g': {
         'enabled': RUN_HO_N3g,
         'info': "Gaussian",
         'source_signal': 'gaussian',

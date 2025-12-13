@@ -6,6 +6,7 @@ import geometry
 from analysis import analysis as an
 from rir_calculators import calculate_pra_rir, calculate_sdn_rir, calculate_ho_sdn_rir, calculate_rimpy_rir, rir_normalisation, calculate_sdn_rir_fast
 from analysis.spatial_analysis import generate_receiver_grid_old, generate_source_positions, generate_full_receiver_grid
+import pprint
 
 def calculate_and_save_data(room_params: dict, source_pos: Tuple[float, float, float],
                               receiver_positions: List[Tuple[float, float]],
@@ -112,7 +113,7 @@ def calculate_and_save_data(room_params: dict, source_pos: Tuple[float, float, f
                     rir, _ = calculate_rimpy_rir(current_params_for_calc, duration, Fs, **config.get('params', {}))
                 elif method.startswith('SDN-'):
                     print("Calculating SDN...")
-                    _, rir, _, _ = calculate_sdn_rir_fast(current_params_for_calc, method, room, duration, Fs, config)
+                    _, rir, _, _ = calculate_sdn_rir(current_params_for_calc, method, room, duration, Fs, config)
                 elif method.startswith('HO-SDN'):
                     source_signal = config.get('source_signal', 'dirac')
                     order = config.get('order')
@@ -211,6 +212,9 @@ def calculate_and_save_data(room_params: dict, source_pos: Tuple[float, float, f
     else:
         print("\n--- No new data was calculated. File is already up-to-date. ---")
 
+    available_methods = [m for m in all_edcs.keys()]
+    pprint.pp(f"Methods available in data file: {available_methods}")
+
 
 if __name__ == "__main__":
     import sys
@@ -233,7 +237,7 @@ if __name__ == "__main__":
     
     # --- GRID SELECTION ---
     # Options: "full", "quarter"
-    GRID_SELECTION = "full" 
+    GRID_SELECTION = "quarter"
 
     # Files to process when PROCESS_MULTIPLE_SOURCES is True
     # HOW TO USE:
@@ -241,24 +245,30 @@ if __name__ == "__main__":
     # To generate a new file (e.g., for Center Source), UNCOMMENT its name below.
     # The script acts as a "whitelist": it will only generate files listed here.
     FILES_TO_PROCESS = [
-        # "aes_room_center_source.npz",
-        # "aes_room_top_middle_source.npz",
-        # "aes_room_upper_right_source.npz",
-        # "aes_room_lower_left_source.npz",
-        
+
+        # Gube6 Room Sources
+        # "cube6_FULLGRID_center_source.npz",
+        # "cube6_FULLGRID_top_middle_source.npz",
+        # "cube6_FULLGRID_upper_right_source.npz",
+        # "cube6_FULLGRID_lower_left_source.npz",
+
         # New FULL GRID files (GRID_SELECTION = "full"):
-        "aes_FULLGRID_center_source.npz",
+        # "aes_FULLGRID_center_source.npz",
         # "aes_FULLGRID_top_middle_source.npz",
         # "aes_FULLGRID_upper_right_source.npz",
         # "aes_FULLGRID_lower_left_source.npz",
-        # "aes_FULLGRID_lower_left_source.npz",
-        
+        # "aes_FULLGRID_corner_sourcev3.npz",
+
         # Legacy files (GRID_SELECTION = "quarter"):
-        # "aes_room_lower_left_source.npz",
+        # "aes_quarter_center_source.npz",
+        # "aes_quarter_top_middle_source.npz",
+        # "aes_quarter_upper_right_source.npz",
+        # "aes_quarter_lower_left_source.npz",
+        "aes_quarter_corner_sourcev3.npz",
     ]
     
     # Set to True to process multiple sources, False for single source from active_room
-    PROCESS_MULTIPLE_SOURCES = True 
+    PROCESS_MULTIPLE_SOURCES = True
 
     # Use active room from config
     active_room = exp_config.active_room
@@ -293,8 +303,8 @@ if __name__ == "__main__":
         elif GRID_SELECTION == "quarter":
              # Original corner/quadrant grid
              # Correctly use half the room dimensions for the grid, as in spatial_analysis.py
-             receiver_positions = generate_receiver_grid_old(active_room['width'] / 2, active_room['depth'] / 2, margin=0.5, n_points=16)
-             grid_tag = "room" # Matches legacy 'aes_room_spatial...'
+             receiver_positions = generate_receiver_grid_old(active_room['width'] / 2, active_room['depth'] / 2, z = active_room['mic z'], margin=0.5, n_points=16)
+             grid_tag = "quarter" # Matches 'aes_quarter_...'
              print(f"Running in MULTI-POSITION (QUARTER-GRID) mode for room '{active_room['display_name']}'")
         
         else:
@@ -303,29 +313,28 @@ if __name__ == "__main__":
     else:
         receiver_positions = [(active_room['mic x'], active_room['mic y'], active_room['mic z'])]
         grid_tag = "single"
-        print(f"\nRunning in SINGLE-POSITION mode for room '{active_room['display_name']}'")
+        print(f"\Running in SINGLE-POSITION mode for room '{active_room['display_name']}'")
 
     if PROCESS_MULTIPLE_SOURCES:
         print("\n--- PROCESSING MULTIPLE SOURCES ---")
         
         # Generate all possible sources
-        all_sources = generate_source_positions(active_room)
-        
+        all_sources = generate_source_positions(active_room, "v3")
+
         # Filter based on FILES_TO_PROCESS
         source_list = []
         for src_x, src_y, src_z, src_name in all_sources:
             # Build expected filename for this source
-            room_name = active_room.get('display_name', 'unknown_room')
+            room_name = active_room.get('display_name')
             
             # Construct filename base
-            # If using full grid: "aes_FULLGRID"
-            # If using old grid: "aes_quarter" (legacy quarterbehavior)
-            if use_grid and grid_tag != "quarter":
+            # Use simplified consistent logic: room_prefix + "_" + grid_tag
+            if use_grid:
                  room_prefix = room_name.split()[0].lower() # "aes"
                  filename_base = f"{room_prefix}_{grid_tag}"
+                 print(f"a.  Using filename base: {filename_base}")
             else:
-                 filename_base = room_name.lower().replace(' ', '_')
-
+                filename_base = room_name.lower().replace(' ', '_')
             expected_filename = f"{filename_base}_{src_name.lower()}.npz"
             
             # Only include if in FILES_TO_PROCESS
@@ -351,7 +360,8 @@ if __name__ == "__main__":
             room_name = active_room.get('display_name', 'unknown_room')
             
             # Reconstruct filename (logic must match above)
-            if use_grid and grid_tag != "quarter":
+            # Reconstruct filename (logic must match above)
+            if use_grid:
                  room_prefix = room_name.split()[0].lower()
                  filename_base = f"{room_prefix}_{grid_tag}"
             else:
@@ -397,7 +407,8 @@ if __name__ == "__main__":
         room_name = active_room.get('display_name')
         
         # Reconstruct filename logic for single source too
-        if use_grid and grid_tag != "quarter":
+        # Reconstruct filename logic for single source too
+        if use_grid:
              room_prefix = room_name.split()[0].lower()
              filename_base = f"{room_prefix}_{grid_tag}"
         else:

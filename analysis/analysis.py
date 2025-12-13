@@ -195,7 +195,7 @@ def EDC_dp(impulse_response):
 
     return edc_dB
 
-def compute_edc(rir, Fs, label=None, plot=True, color=None, energy_thres=1.0):
+def compute_edc(rir, Fs, label=None, plot=False, color=None, energy_thres=1.0):
     """Compute and optionally plot Energy Decay Curve.
     
     Args:

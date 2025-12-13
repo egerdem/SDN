@@ -2,8 +2,7 @@ import matplotlib
 import platform
 if platform.system() == 'Darwin':
     matplotlib.use('Qt5Agg')
-else:
-    matplotlib.use('Agg')
+
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D

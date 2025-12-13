@@ -7,8 +7,7 @@ import matplotlib
 import platform
 if platform.system() == 'Darwin':
     matplotlib.use('Qt5Agg')  # Set the backend to Qt5 on macOS
-else:
-    matplotlib.use('Agg') # Use non-interactive backend on other platforms (e.g. Linux/Headless)
+
 
 
 class Room:
@@ -590,7 +589,7 @@ def plot_reflection_comparison(room: Room, source_wall: str, ax=None):
         ax = fig.add_subplot(111, projection='3d')
         
     # Plot room first
-    from plot_room import plot_room
+    from analysis.plot_room import plot_room
     plot_room(room, ax)
     
     # Get source position and node position
@@ -894,5 +893,5 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.show()
 
-    # specular_matrices_test(test_room, increase_coef=0.2) # Test with a non-zero increase_coef
+    specular_matrices_test(test_room, increase_coef=0.2) # Test with a non-zero increase_coef
     # specular_matrices_test(test_room, increase_coef=0.0) # Test with zero increase_coef (should be diffuse)

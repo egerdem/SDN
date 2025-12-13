@@ -362,7 +362,7 @@ def calculate_and_plot_error_maps(sim_data, output_path: str, reference_method: 
     
     # Print rows for each receiver
     for i in range(len(receiver_positions)):
-        rx, ry = receiver_positions[i]
+        rx, ry = receiver_positions[i][:2]
         row = f"Receiver {i+1:2d}     ({rx:.2f},{ry:.2f})"
         for comparison_key in sorted(error_maps.keys()):
             error_val = per_receiver_errors_dict[comparison_key][i]
@@ -426,10 +426,21 @@ if __name__ == "__main__":
     # files_to_process = ["journal_room_spatial_edc_data.npz"]  # Single file for now, can be expanded later
 
     files_to_process = [
-        "aes_room_spatial_edc_data_center_source.npz",
-        "aes_room_spatial_edc_data_top_middle_source.npz",
-        "aes_room_spatial_edc_data_upper_right_source.npz",
-        "aes_room_spatial_edc_data_lower_left_source.npz",
+
+        # "cube6_FULLGRID_center_source.npz",
+        # "cube6_FULLGRID_top_middle_source.npz",
+        # "cube6_FULLGRID_upper_right_source.npz",
+        # "cube6_FULLGRID_lower_left_source.npz",
+
+        "aes_FULLGRID_center_source.npz",
+        "aes_FULLGRID_top_middle_source.npz",
+        "aes_FULLGRID_upper_right_source.npz",
+        "aes_FULLGRID_lower_left_source.npz",
+
+        # "aes_room_spatial_edc_data_center_source.npz",
+        # "aes_room_spatial_edc_data_top_middle_source.npz",
+        # "aes_room_spatial_edc_data_upper_right_source.npz",
+        # "aes_room_spatial_edc_data_lower_left_source.npz",
     ]
 
     # --- ANALYSIS PARAMETERS ---
@@ -440,7 +451,7 @@ if __name__ == "__main__":
     # REFERENCE_METHOD = 'ISM'
     # Specify which methods to plot. Leave empty or set to None to plot all.
     METHODS_TO_PLOT = ['SDN-Test_3', 'SDN-Test_2', 'SDN-Test1', 'SDN-Test2', 'SDN-Test3', 'SDN-Test4','SDN-Test5',
-                       'SDN-Test6', 'SDN-Test7']
+                       'SDN-Test6', 'SDN-Test7', 'HO-SDN-N2', 'HO-SDN-N3']
     # METHODS_TO_PLOT = ["SDN-c_center", "SDN-c_lower_left", 'SDN-Test2.998', "SDN-c_upper_right"]
     # METHODS_TO_PLOT = ['SDN-Test2.998']
     # METHODS_TO_PLOT = ['SDN-fast4_71'] #not fast actually, fyi. name wrong.
@@ -453,7 +464,7 @@ if __name__ == "__main__":
     # --- CONTROL FLAGS ---
     SAVE_FIGURES = False  # Set to True to save the generated figures to disk
     SHOW_PLOTS = False    # Set to True to display interactive plot windows
-    SAVE_SUMMARY_TEXT = False # Set to False to disable saving the summary .txt file
+    SAVE_SUMMARY_TEXT = True # Set to False to disable saving the summary .txt file
     SHOW_INTERACTIVE_PLOT = True  # Set to True to show unified interactive RIR plot for first receiver
 
     # --- EXECUTION LOOP ---
@@ -635,13 +646,24 @@ if __name__ == "__main__":
                 reversed_rirs = dict(reversed(list(first_receiver_rirs.items())))
                 
                 # Get first receiver coordinates
-                rx, ry = sim_data['receiver_positions'][0]
-                print(f"First receiver position: ({rx:.2f}m, {ry:.2f}m)")
+                first_receiver = sim_data['receiver_positions'][0]
+                rx, ry = first_receiver[:2]
+                rz = first_receiver[2] if len(first_receiver) > 2 else sim_data['room_params'].get('mic z', 0)
+                print(f"First receiver position: ({rx:.2f}m, {ry:.2f}m, {rz:.2f}m)")
                 
-                # Update room parameters with first receiver position
+                # Get source coordinates
+                source_pos = sim_data['source_pos']
+                sx, sy, sz = source_pos[0], source_pos[1], source_pos[2] if len(source_pos) > 2 else 0
+                print(f"Source position: ({sx:.2f}m, {sy:.2f}m, {sz:.2f}m)")
+                
+                # Update room parameters with first receiver and source positions
                 plot_room_params = sim_data['room_params'].copy()
                 plot_room_params['mic x'] = rx
                 plot_room_params['mic y'] = ry
+                plot_room_params['mic z'] = rz
+                plot_room_params['source x'] = sx
+                plot_room_params['source y'] = sy
+                plot_room_params['source z'] = sz
                 
                 # Create the unified interactive plot
                 pp.create_unified_interactive_plot(
@@ -654,19 +676,9 @@ if __name__ == "__main__":
                 print("Interactive plot displayed. Close the plot window to continue.")
 
     # After processing all files, print the consolidated summary table
-    print_consolidated_summary_table(
-        all_mean_errors,
-        all_mean_energies_by_source,
-        all_mean_rt60s_by_source,
-        all_smoothed_50ms_by_source,
-        all_smoothed_full_by_source,
-        REFERENCE_METHOD,
-        source_coordinates,
-        sim_data.get('method_configs')
-    )
-
-    # --- Export Results to Files if plotting all methods ---
-    if METHODS_TO_PLOT is None and SAVE_SUMMARY_TEXT:
+    # If saving to file, capture output; otherwise just print to console
+    # Table saving is independent of figure plotting (SAVE_FIGURES/SHOW_PLOTS)
+    if SAVE_SUMMARY_TEXT:
         # Export Formatted Tables to a single .txt file
         import io
         from contextlib import redirect_stdout
@@ -675,7 +687,7 @@ if __name__ == "__main__":
         room_name = sim_data['room_params'].get('display_name', 'unknown_room').lower().replace(' ', '_')
         num_receivers = len(sim_data['receiver_positions'])
         exp_type = 'single' if num_receivers == 1 else 'multi'
-        text_summary_filename = f'summary_tables_{room_name}_{exp_type}_ref_{REFERENCE_METHOD}.txt'
+        text_summary_filename = f'RMSE_Table_{room_name}_ref_{REFERENCE_METHOD}.txt'
         text_summary_path = os.path.join(output_dir, text_summary_filename)
         
         with open(text_summary_path, 'w') as f:
@@ -683,23 +695,33 @@ if __name__ == "__main__":
             f.write(f"--- SUMMARY TABLES ---\n")
             f.write(f"Room: {sim_data['room_params'].get('display_name', 'N/A')}\n")
             
-            # Add source position
-            source_pos = sim_data['source_pos']
-            f.write(f"Source Position (x,y,z): ({source_pos[0]:.2f}, {source_pos[1]:.2f}, {source_pos[2]:.2f})\n")
+            # Add source position(s) - list all sources if multiple
+            if len(source_coordinates) == 1:
+                # Single source
+                source_pos = list(source_coordinates.values())[0]
+                f.write(f"Source Position (x,y,z): ({source_pos[0]:.2f}, {source_pos[1]:.2f}, {source_pos[2]:.2f})\n")
+            else:
+                # Multiple sources - list all
+                f.write(f"Source Positions ({len(source_coordinates)} positions):\n")
+                for source_name, source_pos in sorted(source_coordinates.items()):
+                    f.write(f"  {source_name}: ({source_pos[0]:.2f}, {source_pos[1]:.2f}, {source_pos[2]:.2f})\n")
 
             # Add receiver position(s)
             f.write(f"Experiment Type: {exp_type}-receiver ({num_receivers} position(s))\n")
-            mic_z = sim_data['room_params'].get('mic z', 'N/A')
+            receiver_positions = sim_data['receiver_positions']
             if exp_type == 'single':
-                rec_pos = sim_data['receiver_positions'][0]
-                f.write(f"Receiver Position (x,y,z): ({rec_pos[0]:.2f}, {rec_pos[1]:.2f}, {mic_z})\n")
+                rec_pos = receiver_positions[0]
+                f.write(f"Receiver Position (x,y,z): ({rec_pos[0]:.2f}, {rec_pos[1]:.2f}, {rec_pos[2]:.2f})\n")
             else:
-                f.write(f"Receiver Positions: Grid of {num_receivers} positions at height z={mic_z}\n")
+                # Print all receiver positions
+                f.write(f"Receiver Positions ({num_receivers} positions):\n")
+                for i, rec_pos in enumerate(receiver_positions):
+                    f.write(f"  Receiver {i+1:2d}: ({rec_pos[0]:.2f}, {rec_pos[1]:.2f}, {rec_pos[2]:.2f})\n")
 
             f.write(f"Reference Method: {REFERENCE_METHOD}\n")
             f.write(f"----------------------\n\n")
 
-            # Capture the output of the summary functions
+            # Capture the output of the summary function and write to both console and file
             with io.StringIO() as buf, redirect_stdout(buf):
                 print_consolidated_summary_table(
                     all_mean_errors,
@@ -711,8 +733,24 @@ if __name__ == "__main__":
                     source_coordinates,
                     sim_data.get('method_configs', {})
                 )
-                f.write(buf.getvalue())
+                captured_output = buf.getvalue()
+                # Write to file
+                f.write(captured_output)
+                # Also print to console
+                print(captured_output)
         print(f"--- Saved formatted summary tables to: {text_summary_path} ---")
+    else:
+        # Just print to console (no file saving)
+        print_consolidated_summary_table(
+            all_mean_errors,
+            all_mean_energies_by_source,
+            all_mean_rt60s_by_source,
+            all_smoothed_50ms_by_source,
+            all_smoothed_full_by_source,
+            REFERENCE_METHOD,
+            source_coordinates,
+            sim_data.get('method_configs')
+        )
 
 
     print("\n--- All spatial analysis complete. ---")

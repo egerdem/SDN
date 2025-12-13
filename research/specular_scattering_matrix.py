@@ -7,8 +7,7 @@ import matplotlib
 import platform
 if platform.system() == 'Darwin':
     matplotlib.use('Qt5Agg')
-else:
-    matplotlib.use('Agg')
+
 
 def directions_for_north():
     # Node is 'north' -> exclude 'north'

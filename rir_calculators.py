@@ -167,7 +167,7 @@ def pad_zeros_to_rir(rir, num_samples):
         rir = rir[:num_samples]
     return rir
 
-def calculate_pra_rir(room_parameters, duration, Fs, use_rand_ism=False, max_rand_disp=0.1, max_order=100):
+def calculate_pra_rir(room_parameters, duration, Fs, use_rand_ism=False, max_rand_disp=0.1, max_order=100, air_absorption=False):
     """
     Calculate RIR using PRA (PyRoomAcoustics) with ISM.
     
@@ -189,14 +189,14 @@ def calculate_pra_rir(room_parameters, duration, Fs, use_rand_ism=False, max_ran
         pra_room = pra.ShoeBox(room_dim, fs=Fs,
                                 materials=pra.Material(energy_absorption = room_parameters['absorption']),
                                 max_order=max_order,
-                                air_absorption=False, ray_tracing=False,use_rand_ism=use_rand_ism, max_rand_disp=max_rand_disp)
+                                air_absorption=air_absorption, ray_tracing=False,use_rand_ism=use_rand_ism, max_rand_disp=max_rand_disp)
     else:
         print("air absorption True")
         pra_room = pra.ShoeBox(room_dim, fs=Fs,
                                 materials=pra.Material(energy_absorption=room_parameters['absorption']),
                                 max_order=max_order,
                                 temperature=room_parameters['air']['temperature'],
-                                humidity=room_parameters['air']['humidity'], air_absorption=True)
+                                humidity=room_parameters['air']['humidity'], air_absorption=air_absorption)
     pra_room.set_sound_speed(343)
     
     # Add source and receiver
@@ -221,10 +221,17 @@ def calculate_pra_rir(room_parameters, duration, Fs, use_rand_ism=False, max_ran
     # Normalize
     # rir = rir / np.max(np.abs(rir))
     
+    # Generate label based on configuration
     if use_rand_ism and max_rand_disp == 0.1:
         label = 'ISM-pra-rand10'
     elif use_rand_ism == False:
         label = 'ISM'
+    else:
+        label = 'ISM-pra'
+    
+    # Add air absorption suffix if enabled
+    if air_absorption:
+        label += '-air'
     
     return rir, label
 

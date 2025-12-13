@@ -9,7 +9,11 @@ from scipy import signal
 # import seaborn as sns
 import analysis as an
 import rir_calculators as rir_calc
-from analysis.plotting_utils import DISPLAY_NAME_MAP
+# Handle both relative import (when used as module) and absolute import (when run directly or from same dir)
+try:
+    from .plotting_utils import DISPLAY_NAME_MAP
+except ImportError:
+    from plotting_utils import DISPLAY_NAME_MAP
 
 
 def print_receiver_grid(receiver_positions, room, source_position=None, save=False, source_name=""):
@@ -63,22 +67,43 @@ def print_receiver_grid(receiver_positions, room, source_position=None, save=Fal
     plt.grid(True, alpha=0.3)
     plt.gca().set_aspect('equal', adjustable='box')
     plt.legend()
+    name = room['display_name']
+
     if save:
-        plt.savefig(f'{source_name}_receiver_grid_old_positions.png')
+        plt.savefig(f'{name}_{source_name}_receiver_grid_old_positions.png')
         plt.close()
     plt.show()
 
-def generate_receiver_grid_old(room_width: float, room_depth: float, margin = 1, center_margin = None, n_points: int = 50) -> List[Tuple[float, float]]:
+def generate_receiver_grid_old(room_width: float, room_depth: float, room_height: float = None, z: float = None, margin = 1, center_margin = None, n_points: int = 50) -> List[Tuple[float, float, float]]:
     """Generate a grid of receiver positions within the room.
     
     Args:
         room_width (float): Width of the room
         room_depth (float): Depth of the room
+        room_height (float): Height of the room (optional, used to determine default z)
+        z (float): Height of receivers. If None, automatically determined from room dimensions
+        margin (float): Wall margin (default: 1)
+        center_margin (float): Center margin, if None uses margin value
         n_points (int): Number of receiver positions to generate
         
     Returns:
-        List[Tuple[float, float]]: List of (x, y) coordinates for receivers
+        List[Tuple[float, float, float]]: List of (x, y, z) coordinates for receivers
     """
+    # Auto-determine z height based on room dimensions if not provided
+    if z is None:
+        # Match against known room configurations from experiment_configs
+        if abs(room_width - 9) < 0.01 and abs(room_depth - 7) < 0.01:  # AES Room
+            z = 1.5
+        elif abs(room_width - 6) < 0.01 and abs(room_depth - 7) < 0.01:  # WASPAA Room
+            z = 2.4
+        elif abs(room_width - 3.2) < 0.01 and abs(room_depth - 4) < 0.01:  # Journal Room
+            z = 1.5
+        elif abs(room_width - 6) < 0.01 and abs(room_depth - 6) < 0.01:  # Cube6 Room
+            z = 3.0
+        else:
+            # Default fallback
+            assert room_height is not None, "Either z or room_height must be provided"
+    
     # Create a grid of points, avoiding walls (1m margin)
     # margin is WALL MARGIN
     if center_margin is None:
@@ -86,7 +111,7 @@ def generate_receiver_grid_old(room_width: float, room_depth: float, margin = 1,
     x = np.linspace(margin, room_width - center_margin, int(np.sqrt(n_points)))
     y = np.linspace(margin, room_depth - center_margin, int(np.sqrt(n_points)))
     X, Y = np.meshgrid(x, y)
-    return list(zip(X.flatten(), Y.flatten()))
+    return list(zip(X.flatten(), Y.flatten(), [z] * len(X.flatten())))
 
 
 def generate_receiver_grid_tr(room_width: float, room_depth: float, margin=1, n_points: int = 50) -> List[
@@ -140,13 +165,13 @@ def generate_source_positions(room_params, name = None):
     Returns:
         If method is "sdn": List of (x, y, z) position tuples
     """
-
     if name is None:
-        name = "v1"
+        assert False, "Source position version name must be specified (e.g., 'v1' or 'v2')"
 
     # Extract room dimensions
     room_width = room_params['width']
     room_depth = room_params['depth']
+    room_height = room_params['height']
     source_z = room_params['source z']
 
     # Define source positions
@@ -177,6 +202,24 @@ def generate_source_positions(room_params, name = None):
 
             # Source at the top middle wall
             (room_width / 2, room_depth - 1.0, source_z, "Top_Middle_SourceV2")
+        ]
+
+    elif name == "v3":
+        source_positions = [
+            # Source in the middle of the room
+            (room_width / 2, room_depth / 2, source_z, "Center_Source"),
+
+            # Source in the lower left corner
+            (1.0, 1.0, source_z, "Lower_Left_Source"),
+
+            # Source in the upper right corner, offset from the right wall
+            (room_width - 0.5, room_depth - 1.0, source_z, "Upper_Right_Source"),
+
+            # Source at the top middle wall
+            (room_width / 2, room_depth - 1.0, source_z, "Top_Middle_Source"),
+
+            # corner source near the intersection of three walls
+            (room_width - 0.5, room_depth - 1.0, room_height-0.5, "Corner_SourceV3")
         ]
 
     # return position tuples for SDN
@@ -590,7 +633,7 @@ if __name__ == "__main__":
         # {"type": "edc", "metric": "sum"}
     ]
 
-    receiver_positions = generate_receiver_grid_old(room['width'] / 2, room['depth'] / 2, n_points=16,
+    receiver_positions = generate_receiver_grid_old(room['width'], room['depth'], room['height'], n_points=16,
                                                   margin=0.5)  # room aes
 
     print_receiver_grid(receiver_positions,room_parameters)

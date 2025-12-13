@@ -50,16 +50,23 @@ err_duration_ms = 50  # 50 ms
 
 # --- Optimizer Selection ---
 OPTIMIZER = 'minimize_scalar'  # Options: 'minimize_scalar', 'basin_hopping', 'differential_evolution'
-BOUNDS = (-3.0, 7.0)  # Bounds for c parameter
+BOUNDS = (1.0, 7.0)  # Bounds for c parameter
 
 # List of data files to process. Each will be optimized independently.
 FILES_TO_PROCESS = [
-    # "aes_room_spatial_edc_data_center_source.npz",
-    "aes_room_spatial_edc_data_top_middle_source.npz",
-    # "aes_room_spatial_edc_data_upper_right_source.npz",
-    # "aes_room_spatial_edc_data_lower_left_source.npz",
+
+    # "cube6_FULLGRID_center_source.npz",
+    # "cube6_FULLGRID_top_middle_source.npz",
+    # "cube6_FULLGRID_upper_right_source.npz",
+    # "cube6_FULLGRID_lower_left_source.npz",
+
+    # "aes_FULLGRID_center_source.npz",
+    # "aes_FULLGRID_top_middle_source.npz",
+    # "aes_FULLGRID_upper_right_source.npz",
+    # "aes_FULLGRID_lower_left_source.npz",
 ]
 
+grid_name = "fullgrid"
 # --- Objective Function ---
 def compute_spatial_rmse(c_val, room, room_parameters, sdn_config, ref_edcs, receiver_positions, duration, Fs, err_duration_ms, source_name, return_individual=False):
     """
@@ -80,7 +87,8 @@ def compute_spatial_rmse(c_val, room, room_parameters, sdn_config, ref_edcs, rec
     num_receivers = len(receiver_positions)
     individual_rmses = []
 
-    for i, (rx, ry) in enumerate(receiver_positions):
+    for i, pos in enumerate(receiver_positions):
+        rx, ry = pos[:2]
         print(f"  Evaluating receiver {i+1}/{num_receivers} at position ({rx:.2f}, {ry:.2f}) with c = {c_scalar:.4f}")
         # 1. Get the pre-computed reference EDC for this receiver
         ref_edc = ref_edcs[i]
@@ -96,7 +104,7 @@ def compute_spatial_rmse(c_val, room, room_parameters, sdn_config, ref_edcs, rec
         rir_sdn_normed = rir_normalisation(rir_sdn, room, Fs, normalize_to_first_impulse=True)['single_rir']
 
         if  i == 15:
-            plot_tr = True
+            plot_tr = False
         else:
             plot_tr = False
 
@@ -119,6 +127,46 @@ def compute_spatial_rmse(c_val, room, room_parameters, sdn_config, ref_edcs, rec
     return mean_rmse
 
 # -----------------------------------------------------------------------------
+# Reusable Optimization Logic
+# -----------------------------------------------------------------------------
+def find_optimal_c(room, room_parameters, ref_edcs, receiver_positions, duration, Fs, err_duration_ms=50, source_name="Opt", bounds=BOUNDS):
+    """
+    Finds the optimal 'c' value for a given room setup.
+    Returns: (optimal_c, mean_rmse, individual_rmses)
+    """
+    # Base SDN config
+    base_sdn_config = {
+        'enabled': True,
+        'info': "c_optimized",
+        'flags': {'specular_source_injection': True} # Base for SW-SDN
+    }
+
+    # Objective function with fixed arguments
+    obj = partial(compute_spatial_rmse,
+                  room=room,
+                  room_parameters=room_parameters,
+                  sdn_config=base_sdn_config,
+                  ref_edcs=ref_edcs,
+                  receiver_positions=receiver_positions,
+                  duration=duration, Fs=Fs,
+                  err_duration_ms=err_duration_ms,
+                  source_name=source_name)
+
+    # Run Optimization
+    # Use minimize_scalar by default as it is most robust for 1D
+    res = optimize_minimize_scalar(obj, bounds)
+    
+    optimal_c = res.x
+    mean_rmse = res.fun
+    
+    # Get details
+    _, individual_rmses = compute_spatial_rmse(
+        optimal_c, room, room_parameters, base_sdn_config, ref_edcs,
+        receiver_positions, duration, Fs, err_duration_ms, source_name, return_individual=True)
+        
+    return optimal_c, mean_rmse, individual_rmses
+
+# -----------------------------------------------------------------------------
 # Optimizer Functions
 # -----------------------------------------------------------------------------
 def optimize_minimize_scalar(obj_func, bounds):
@@ -126,7 +174,7 @@ def optimize_minimize_scalar(obj_func, bounds):
     1D bounded scalar optimization using Brent's method.
     Fast and reliable for single-parameter optimization.
     """
-    print(f"--- Starting Minimize-Scalar Optimization (bounds={bounds}) ---")
+    # print(f"--- Starting Minimize-Scalar Optimization (bounds={bounds}) ---")
     res = minimize_scalar(obj_func, bounds=bounds, method='bounded',
                           options={'xatol': 1e-3, 'maxiter': 20})
     return res
@@ -230,7 +278,7 @@ if __name__ == "__main__":
         num_samples = int(Fs * duration)
         impulse = geometry.Source.generate_signal('dirac', num_samples)
         room.set_source(*source_pos, signal=impulse['signal'], Fs=Fs)
-        room.set_microphone(room_parameters['mic x'], room_parameters['mic y'], room_parameters['mic z']) # Set initial mic pos
+        # Note: Microphone position is set in the loop for each receiver position
         room_parameters['reflection'] = np.sqrt(1 - room_parameters['absorption'])
         room.wallAttenuation = [room_parameters['reflection']] * 6
 
@@ -295,8 +343,8 @@ if __name__ == "__main__":
 
         # Receiver rows
         for i in range(room_info['num_receivers']):
-            rx, ry = receiver_positions[i]
-            row = f"Receiver {i+1:2d} ({rx:.2f},{ry:.2f})"
+            rx, ry, rz = receiver_positions[i]
+            row = f"Receiver {i+1:2d} ({rx:.2f},{ry:.2f},{rz:.2f})"
             for source_name in source_names:
                 rmse = all_results[source_name]['individual_rmses'][i]
                 row += f" | {rmse:>15.6f}"
@@ -315,7 +363,7 @@ if __name__ == "__main__":
         output_dir = DATA_DIR  # Use the same directory as input data
         os.makedirs(output_dir, exist_ok=True)
         room_name_clean = room_info['name'].lower().replace(' ', '_')
-        output_filename = f"zoptimization_results_{room_name_clean}_ref_{REFERENCE_METHOD}.txt"
+        output_filename = f"optimization_{room_name_clean}_{grid_name}_ref_{REFERENCE_METHOD}.txt"
         output_path = os.path.join(output_dir, output_filename)
 
         with open(output_path, 'w') as f:
@@ -342,8 +390,8 @@ if __name__ == "__main__":
             f.write("-" * len(header) + "\n")
             
             for i in range(room_info['num_receivers']):
-                rx, ry = receiver_positions[i]
-                row = f"Receiver {i+1:2d} ({rx:.2f},{ry:.2f})"
+                rx, ry, rz = receiver_positions[i]
+                row = f"Receiver {i+1:2d} ({rx:.2f},{ry:.2f}, {rz:.2f})"
                 for source_name in source_names:
                     rmse = all_results[source_name]['individual_rmses'][i]
                     row += f" | {rmse:>15.6f}"

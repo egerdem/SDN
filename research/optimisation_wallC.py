@@ -48,11 +48,20 @@ BOUNDS_VEC = [(1.0, 7.0)] * 6
 MAX_RECEIVERS = 16  # For trial runs, limit to first 2 receivers
 
 FILES_TO_PROCESS = [
-    "aes_room_spatial_edc_data_center_source.npz",
-    "aes_room_spatial_edc_data_lower_left_source.npz",
-    "aes_room_spatial_edc_data_top_middle_source.npz",
-    "aes_room_spatial_edc_data_upper_right_source.npz",
+
+    # "cube6_FULLGRID_center_source.npz",
+    # "cube6_FULLGRID_top_middle_source.npz",
+    # "cube6_FULLGRID_upper_right_source.npz",
+    "cube6_FULLGRID_lower_left_source.npz",
+
+    # "aes_FULLGRID_center_source.npz",
+    # "aes_FULLGRID_top_middle_source.npz",
+    # "aes_FULLGRID_upper_right_source.npz",
+    # "aes_FULLGRID_lower_left_source.npz",
 ]
+
+grid_name = "fullgrid"
+
 
 
 # -----------------------------------------------------------------------------
@@ -89,8 +98,8 @@ def compute_dataset_rmse(c_vec: np.ndarray, dataset: dict, err_duration_ms: int,
     num_samples = int(Fs * duration)
     impulse = geometry.Source.generate_signal("dirac", num_samples)
     room.set_source(*dataset["source_pos"], signal=impulse["signal"], Fs=Fs)
-    room.set_microphone(room_params["mic x"], room_params["mic y"],
-                        room_params["mic z"])
+    # room.set_microphone(room_params["mic x"], room_params["mic y"],
+    #                     room_params["mic z"])
     room_params["reflection"] = np.sqrt(1 - room_params["absorption"])
     room.wallAttenuation = [room_params["reflection"]] * 6
 
@@ -111,7 +120,8 @@ def compute_dataset_rmse(c_vec: np.ndarray, dataset: dict, err_duration_ms: int,
         ref_edcs = ref_edcs[:MAX_RECEIVERS]
         print(f"  [Trial Mode] Limiting to first {MAX_RECEIVERS} receivers")
 
-    for i, (rx, ry) in enumerate(receivers):
+    for i, pos in enumerate(receivers):
+        rx, ry = pos[:2]
         room.set_microphone(rx, ry,  room_params["mic z"])
         cache_label = f"{dataset.get('name', 'dataset')}_rx{i:02d}"
         cfg['cache_label'] = cache_label
@@ -309,6 +319,7 @@ if __name__ == "__main__":
 
     # Export results
     room_info = datasets[0]['room_params']
+    room_name = room_info.get('display_name')
     c_vec_str = "[" + ",".join(f"{v:.2f}" for v in optimal_c_vec) + "]"
     print(f"\n--- WALL C-VECTOR OPTIMIZATION RESULTS {c_vec_str} ---")
     
@@ -325,8 +336,8 @@ if __name__ == "__main__":
         num_receivers = min(num_receivers, MAX_RECEIVERS)
     
     for i in range(num_receivers):
-        rx, ry = datasets[0]['receiver_positions'][i]
-        row = f"Receiver {i+1:2d} ({rx:.2f},{ry:.2f})"
+        rx, ry, rz = datasets[0]['receiver_positions'][i]
+        row = f"Receiver {i+1:2d} ({rx:.2f},{ry:.2f},{rz:.2f})"
         for source_name in source_names:
             rmse = all_results[source_name]['individual_rmses'][i]
             row += f" | {rmse:>15.6f}"
@@ -337,17 +348,22 @@ if __name__ == "__main__":
     
     # Export to file
     if len(source_names) > 1:
-        file_prefix = "multi_source"
+        file_prefix = "multi"
     else:
-        file_prefix = source_names[0].split()[0].lower()
+        # Extract source position name: split by underscore and take the third word (index 2)
+        # e.g., "aes_FULLGRID_center_source.npz" -> "center"
+        filename = FILES_TO_PROCESS[0].replace('.npz', '')
+        parts = filename.split('_')
+        file_prefix = parts[2].lower() if len(parts) > 2 else "unknown"
         
     output_dir = DATA_DIR  # Use the same directory as input data
     os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, f"{file_prefix}_wall_c_vector_opt_ref_{REFERENCE_METHOD}.txt")
+    room_name_clean = room_info.get('display_name').lower().replace(' ', '_')
+    output_path = os.path.join(output_dir, f"optimization_{room_name_clean}_{file_prefix}_{grid_name}_wall_c_ref_{REFERENCE_METHOD}.txt")
     
     with open(output_path, 'w') as f:
         f.write("--- SDN WALL C-VECTOR OPTIMIZATION RESULTS ---\n")
-        f.write(f"Room: {room_info.get('display_name', 'AES Room')} ({room_info['width']}x{room_info['depth']}x{room_info['height']} m)\n")
+        f.write(f"Room: {room_info.get('display_name')} ({room_info['width']}x{room_info['depth']}x{room_info['height']} m)\n")
         f.write(f"Absorption: {room_info['absorption']}, Reference Method: {REFERENCE_METHOD}\n")
         f.write(f"Optimal c vector: {c_vec_str}, Global Mean RMSE: {result.fun:.6f}\n")
         f.write("="*100 + "\n\n")
@@ -369,8 +385,8 @@ if __name__ == "__main__":
             num_receivers = min(num_receivers, MAX_RECEIVERS)
         
         for i in range(num_receivers):
-            rx, ry = datasets[0]['receiver_positions'][i]
-            row = f"Receiver {i+1:2d} ({rx:.2f},{ry:.2f})"
+            rx, ry, rz = datasets[0]['receiver_positions'][i]
+            row = f"Receiver {i+1:2d} ({rx:.2f},{ry:.2f}, {rz:.2f})"
             
             row_values = []
             for source_name in source_names:

@@ -2,7 +2,11 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import List, Dict, Tuple
 import numpy as np
-from analysis.spatial_analysis import generate_receiver_grid_old, generate_source_positions, print_receiver_grid
+# Handle both relative import (when used as module) and absolute import (when run directly or from same dir)
+try:
+    from .spatial_analysis import generate_receiver_grid_old, generate_source_positions, print_receiver_grid
+except ImportError:
+    from spatial_analysis import generate_receiver_grid_old, generate_source_positions, print_receiver_grid
 
 @dataclass
 class Path:
@@ -214,45 +218,58 @@ class PathTracker:
             print(f"Order {order}: {count} valid paths")
 
 if __name__ == "__main__":
-    from .sdn_path_calculator import SDNCalculator, ISMCalculator, PathCalculator
+    # from .sdn_path_calculator import SDNCalculator, ISMCalculator, PathCalculator
+    # Add project root to path BEFORE other imports
+    import os
+    import sys
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+    try:
+        from .sdn_path_calculator import SDNCalculator, ISMCalculator, PathCalculator
+    except ImportError:
+        from sdn_path_calculator import SDNCalculator, ISMCalculator, PathCalculator
+
+
     import geometry
-    from . import plot_room as pp
+    # from . import plot_room as pp
     import matplotlib.pyplot as plt
+    import experiment_configs as exp_cfg
 
     plot_arrival_times_per_order = False
 
-    room_aes = {'width': 9, 'depth': 7, 'height': 4,
-                'source x': 4.5, 'source y': 3.5, 'source z': 2,
-                'mic x': 2, 'mic y': 2, 'mic z': 1.5,
-                'absorption': 0.2,
-                }
+    # room_aes = {'width': 9, 'depth': 7, 'height': 4,
+    #             'source x': 4.5, 'source y': 3.5, 'source z': 2,
+    #             'mic x': 2, 'mic y': 2, 'mic z': 1.5,
+    #             'absorption': 0.2,
+    #             }
+    #
+    # room_journal = {'width': 3.2, 'depth': 4, 'height': 2.7,
+    #                 'source x': 2, 'source y': 3., 'source z': 2,
+    #                 'mic x': 1, 'mic y': 1, 'mic z': 1.5,
+    #                 'absorption': 0.1,
+    #                 }
+    #
+    # room_aes_outliar = {
+    #     'display_name': 'AES Room',
+    #     'width': 9, 'depth': 7, 'height': 4,
+    #     'source x': 4.5, 'source y': 6, 'source z': 2,
+    #     'mic x':0.5, 'mic y': 0.5, 'mic z': 1.5,
+    #     'absorption': 0.2,
+    # }
 
-    room_journal = {'width': 3.2, 'depth': 4, 'height': 2.7,
-                    'source x': 2, 'source y': 3., 'source z': 2,
-                    'mic x': 1, 'mic y': 1, 'mic z': 1.5,
-                    'absorption': 0.1,
-                    }
-
-    room_aes_outliar = {
-        'display_name': 'AES Room',
-        'width': 9, 'depth': 7, 'height': 4,
-        'source x': 4.5, 'source y': 6, 'source z': 2,
-        'mic x':0.5, 'mic y': 0.5, 'mic z': 1.5,
-        'absorption': 0.2,
-    }
-
-    room_parameters = room_aes_outliar
+    room_parameters = exp_cfg.room_aes.copy()
     active_room = room_parameters
     room = geometry.Room(room_parameters['width'], room_parameters['depth'], room_parameters['height'])
 
-    receiver_positions = generate_receiver_grid_old(active_room['width'] / 2, active_room['depth'] / 2, wall_margin=0.5,
-                                                    center_margin=0.5,
-                                                    n_points=16)
+    receiver_positions = generate_receiver_grid_old(active_room['width'] / 2, active_room['depth'] / 2,
+                                                    z=active_room['mic z'], margin=0.5, n_points=16)
+
     source_pos = room_parameters['source x'], room_parameters['source y'], room_parameters['source z']
 
     print_receiver_grid(receiver_positions, room_parameters)
 
-    for i, (rx, ry) in enumerate(receiver_positions):
+    for i, pos in enumerate(receiver_positions):
+        rx, ry = pos[:2]
         print(f"    ... receiver {i + 1}/{len(receiver_positions)} at ({rx:.2f}, {ry:.2f})")
 
         room_parameters.update({
