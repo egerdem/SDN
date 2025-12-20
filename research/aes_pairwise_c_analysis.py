@@ -39,27 +39,51 @@ from analysis import analysis as an
 from rir_calculators import calculate_sdn_rir_fast, rir_normalisation, enable_basis_disk_cache
 from deprecated import wall_proximity
 from research.optimisation_singleC import optimize_minimize_scalar, BOUNDS as DEFAULT_C_BOUNDS
+from research.data_config import DataConfig
 
 
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
 
-DATA_DIR = os.path.join(_project_root, "results", "paper_data")
-OUTPUT_DIR = os.path.join(_project_root, "results")
+# === DATA SOURCE CONFIGURATION ===
+# Choose one mode: "legacy" or "experiment"
+
+# Option 1: Legacy mode (flat file structure)
+# config = DataConfig(mode="legacy")
+
+# Option 2: Experiment mode (uncomment to use)
+config = DataConfig(
+    mode="experiment",
+    # experiment_name="aes_fullgrid_perpair_srcgrid3x5_corner2.0_per_pair",
+    experiment_name="aes_fullgrid_8src_diagonal",
+)
+
+# Option 3: Legacy mode with custom file selection
+# config = DataConfig(
+#     mode="legacy",
+#     legacy_files=[
+        # "aes_FULLGRID_center_source.npz",
+        # "aes_FULLGRID_top_middle_source.npz",
+        # "aes_FULLGRID_upper_right_source.npz",
+        # "aes_FULLGRID_lower_left_source.npz",
+        # "aes_FULLGRID_corner_sourcev3.npz",
+#     ]
+# )
+
+# Get paths from config
+DATA_DIR = config.get_data_dir()
+FILES_TO_PROCESS = config.get_files()
+
+# Output directory: use experiment folder if in experiment mode, otherwise use results/
+if config.mode == "experiment":
+    OUTPUT_DIR = DATA_DIR  # Save to experiment directory
+else:
+    OUTPUT_DIR = os.path.join(_project_root, "results")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 REFERENCE_METHOD = "RIMPY-neg10"
 ORIGINAL_SDN_METHOD = "SDN-Test1"  # c=1 original (saved in NPZ)
-
-# Use FULLGRID (per your request)
-FILES_TO_PROCESS = [
-    "aes_FULLGRID_center_source.npz",
-    "aes_FULLGRID_top_middle_source.npz",
-    "aes_FULLGRID_upper_right_source.npz",
-    "aes_FULLGRID_lower_left_source.npz",
-    # "aes_FULLGRID_corner_sourcev3.npz",
-]
 
 # RMSE window (ms)
 ERR_DURATION_MS = 50
@@ -70,6 +94,9 @@ ERR_DURATION_MS = 50
 C_BOUNDS = DEFAULT_C_BOUNDS
 
 # Optional: also compute per-pair optimized c* (slow). Keep off for the "SDN error only" study.
+# NOTE: c_opt_pair column in CSV is filled when RUN_PAIRWISE_C_OPT=True.
+#       If you already have optimal_c values from monte_carlo_proximity.py results.json,
+#       use the populate_csv_from_json.py script to fill this column instead.
 RUN_PAIRWISE_C_OPT = False
 
 # Outlier rejection (only used if RUN_PAIRWISE_C_OPT=True)
@@ -213,8 +240,8 @@ def main() -> None:
         room_parameters = dict(room_params)
         room_parameters["reflection"] = np.sqrt(1.0 - room_params["absorption"])
 
-        # Determine a readable source tag from filename
-        source_tag = filename.replace("aes_FULLGRID_", "").replace(".npz", "")
+        # Determine a readable source tag from filename using config
+        source_tag = config.extract_source_tag(filename)
 
         print(f"\n=== {filename} ===")
         print(f"source_tag={source_tag}, src_pos={src_pos}, H_src_norm={h_src_norm:.4f}, receivers={len(receiver_positions)}")

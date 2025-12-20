@@ -8,6 +8,9 @@ from rir_calculators import calculate_pra_rir, calculate_sdn_rir, calculate_ho_s
 from analysis.spatial_analysis import generate_receiver_grid_old, generate_source_positions, generate_full_receiver_grid
 import pprint
 
+# Global defaults for import safety
+METHODS_TO_REPLACE = []
+
 def calculate_and_save_data(room_params: dict, source_pos: Tuple[float, float, float],
                               receiver_positions: List[Tuple[float, float]],
                               duration: float, Fs: int,
@@ -237,7 +240,7 @@ if __name__ == "__main__":
     
     # --- GRID SELECTION ---
     # Options: "full", "quarter"
-    GRID_SELECTION = "quarter"
+    GRID_SELECTION = "full"
 
     # Files to process when PROCESS_MULTIPLE_SOURCES is True
     # HOW TO USE:
@@ -264,8 +267,22 @@ if __name__ == "__main__":
         # "aes_quarter_top_middle_source.npz",
         # "aes_quarter_upper_right_source.npz",
         # "aes_quarter_lower_left_source.npz",
-        "aes_quarter_corner_sourcev3.npz",
+        # "aes_quarter_corner_sourcev3.npz",
+
+        # "waspaa_FULLGRID_center_source.npz",
+        # "waspaa_FULLGRID_top_middle_source.npz",
+        # "waspaa_FULLGRID_upper_right_source.npz",
+        # "waspaa_FULLGRID_lower_left_source.npz",
+        # "waspaa_FULLGRID_corner_sourcev3.npz",
+
+        "journal_FULLGRID_center_source.npz",
+        "journal_FULLGRID_top_middle_source.npz",
+        "journal_FULLGRID_upper_right_source.npz",
+        "journal_FULLGRID_lower_left_source.npz",
+        # "journal_FULLGRID_corner_sourcev3.npz",
     ]
+
+
     
     # Set to True to process multiple sources, False for single source from active_room
     PROCESS_MULTIPLE_SOURCES = True

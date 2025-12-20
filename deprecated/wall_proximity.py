@@ -10,7 +10,7 @@ if project_root not in sys.path: sys.path.append(project_root)
 
 import experiment_configs as exp_config
 try:
-    from analysis.spatial_analysis import generate_source_positions, generate_full_receiver_grid
+    from analysis.spatial_analysis import generate_source_positions, generate_full_receiver_grid, generate_fixed_source_grid
 except ImportError:
     from spatial_analysis import generate_source_positions, generate_full_receiver_grid
 
@@ -22,6 +22,22 @@ def harmonic_mean(dists):
     inv_sum = sum(1.0 / d for d in dists if d > 0)
     if inv_sum == 0: return float('inf')
     return len(dists) / inv_sum
+
+def harmonic_mean_norm(dists, active_room):
+
+    # Harmonic mean (dominated by smallest distance, i.e., wall proximity)
+    h_src = harmonic_mean(dists)
+
+    width = active_room['width']
+    depth = active_room['depth']
+    height = active_room['height']
+
+    # Characteristic length (cube root of volume)
+    volume = width * depth * height
+    char_len = volume ** (1.0 / 3.0)
+    # Normalize by characteristic length for scale invariance
+    h_src_norm = h_src / char_len
+    return h_src_norm
 
 def get_wall_distances(x, y, z, width, depth, height):
     """Calculate distances to all 6 walls."""
@@ -51,35 +67,37 @@ def analyze_wall_proximity():
     
 import geometry
 
-def analyze_wall_proximity():
-    # Load Room Config
-    active_room = exp_config.active_room
+def analyze_wall_proximity(source_positions, receiver_positions, active_room):
+
     width = active_room['width']
     depth = active_room['depth']
     height = active_room['height']
-    
+
     room_name = active_room.get('display_name', 'Unknown')
     print(f"Room: {room_name} (W={width}, D={depth}, H={height})")
-    
-    # Generate Sources and Receivers
-    source_positions = generate_source_positions(active_room, name='v1')
-    receiver_positions = generate_full_receiver_grid(width, depth, active_room['mic z'], 4, 4, 0.5)
-    
+
     # -------------------------------------------------------------------------
     # 1. Source Summary (Harmonic Mean)
     # -------------------------------------------------------------------------
     print(f"\n[1. SOURCE Proximity Summary]")
-    print(f"{'Source Name':<20} | {'Coords':<20} | {'H_src':<10}")
+    print(f"{'Source Name':<20} | {'Coords':<20} | {'H_src_norm':<10} | {'H_src':<10}")
     print("-" * 60)
     
     src_h_means = {}
     
     for src in source_positions:
-        sx, sy, sz, name = src
+        try:
+            sx, sy, sz, name = src
+        except:
+            sx, sy, sz  = src
+            name = f"SRC({sx:.1f},{sy:.1f},{sz:.1f})"
+
         dists = get_wall_distances(sx, sy, sz, width, depth, height)
         h_src = harmonic_mean(dists)
+        h_src_norm = harmonic_mean_norm(dists, active_room)
+
         src_h_means[name] = h_src
-        print(f"{name:<20} | {f'({sx:.1f}, {sy:.1f})':<20} | {h_src:<10.3f}")
+        print(f"{name:<20} | {f'({sx:.1f}, {sy:.1f})':<20} | {h_src_norm:<10.3f} | {h_src:<10.3f}")
 
     # -------------------------------------------------------------------------
     # 2. Detailed Grid Analysis
@@ -102,7 +120,12 @@ def analyze_wall_proximity():
         tables['node_dist'][rx_idx] = {'coords': (rx_x, rx_y)}
         
         for src in source_positions:
-            sx, sy, sz, src_name = src
+            try:
+                sx, sy, sz, src_name = src
+            except:
+                sx, sy, sz = src
+                src_name = f"SRC({sx:.1f},{sy:.1f},{sz:.1f})"
+
             h_src = src_h_means[src_name]
             
             # Metric 1: Combined Proximity Score
@@ -133,7 +156,14 @@ def analyze_wall_proximity():
                  tables['node_dist'][rx_idx][src_name] = 0.0
 
     # Helper to print table
-    source_names = [s[3] for s in source_positions]
+    # Extract source names with try-except for sources without names
+    source_names = []
+    for s in source_positions:
+        try:
+            source_names.append(s[3])
+        except:
+            sx, sy, sz = s
+            source_names.append(f"SRC({sx:.1f},{sy:.1f},{sz:.1f})")
     
     def print_metric_table(metric_key, title):
         print(f"\n{title}")
@@ -171,4 +201,23 @@ def analyze_wall_proximity():
     print_metric_table('node_dist', "Mean Distance to 3 Nearest Nodes [Lower = Harder]")
 
 if __name__ == "__main__":
-    analyze_wall_proximity()
+    # Load Room Config
+    active_room = exp_config.active_room
+    width = active_room['width']
+    depth = active_room['depth']
+    # Generate Sources and Receivers
+    # source_positions = generate_source_positions(active_room, name='v1')
+    receiver_positions = generate_full_receiver_grid(width, depth, active_room['mic z'], 4, 4, 0.5)
+
+    source_positions = generate_fixed_source_grid(
+        active_room,
+        padding=0.5,
+        n_x=15,
+        n_y=15,
+        z_mode="fixed_1p5",
+        include_corners=True,
+        corner_offset=0.5,
+        diagonals=True
+    )
+
+    analyze_wall_proximity(source_positions, receiver_positions, active_room)

@@ -165,13 +165,23 @@ def load_data(data_path: str) -> dict:
         'room_params': data['room_params'][0]
     }
     
+    # NEW: Check for modern 'edcs' dictionary format first (preferred)
+    if 'edcs' in data:
+        edcs_dict = data['edcs'].item()  # Convert numpy array to dict
+        results['edcs'].update(edcs_dict)
+    
+    # Backward compatibility: parse flat keys (will be overridden by 'edcs' dict if present)
     for key in data.keys():
         if key.startswith('rirs_'):
             method = key.replace('rirs_', '')
             results['rirs'][method] = data[key]
-        elif key.startswith('edcs_'):
-            method = key.replace('edcs_', '')
-            results['edcs'][method] = data[key]
+
+        #elif key.startswith('edcs_'):
+        #method = key.replace('edcs_', '')
+        elif key.startswith('edcs_') and key != 'edcs':  # Skip the 'edcs' dict itself
+            method = key.replace('edcs_', '').replace('_', '-')  # Convert underscores to hyphens
+            if method not in results['edcs']:  # Don't override if already loaded from 'edcs' dict
+                results['edcs'][method] = data[key]
         elif key.startswith('neds_'):
             method = key.replace('neds_', '')
             results['neds'][method] = data[key]

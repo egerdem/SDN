@@ -26,7 +26,7 @@ room_aes = {
 room_aes_rx00 = {
     'display_name': 'AES Room',
     'width': 9, 'depth': 7, 'height': 4,
-    'source x': 4.5, 'source y': 3.5, 'source z': 2,
+    'source x': 7, 'source y': 6, 'source z': 2,
     'mic x': 0.5, 'mic y': 0.5, 'mic z': 1.5,
     'absorption': 0.2,
 }
@@ -56,7 +56,9 @@ room_cube6 = {
     }
 
 # Default Active Room
-active_room = room_aes
+# active_room = room_aes
+active_room = room_aes_rx00
+# active_room = room_journal
 # active_room = room_cube6
 
 if active_room['display_name'] == 'Journal Room':
@@ -83,7 +85,7 @@ PLOT_ISM_with_pra_rand10_airabsorb = False
 PLOT_ISM_rimPy_pos = False
 PLOT_ISM_rimPy_pos_rand10 = False
 PLOT_ISM_rimPy_neg = False
-PLOT_ISM_rimPy_neg_rand10 = False    #
+PLOT_ISM_rimPy_neg_rand10 = False
 
 # tests
 wall1, wall2, wall3, wall4, wall5, wall6 = False, False, False, False, False, False
@@ -96,16 +98,16 @@ TR = False  # Set to True to enable all SDN tests by default
 # SDN Tests
 
 
-RUN_SDN_Test1_spec = True
+RUN_SDN_Test1_spec = False
 
 RUN_SDN_Test_2 = TR
 RUN_SDN_Test_3 = TR
 RUN_SDN_Test0 = False
 RUN_SDN_Test1 = True  # c=1 original
 RUN_SDN_Test2 = TR
-RUN_SDN_Test3 = TR
+RUN_SDN_Test3 = True
 RUN_SDN_Test4 = TR
-RUN_SDN_Test5 = TR
+RUN_SDN_Test5 = True
 RUN_SDN_Test6 = TR
 RUN_SDN_Test7 = TR
 
@@ -114,9 +116,9 @@ RUN_SDN_Test4_71 = False # Test2.998
 
 RUN_SDN_Test_micX = False
 RUN_SDN_Test2_mic = False
-RUN_SDN_Test3_mic = False
+RUN_SDN_Test3_mic = True
 RUN_SDN_Test4_mic = False
-RUN_SDN_Test5_mic = False
+RUN_SDN_Test5_mic = True
 
 SDN_SW_v2_kk000 = False
 SDN_SW_v2_kkk00 = False

@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import Dict, List, Tuple
+import os
 import geometry
 from sdn_core import DelayNetwork
 from archive.sdn_base import calculate_sdn_base_rir
@@ -73,6 +74,103 @@ def print_receiver_grid(receiver_positions, room, source_position=None, save=Fal
         plt.savefig(f'{name}_{source_name}_receiver_grid_old_positions.png')
         plt.close()
     plt.show()
+
+def print_source_grid(source_positions, receiver_positions, room, save=False, grid_name=""):
+    """
+    Visualize all source positions and receiver positions together in a single plot.
+    
+    Args:
+        source_positions: List of source positions (x, y, z) or (x, y, z, name)
+        receiver_positions: List of receiver positions (x, y, z)
+        room: Room parameters dictionary
+        save: Whether to save the plot
+        grid_name: Name for the saved file
+    """
+    print(f"\nSource-Receiver Grid Visualization:")
+    print(f"Sources: {len(source_positions)} positions")
+    print(f"Receivers: {len(receiver_positions)} positions")
+    
+    # Print source coordinates
+    print("\nSource Positions:")
+    for i, pos in enumerate(source_positions):
+        if len(pos) >= 4:  # Has name
+            sx, sy, sz, name = pos[:4]
+            print(f"Source {i:2d}: ({sx:.2f}, {sy:.2f}, {sz:.2f}) - {name}")
+        else:
+            sx, sy, sz = pos[:3]
+            print(f"Source {i:2d}: ({sx:.2f}, {sy:.2f}, {sz:.2f})")
+    
+    # Print receiver coordinates
+    print("\nReceiver Positions:")
+    grid_size = int(np.sqrt(len(receiver_positions)))
+    for i, pos in enumerate(receiver_positions):
+        rx, ry = pos[:2]
+        print(f"Receiver {i:2d}: ({rx:.2f}, {ry:.2f}), grid index: row={i // grid_size}, col={i % grid_size}")
+
+    # Create visualization
+    plt.figure(figsize=(12, 10))
+    
+    # Plot receivers
+    rx_values = [pos[0] for pos in receiver_positions]
+    ry_values = [pos[1] for pos in receiver_positions]
+    plt.scatter(rx_values, ry_values, c='blue', s=80, alpha=0.7, marker='o', label='Receivers')
+
+    # Add receiver indices and coordinates
+    for i, pos in enumerate(receiver_positions):
+        rx, ry = pos[:2]
+        plt.text(rx, ry, f"R{i}", fontsize=8, ha='center', va='center', color='white', weight='bold')
+        plt.text(rx, ry + 0.15, f"({rx:.1f},{ry:.1f})", fontsize=7, ha='center', va='center', color='blue')
+
+    # Plot sources
+    sx_values = [pos[0] for pos in source_positions]
+    sy_values = [pos[1] for pos in source_positions]
+    plt.scatter(sx_values, sy_values, c='red', s=120, alpha=0.8, marker='*', label='Sources')
+    
+    # Add source indices and coordinates
+    for i, pos in enumerate(source_positions):
+        sx, sy = pos[:2]
+        sz = pos[2] if len(pos) > 2 else 0
+        plt.text(sx, sy, f"S{i}", fontsize=9, ha='center', va='center', color='white', weight='bold')
+        
+        # Add source name if available
+        if len(pos) >= 4:
+            name = pos[3]
+            plt.text(sx, sy - 0.25, f"{name}", fontsize=8, ha='center', va='top', color='red', weight='bold',
+                    bbox=dict(boxstyle='round,pad=0.2', facecolor='white', edgecolor='red', alpha=0.8))
+        else:
+            plt.text(sx, sy - 0.25, f"({sx:.1f},{sy:.1f},{sz:.1f})", fontsize=8, ha='center', va='top', color='red')
+
+    # Add room boundaries
+    plt.plot([0, room['width']], [0, 0], 'k-', linewidth=3, label='Room boundaries')
+    plt.plot([0, room['width']], [room['depth'], room['depth']], 'k-', linewidth=3)
+    plt.plot([0, 0], [0, room['depth']], 'k-', linewidth=3)
+    plt.plot([room['width'], room['width']], [0, room['depth']], 'k-', linewidth=3)
+
+    plt.title(f'Combined Source-Receiver Grid Layout\n{room["display_name"]} - {len(source_positions)} Sources, {len(receiver_positions)} Receivers')
+    plt.xlabel('Room Width (m)')
+    plt.ylabel('Room Depth (m)')
+    plt.grid(True, alpha=0.3)
+    plt.gca().set_aspect('equal', adjustable='box')
+    plt.legend(loc='upper right')
+    
+    # Add room dimensions as text
+    plt.text(room['width']/2, -0.3, f"Width: {room['width']}m", ha='center', va='top', fontsize=10)
+    plt.text(-0.3, room['depth']/2, f"Depth: {room['depth']}m", ha='center', va='center', rotation=90, fontsize=10)
+
+    if save:
+        # If grid_name is an absolute path, use it directly; otherwise construct filename
+        if os.path.isabs(grid_name):
+            filename = grid_name
+        else:
+            filename = f'{room["display_name"]}_{grid_name}_combined_source_receiver_grid.png'
+        
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(os.path.abspath(filename)), exist_ok=True)
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        print(f"Plot saved as: {filename}")
+        plt.close()
+    else:
+        plt.show()
 
 def generate_receiver_grid_old(room_width: float, room_depth: float, room_height: float = None, z: float = None, margin = 1, center_margin = None, n_points: int = 50) -> List[Tuple[float, float, float]]:
     """Generate a grid of receiver positions within the room.
@@ -155,6 +253,7 @@ def generate_full_receiver_grid(room_width: float, room_depth: float, height: fl
             receivers.append((xi, yi, height))
             
     return receivers
+
 def generate_source_positions(room_params, name = None):
     """Create a list of source positions within the room.
 
@@ -224,6 +323,160 @@ def generate_source_positions(room_params, name = None):
 
     # return position tuples for SDN
     sources = [(pos[0], pos[1], pos[2], pos[3]) for pos in source_positions]
+
+    return sources
+
+def generate_fixed_source_grid(
+    room_params,
+    padding,
+    n_x=5,
+    n_y=5,
+    z_mode="mid",
+    include_corners=True,
+    corner_offset=1.5,
+    diagonals=False
+):
+    """
+    Deterministic, equi-spaced source positions (no random branching).
+
+    Rationale: replaces the previous "corner_biased" RNG logic with a repeatable
+    coverage pattern similar in spirit to your fixed sources, but denser/more representative.
+
+    - n_x, n_y: grid density in x/y between [padding, dim-padding]. The 4 natural corner 
+      positions from the grid are excluded, leaving (n_x * n_y - 4) grid sources.
+    - z_mode:
+        - "mid": z = h/2 (clipped to [padding, h-padding])
+        - "fixed_1p5": z = 1.5 (clipped to [padding, h-padding])
+    - include_corners: add 4 additional corner points at the same z using corner_offset
+    - corner_offset: distance (meters) from each wall for the 4 corner points.
+      This helps avoid exact overlap with receiver grids that often use `padding`
+      as their margin (e.g., 0.5m). Default: 1.5m.
+      
+    Total sources: (n_x * n_y - 4) + (4 if include_corners else 0)
+    Example: 5x5 grid -> 21 grid sources + 4 corners = 25 total sources
+    """
+
+    w = room_params['width']
+    d = room_params['depth']
+    h = room_params['height']
+
+    # Generate grid points excluding corners (which will be added separately if include_corners=True)
+    x_vals = np.linspace(padding, w - padding, n_x)
+    y_vals = np.linspace(padding, d - padding, n_y)
+
+    if z_mode == "fixed_1p5":
+        z = float(np.clip(1.5, padding, h - padding))
+    else:
+        z = float(np.clip(h / 2.0, padding, h - padding))
+
+    # Create all grid combinations but exclude the 4 corner positions
+    all_grid_sources = [(float(x), float(y), z) for x in x_vals for y in y_vals]
+    
+    # Remove the 4 corner positions from the grid (first, last combinations)
+    corner_positions = [
+        (x_vals[0], y_vals[0]),   # bottom-left
+        (x_vals[-1], y_vals[0]),  # bottom-right  
+        (x_vals[0], y_vals[-1]),  # top-left
+        (x_vals[-1], y_vals[-1])  # top-right
+    ]
+    
+    sources = []
+    for x, y, z_val in all_grid_sources:
+        if (x, y) not in corner_positions:
+            sources.append((x, y, z_val))
+
+    if include_corners:
+        # Place corner points *inside* the room, not exactly on the `padding` margin.
+        # This reduces source/receiver "clashes" when receiver grids sit at `padding`.
+        cx0 = float(np.clip(corner_offset, padding, w - padding))
+        cy0 = float(np.clip(corner_offset, padding, d - padding))
+        cx1 = float(np.clip(w - corner_offset, padding, w - padding))
+        cy1 = float(np.clip(d - corner_offset, padding, d - padding))
+
+        corners = [
+            (cx0, cy0, z),
+            (cx1, cy0, z),
+            (cx0, cy1, z),
+            (cx1, cy1, z),
+        ]
+        # Prepend corners so src1..src4 are always "boundary-like"
+        sources = corners + sources
+
+    # De-duplicate while preserving order
+    seen = set()
+    unique_sources = []
+    for s in sources:
+        key = (round(s[0], 6), round(s[1], 6), round(s[2], 6))
+        if key not in seen:
+            seen.add(key)
+            unique_sources.append(s)
+
+    if diagonals:
+        # Extract diagonal sources only (to get varying H_src values)
+        # We'll filter to keep sources that lie approximately on the diagonal
+        diag_sources = []
+
+        # Create a grid to identify diagonal positions
+        x_vals = np.linspace(0.5, w - 0.5, n_x)
+        y_vals = np.linspace(0.5, d - 0.5, n_y)
+
+        # For each source, check if it's on the diagonal
+        for sx, sy, sz in unique_sources:
+            # Find closest grid indices
+            x_idx = np.argmin(np.abs(x_vals - sx))
+            y_idx = np.argmin(np.abs(y_vals - sy))
+
+            # Keep if on diagonal (x_idx == y_idx)
+            if x_idx == y_idx and sx <= w/2 and sy <= d/2:
+                diag_sources.append((sx, sy, sz))
+
+        unique_sources = diag_sources[1:]
+
+    return unique_sources
+
+
+def generate_fixed_source_grid_simple(
+        room_params,
+        padding,
+        n_x=2,
+        n_y=2,
+        z_mode="mid"):
+    """
+    Generate a simple 2x2 grid of sources positioned at padding distance from walls.
+    
+    Args:
+        room_params: Room parameters dict with 'width', 'depth', 'height'
+        padding: Distance from walls to place sources
+        n_x: Number of sources along x-axis (default: 2)
+        n_y: Number of sources along y-axis (default: 2) 
+        z_mode: Height mode ("mid" for room center, "fixed_1p5" for 1.5m)
+    
+    Returns:
+        List of (x, y, z, name) source positions
+    """
+    w = room_params['width']
+    d = room_params['depth']
+    h = room_params['height']
+
+    # Calculate source positions at padding distance from walls
+    x_vals = [padding, w - padding]  # Near left wall, near right wall
+    y_vals = [padding, d - padding]  # Near front wall, near back wall
+
+    if z_mode == "fixed_1p5":
+        z = 1.5
+    else:
+        z = float(np.clip(h / 2.0, padding, h - padding))
+
+    # Create 4 sources at the corners (padding distance from walls)
+    sources = []
+    source_names = ["Corner_BL", "Corner_TL", "Corner_BR", "Corner_TR"]  # Bottom-Left, Top-Left, Bottom-Right, Top-Right
+    
+    idx = 0
+    for x in x_vals:
+        for y in y_vals:
+            # sources.append((float(x), float(y), z, source_names[idx]))
+            sources.append((float(x), float(y), z))
+            idx += 1
 
     return sources
 

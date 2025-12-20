@@ -16,6 +16,7 @@ if script_dir not in sys.path: sys.path.append(script_dir)
 import experiment_configs
 import geometry
 from deprecated import wall_proximity
+from c_predictor import predict_c_from_source
 
 try:
     from analysis.spatial_analysis import generate_source_positions, generate_full_receiver_grid
@@ -25,8 +26,8 @@ except ImportError:
 def analyze_fixed_grids():
     # Define Rooms to Analyze
     rooms_to_analyze = [
-        experiment_configs.room_cube6,
-        # experiment_configs.room_aes
+        # experiment_configs.room_cube6,
+        experiment_configs.room_aes
     ]
     
     print("=== FIXED GRID PROXIMITY ANALYSIS ===")
@@ -48,9 +49,9 @@ def analyze_fixed_grids():
         source_names = [s[3] for s in source_positions]
         
         # 2. Generate Receivers (16 fixed positions - Full Grid 4x4)
-        receiver_positions = generate_full_receiver_grid(w, d, active_room['mic z'], 4, 4, 0.5)
-        # receiver_positions = generate_receiver_grid_old(active_room['width'] / 2, active_room['depth'] / 2, z = active_room['mic z'], margin=0.5,
-        #                                                 n_points=16)
+        # receiver_positions = generate_full_receiver_grid(w, d, active_room['mic z'], 4, 4, 0.5)
+        receiver_positions = generate_receiver_grid_old(active_room['width'] / 2, active_room['depth'] / 2, z = active_room['mic z'], margin=0.5,
+                                                        n_points=16)
 
         # Data structure for tables
         # tables['metric'][rx_idx][src_name]
@@ -63,6 +64,7 @@ def analyze_fixed_grids():
         }
         
         # Pre-calculate Source Metrics
+        room_dims = (w, d, h)
         for src in source_positions:
             sx, sy, sz, s_name = src
             s_dists = wall_proximity.get_wall_distances(sx, sy, sz, w, d, h)
@@ -70,6 +72,16 @@ def analyze_fixed_grids():
             metrics['h_src'][s_name] = h_s
             
         print(f"Sources H_src: {', '.join([f'{k}={v:.2f}' for k,v in metrics['h_src'].items()])}")
+
+        # Print C predictions for each source using the fitted linear rule (via c_predictor.py)
+        print("\nSuggested C (from linear fit) per source:")
+        print(f"{'Source':<24} | {'Pos (x,y,z) [m]':<22} | {'H_src':<8} | {'C_pred':<6}")
+        print("-" * 70)
+        for sx, sy, sz, s_name in source_positions:
+            h_s = metrics['h_src'][s_name]
+            c_pred = predict_c_from_source((sx, sy, sz), room_dims, model_type="linear", verbose=False)
+            pos_str = f"({sx:.2f},{sy:.2f},{sz:.2f})"
+            print(f"{s_name:<24} | {pos_str:<22} | {h_s:<8.3f} | {c_pred:<6.2f}")
         
         # Calculate Metrics for all pairs
         for rx_idx, rx in enumerate(receiver_positions):

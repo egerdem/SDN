@@ -245,8 +245,35 @@ if EXPERIMENT_NAME is None:
     EXPERIMENT_NAME = _auto_experiment_name()
 TOTAL_RUNS = _recompute_total_runs()
 
-# Minimal runtime validation removed - Python will raise NameError if variables are truly missing
-# This allows for more flexible preset configurations
+# Minimal runtime validation to catch typos/missing preset keys early.
+_REQUIRED_GLOBALS: list[str] = ["MODE", "NUM_ROOMS"]
+if MODE == "fullgrid_sources":
+    _REQUIRED_GLOBALS += [
+        "FULLGRID_OPTIMIZE_SCOPE",
+        "RECEIVER_GRID_N_X",
+        "RECEIVER_GRID_N_Y",
+        "RECEIVER_GRID_MARGIN",
+        "SOURCE_GENERATION_SPECS",
+        "SOURCE_GRID_N_X",
+        "SOURCE_GRID_N_Y",
+        "SOURCE_GRID_INCLUDE_CORNERS",
+        "FULLGRID_FIXED_ROOM_FROM_EXPERIMENT_CONFIGS",
+    ]
+    # Monte Carlo fullgrid needs room ranges + (Fs, absorption)
+    if not bool(globals().get("FULLGRID_FIXED_ROOM_FROM_EXPERIMENT_CONFIGS", False)):
+        _REQUIRED_GLOBALS += [
+            "WIDTH_RANGE",
+# Validate that the preset defined all required keys
+required_keys = [
+    "MODE", "FS", "DURATION", "ABSORPTION", "TOTAL_RUNS",
+    "RECEIVER_GRID_N_X", "RECEIVER_GRID_N_Y", "RECEIVER_GRID_MARGIN",
+    "SOURCE_GENERATION_SPECS",
+    "SOURCE_GRID_N_X", "SOURCE_GRID_N_Y", "SOURCE_GRID_INCLUDE_CORNERS",
+    # SOURCE_GRID_CORNER_OFFSET is optional (only needed for parametric generation)
+]
+missing = [k for k in required_keys if k not in globals()]
+if missing:
+    raise RuntimeError(f"Preset '{PRESET}' did not define required keys: {missing}")
 
 OUTPUT_FILE = os.path.join(project_root, "results", "monte_carlo_proximity_results.json")
 
@@ -961,7 +988,7 @@ def run_monte_carlo_fullgrid_sources():
                 "n_x": int(SOURCE_GRID_N_X),
                 "n_y": int(SOURCE_GRID_N_Y),
                 "include_corners": bool(SOURCE_GRID_INCLUDE_CORNERS),
-                "corner_offset": float(globals().get("SOURCE_GRID_CORNER_OFFSET", 1.5)),
+                "corner_offset": float(SOURCE_GRID_CORNER_OFFSET),
             },
             "duration_policy": "fixed (experiment_configs/fixed_duration_s) OR sabine_adaptive_0.3+1.5*RT60_clipped_1.0..2.5",
             "err_duration_ms": int(ERR_DURATION_MS),

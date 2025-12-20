@@ -28,8 +28,6 @@ if project_root not in sys.path: sys.path.append(project_root)
 
 RESULTS_FILE = os.path.join(project_root, "results", "monte_carlo_proximity_results.json")
 RESULTS_FILE = os.path.join(project_root, "results", "paper_data/experiments/aes_fullgrid_perpair_srcgrid3x5_corner2.0_per_pair/results.json")
-RESULTS_FILE = os.path.join(project_root, "results", "paper_data/experiments/aes_fullgrid_8src_diagonal/results.json")
-
 
 # RESULTS_FILE = os.path.join(project_root, "results", "experiments", "aes_fullgrid_perpair_srcgrid3x5_corner2.0_per_pair/results.json")
 
@@ -244,50 +242,36 @@ print(f"\n" + "="*70)
 print("PREDICTION FUNCTION")
 print("="*70)
 
-# Save ALL three model parameters (not just best one)
-all_models_params = {
+# Save model parameters to JSON
+model_params = {
+    'model_type': best_model_name,
+    'r2_score': float(best_r2),
+    'mae': float(best_mae),
     'outlier_criteria': {
         'c_threshold': C_UPPER_THRESHOLD,
-        'rmse_threshold': RMSE_THRESHOLD,
-        'n_outliers': int(np.sum(outlier_mask)),
-        'n_inliers': int(np.sum(inlier_mask))
-    },
-    'models': {
-        'linear': {
-            'type': 'Linear',
-            'equation': f'C = {model_linear.intercept_:.4f} + {model_linear.coef_[0]:.4f} * H_src_norm',
-            'intercept': float(model_linear.intercept_),
-            'coefficient': float(model_linear.coef_[0]),
-            'r2_score': float(r2_linear),
-            'mae': float(mae_linear)
-        },
-        'polynomial': {
-            'type': 'Polynomial (degree 2)',
-            'equation': f'C = {model_poly.intercept_:.4f} + {model_poly.coef_[0]:.4f}*H + {model_poly.coef_[1]:.4f}*H²',
-            'intercept': float(model_poly.intercept_),
-            'coef_h': float(model_poly.coef_[0]),
-            'coef_h2': float(model_poly.coef_[1]),
-            'r2_score': float(r2_poly),
-            'mae': float(mae_poly)
-        },
-        'power': {
-            'type': 'Power Law',
-            'equation': f'C = {a_power:.4f} * H_src_norm^{b_power:.4f}',
-            'a': float(a_power),
-            'b': float(b_power),
-            'r2_score': float(r2_power),
-            'mae': float(mae_power)
-        }
-    },
-    'best_model': best_model_name.lower()
+        'rmse_threshold': RMSE_THRESHOLD
+    }
 }
 
-# Save to experiment directory (same as RESULTS_FILE)
-params_file = os.path.join(output_dir, "c_prediction_model_params.json")
+if best_model_name == 'Linear':
+    model_params['intercept'] = float(model_linear.intercept_)
+    model_params['coefficient'] = float(model_linear.coef_[0])
+
+elif best_model_name == 'Polynomial':
+    model_params['intercept'] = float(model_poly.intercept_)
+    model_params['coef_h'] = float(model_poly.coef_[0])
+    model_params['coef_h2'] = float(model_poly.coef_[1])
+
+
+else:  # Power
+    model_params['a'] = float(a_power)
+    model_params['b'] = float(b_power)
+
+# Save parameters
+params_file = os.path.join(project_root, "results", "c_prediction_model_params.json")
 with open(params_file, 'w') as f:
-    json.dump(all_models_params, f, indent=2)
-print(f"\nAll model parameters saved to: {params_file}")
-print(f"Best model: {best_model_name} (R²={best_r2:.4f})")
+    json.dump(model_params, f, indent=2)
+print(f"\nModel parameters saved to: {params_file}")
 
 # =====================================================================
 # 6. VALIDATION EXAMPLES
@@ -308,16 +292,12 @@ for idx in test_indices:
     h_norm = r['h_src_norm']
     actual_c = r['optimal_c']
     
-    # Use best model from all_models_params
-    best_model_key = all_models_params['best_model']
-    model_data = all_models_params['models'][best_model_key]
-    
-    if best_model_key == 'linear':
-        pred_c = model_data['intercept'] + model_data['coefficient'] * h_norm
-    elif best_model_key == 'polynomial':
-        pred_c = model_data['intercept'] + model_data['coef_h'] * h_norm + model_data['coef_h2'] * h_norm**2
-    else:  # power
-        pred_c = model_data['a'] * h_norm ** model_data['b']
+    if best_model_name == 'Linear':
+        pred_c = model_params['intercept'] + model_params['coefficient'] * h_norm
+    elif best_model_name == 'Polynomial':
+        pred_c = model_params['intercept'] + model_params['coef_h'] * h_norm + model_params['coef_h2'] * h_norm**2
+    else:  # Power
+        pred_c = model_params['a'] * h_norm ** model_params['b']
     
     pred_c = np.clip(pred_c, 1.0, 7.0)
     error = abs(actual_c - pred_c)

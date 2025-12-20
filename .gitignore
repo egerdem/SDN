@@ -2,7 +2,6 @@
 __pycache__/
 *.pyc
 *.pkl
-*.json
 *.npy
 .DS_Store
 *.h5

@@ -120,8 +120,12 @@ def plot_single_error_map(ax, data, vmin, vmax, interpolated, error_metric, room
     ax.tick_params(axis='both', which='major', labelsize=10)
     ax.set_aspect('equal', adjustable='box')
 
+    # Clip to exact room dimensions to prevent patch overflow
+    ax.set_xlim(0, room_params['width'])
+    ax.set_ylim(0, room_params['depth'])
 
-def print_consolidated_summary_table(all_errors: Dict, all_energies: Dict, all_rt60s: Dict, 
+
+def print_consolidated_summary_table(all_errors: Dict, all_energies: Dict, all_rt60s: Dict,
                                       all_smoothed_50ms: Dict, all_smoothed_full: Dict,
                                       reference_method: str, source_coordinates: Dict, method_configs: Dict):
     """Prints a single consolidated summary table for RMSE, Energy, RT60, and Smoothed RIR errors."""
@@ -136,7 +140,7 @@ def print_consolidated_summary_table(all_errors: Dict, all_energies: Dict, all_r
     if not all_source_names:
         print("No source data found in results.")
         return
-    
+
     # The "Average" column is only meaningful if there are multiple sources to average over.
     show_average_col = len(all_source_names) > 1
 
@@ -147,7 +151,7 @@ def print_consolidated_summary_table(all_errors: Dict, all_energies: Dict, all_r
         for key, source_data in all_errors.items():
             if source_data:
                 avg_errors[key] = np.mean(list(source_data.values()))
-        
+
         energies_by_method, rt60s_by_method = {}, {}
         smoothed_50ms_by_comparison, smoothed_full_by_comparison = {}, {}
         for source_name in all_source_names:
@@ -157,7 +161,7 @@ def print_consolidated_summary_table(all_errors: Dict, all_energies: Dict, all_r
             for method, value in all_rt60s.get(source_name, {}).items():
                 if method not in rt60s_by_method: rt60s_by_method[method] = []
                 rt60s_by_method[method].append(value)
-            
+
             # Collect smoothed RIR errors
             for comparison_key, value in all_smoothed_50ms.get(source_name, {}).items():
                 if comparison_key not in smoothed_50ms_by_comparison: smoothed_50ms_by_comparison[comparison_key] = []
@@ -195,11 +199,11 @@ def print_consolidated_summary_table(all_errors: Dict, all_energies: Dict, all_r
         coord_str = f"({coords[0]:.1f},{coords[1]:.1f})" if coords is not None else ""
         header1 += f" | {display_source_name + ' ' + coord_str:<{col_width}}"
         header2 += f" | {'EDC':>7} {'Energy':>7} {'RT60':>6} {'Sm-50ms':>9} {'Sm-Full':>9} "
-    
+
     if show_average_col:
         header1 += f" | {'Average':<{col_width}}"
         header2 += f" | {'EDC':>7} {'Energy':>7} {'RT60':>6} {'Sm-50ms':>9} {'Sm-Full':>9} "
-    
+
     print(header1)
     print(header2)
     print("-" * len(header1))
@@ -212,9 +216,9 @@ def print_consolidated_summary_table(all_errors: Dict, all_energies: Dict, all_r
         if len(display_name) > method_col_width - 1:
             display_name = display_name[:method_col_width - 4] + "..."
         row = f"{display_name:<{method_col_width}}"
-        
+
         comparison_key = f"{reference_method}_vs_{test_key}"
-        
+
         for source_name in all_source_names:
             error = all_errors.get(comparison_key, {}).get(source_name, float('nan'))
             energy = all_energies.get(source_name, {}).get(test_key, float('nan'))
@@ -230,7 +234,7 @@ def print_consolidated_summary_table(all_errors: Dict, all_energies: Dict, all_r
             avg_s50 = avg_smoothed_50ms.get(comparison_key, float('nan'))
             avg_sf = avg_smoothed_full.get(comparison_key, float('nan'))
             row += f" | {avg_err:>7.3f} {avg_en:>7.2f} {avg_rt:>6.2f} {avg_s50:>9.4f} {avg_sf:>9.4f} "
-            
+
         print(row)
 
     print("-" * len(header1))
@@ -250,7 +254,7 @@ def calculate_and_plot_error_maps(sim_data, output_path: str, reference_method: 
     # Extract data from the loaded dictionary
     receiver_positions = sim_data['receiver_positions']
     room_params = sim_data['room_params']
- 
+
     source_pos = sim_data['source_pos']
     Fs = sim_data['Fs']
     all_edcs = sim_data.get('edcs', {})
@@ -259,7 +263,7 @@ def calculate_and_plot_error_maps(sim_data, output_path: str, reference_method: 
     if not all_edcs:
         print("Error: No EDC data found in the file.")
         return
-        
+
     if reference_method not in all_edcs:
         print(f"Error: Reference method '{reference_method}' not found in the data file.")
         print(f"Available methods: {list(all_edcs.keys())}")
@@ -267,30 +271,30 @@ def calculate_and_plot_error_maps(sim_data, output_path: str, reference_method: 
 
     # --- Error Calculation ---
     print(f"\n--- Calculating {error_metric.upper()} for {comparison_type} (first {err_duration_ms}ms) ---")
-    
+
     error_maps = {}
     grid_size = int(np.sqrt(len(receiver_positions)))
     X = receiver_positions[:, 0].reshape(grid_size, grid_size)
     Y = receiver_positions[:, 1].reshape(grid_size, grid_size)
-    
+
     ref_signals = all_edcs[reference_method]
 
     # --- Method Filtering and Availability Report ---
     available_methods = [m for m in all_edcs.keys()]
     print("\n--- Method Availability Report ---")
     pprint.pp(f"Methods available in data file: {available_methods}")
-    
+
     methods_to_compare = available_methods
-    
+
     # If a specific list of methods is provided, filter for them
     if methods_to_plot:
         print(f"Methods requested for plotting: {methods_to_plot}")
         # Intersect available methods with requested methods
         final_methods_to_plot = [m for m in methods_to_plot if m in available_methods]
-        
+
         # Report on what will actually be plotted
         print(f"==> Final methods to be plotted: {final_methods_to_plot}")
-        
+
         # Report on any requested methods that were not found
         skipped_methods = [m for m in methods_to_plot if m not in available_methods]
         if skipped_methods:
@@ -311,18 +315,18 @@ def calculate_and_plot_error_maps(sim_data, output_path: str, reference_method: 
         for i in range(len(receiver_positions)):
             sig1 = ref_signals[i]
             sig2 = test_signals[i]
-            
+
             # Using the same robust RMSE calculation from spatial_analysis
             error = an.compute_RMS(
-                sig1, 
-                sig2, 
+                sig1,
+                sig2,
                 range=int(err_duration_ms),
                 Fs=Fs,
                 skip_initial_zeros=True,
                 normalize_by_active_length=True
             )
             error_maps[comparison_key]['errors'].append(error)
-        
+
         error_maps[comparison_key]['errors'] = np.array(error_maps[comparison_key]['errors']).reshape(grid_size, grid_size)
 
     if not error_maps:
@@ -342,7 +346,7 @@ def calculate_and_plot_error_maps(sim_data, output_path: str, reference_method: 
         test_display_name = DISPLAY_NAME_MAP.get(test_method_key, test_method_key)
         print(f"  {ref_display_name} vs. {test_display_name}: {mean_error:.4f}")
     print("----------------------------------\n")
-    
+
     # --- Print Per-Receiver RMSE Table ---
     print("\n--- Per-Receiver RMSE Errors ---")
     grid_size = int(np.sqrt(len(receiver_positions)))
@@ -359,7 +363,7 @@ def calculate_and_plot_error_maps(sim_data, output_path: str, reference_method: 
         header += f" | {test_display_name:>20}"
     print(header)
     print("-" * len(header))
-    
+
     # Print rows for each receiver
     for i in range(len(receiver_positions)):
         rx, ry = receiver_positions[i][:2]
@@ -368,7 +372,7 @@ def calculate_and_plot_error_maps(sim_data, output_path: str, reference_method: 
             error_val = per_receiver_errors_dict[comparison_key][i]
             row += f" | {error_val:>20.6f}"
         print(row)
-    
+
     # Print mean row
     mean_row = f"{'Mean RMSE':<15} {'':<20}"
     for comparison_key in sorted(error_maps.keys()):
@@ -386,7 +390,7 @@ def calculate_and_plot_error_maps(sim_data, output_path: str, reference_method: 
 
     all_errors = np.concatenate([data['errors'].flatten() for data in error_maps.values()])
     vmin, vmax = np.min(all_errors), np.max(all_errors)
-    
+
     for i, (comparison_key, data) in enumerate(error_maps.items()):
         mean_error = np.mean(data['errors'])
         plot_single_error_map(axes[i], data, vmin, vmax, interpolated, error_metric,
@@ -411,37 +415,28 @@ if __name__ == "__main__":
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.abspath(os.path.join(script_dir, '..'))
     
-    data_dir = os.path.join(project_root, "results", "paper_data")
+    # Import DataConfig
+    sys.path.append(project_root)
+    from research.data_config import DataConfig
+    
+    # === DATA SOURCE CONFIGURATION ===
+    # Option 1: Legacy mode
+    config = DataConfig(mode="legacy", legacy_files=[
+        "aes_FULLGRID_center_source.npz",
+        "aes_FULLGRID_top_middle_source.npz",
+    ])
+    
+    # Option 2: Experiment mode (uncomment to use)
+    # config = DataConfig(mode="experiment", experiment_name="aes_fullgrid_perpair_srcgrid3x5_corner2.0_per_pair")
+    
+    data_dir = config.get_data_dir()
+    files_to_process = config.get_files()
+    
     output_dir = os.path.join(project_root, "results", "paper_figures")
     os.makedirs(output_dir, exist_ok=True)
 
     # --- SELECT DATA FILES ---
-    # List of data files to process. This will generate a separate figure for each file.
-    files_to_process = [
-        # "aes_room_spatial_edc_data_upper_right_source.npz",
-        # "aes_room_spatial_edc_data_upper_right_sourcev2_8_6_2.npz",
-        # "aes_room_spatial_edc_data_upper_right_sourcev2_7d5_6_2.npz"
-    ]
-
-    # files_to_process = ["journal_room_spatial_edc_data.npz"]  # Single file for now, can be expanded later
-
-    files_to_process = [
-
-        # "cube6_FULLGRID_center_source.npz",
-        # "cube6_FULLGRID_top_middle_source.npz",
-        # "cube6_FULLGRID_upper_right_source.npz",
-        # "cube6_FULLGRID_lower_left_source.npz",
-
-        "aes_FULLGRID_center_source.npz",
-        "aes_FULLGRID_top_middle_source.npz",
-        "aes_FULLGRID_upper_right_source.npz",
-        "aes_FULLGRID_lower_left_source.npz",
-
-        # "aes_room_spatial_edc_data_center_source.npz",
-        # "aes_room_spatial_edc_data_top_middle_source.npz",
-        # "aes_room_spatial_edc_data_upper_right_source.npz",
-        # "aes_room_spatial_edc_data_lower_left_source.npz",
-    ]
+    # files_to_process is now set by DataConfig above
 
     # --- ANALYSIS PARAMETERS ---
     REFERENCE_METHOD = 'RIMPY-neg10'
@@ -450,8 +445,9 @@ if __name__ == "__main__":
     # REFERENCE_METHOD = 'ISM-pra-rand10'
     # REFERENCE_METHOD = 'ISM'
     # Specify which methods to plot. Leave empty or set to None to plot all.
-    METHODS_TO_PLOT = ['SDN-Test_3', 'SDN-Test_2', 'SDN-Test1', 'SDN-Test2', 'SDN-Test3', 'SDN-Test4','SDN-Test5',
-                       'SDN-Test6', 'SDN-Test7', 'HO-SDN-N2', 'HO-SDN-N3']
+    # METHODS_TO_PLOT = ['SDN-Test_3', 'SDN-Test_2', 'SDN-Test1', 'SDN-Test2', 'SDN-Test3', 'SDN-Test4','SDN-Test5',
+    #                    'SDN-Test6', 'SDN-Test7', 'HO-SDN-N2', 'HO-SDN-N3']
+    METHODS_TO_PLOT = ['SDN-Test1', 'SDN-Test2', 'SDN-Test3', 'SDN-Test5']
     # METHODS_TO_PLOT = ["SDN-c_center", "SDN-c_lower_left", 'SDN-Test2.998', "SDN-c_upper_right"]
     # METHODS_TO_PLOT = ['SDN-Test2.998']
     # METHODS_TO_PLOT = ['SDN-fast4_71'] #not fast actually, fyi. name wrong.
@@ -463,9 +459,9 @@ if __name__ == "__main__":
 
     # --- CONTROL FLAGS ---
     SAVE_FIGURES = False  # Set to True to save the generated figures to disk
-    SHOW_PLOTS = False    # Set to True to display interactive plot windows
-    SAVE_SUMMARY_TEXT = True # Set to False to disable saving the summary .txt file
-    SHOW_INTERACTIVE_PLOT = True  # Set to True to show unified interactive RIR plot for first receiver
+    SHOW_PLOTS = True    # Set to True to display interactive plot windows
+    SAVE_SUMMARY_TEXT = False # Set to False to disable saving the summary .txt file
+    SHOW_INTERACTIVE_PLOT = False  # Set to True to show unified interactive RIR plot for first receiver
 
     # --- EXECUTION LOOP ---
     all_mean_errors = {}

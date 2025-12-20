@@ -17,7 +17,10 @@ project_root = os.path.dirname(script_dir)
 sys.path.append(project_root)
 
 # Load results
-results_file = os.path.join(project_root, "results", "monte_carlo_proximity_results.json")
+
+# results_file = os.path.join(project_root, "results", "monte_carlo_proximity_results.json")
+results_file = os.path.join(project_root, "results", "paper_data/experiments/aes_fullgrid_perpair_srcgrid3x5_corner2.0_per_pair/results.json")
+
 with open(results_file, 'r') as f:
     results = json.load(f)
 
@@ -63,7 +66,7 @@ ax1.plot(h_range, c_fit, 'r--', linewidth=3, alpha=0.8,
 
 ax1.set_xlabel('Normalized H_src (H_src / V^(1/3)) [Lower=Corner]', fontsize=13, fontweight='bold')
 ax1.set_ylabel('Optimal C Parameter', fontsize=13, fontweight='bold')
-ax1.set_title('Source Wall Proximity vs Optimal C\n(Monte Carlo Results: 80 runs, 4 rooms)', 
+ax1.set_title('Source Wall Proximity vs Optimal C\n(Monte Carlo Results)',
               fontsize=14, fontweight='bold')
 ax1.legend(loc='upper left', fontsize=11, framealpha=0.9)
 ax1.grid(True, alpha=0.3, linestyle='--')

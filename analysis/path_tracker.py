@@ -293,7 +293,7 @@ if __name__ == "__main__":
         ism_calc = ISMCalculator(room.walls, room.source.srcPos, room.micPos)
         sdn_calc.set_path_tracker(path_tracker)
         ism_calc.set_path_tracker(path_tracker)
-        N = 1
+        N = 2
         # Compare paths and analyze invalid ISM paths
         PathCalculator.compare_paths(sdn_calc, ism_calc,
                                      max_order=N, print_comparison=True)  # Increased to 5

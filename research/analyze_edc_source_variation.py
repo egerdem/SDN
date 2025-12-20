@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 import sys
+from research.data_config import DataConfig
 
 # Add project root to path
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -14,29 +15,24 @@ import analysis.plot_room as pp
 # --- Configuration ---
 DATA_DIR = os.path.join(project_root, "results", "paper_data")
 OUTPUT_DIR = os.path.join(project_root, "results", "edc_source_variations")
+# Configuration
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_project_root = os.path.dirname(_script_dir)
+
+# === DATA SOURCE CONFIGURATION ===
+config = DataConfig(mode="legacy")
+# config = DataConfig(mode="experiment", experiment_name="aes_fullgrid_perpair_srcgrid3x5_corner2.0_per_pair")
+
+DATA_DIR = config.get_data_dir()
+FILES_TO_PROCESS = config.get_files()
+
+REFERENCE_METHOD = "RIMPY-neg10"
+
+OUTPUT_DIR = os.path.join(_project_root, "results", "edc_source_variations")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Files representing different source positions
-FILES_TO_PROCESS = [
-    # "aes_quarter_center_source.npz", # Example filename, adjust if needed
-    # "aes_room_spatial_edc_data_top_middle_source.npz",
-    # ... User provided list in prompt ...
-    
-    # Using the filenames likely present based on previous context:
-    "aes_quarter_center_source.npz",
-    "aes_quarter_top_middle_source.npz",
-    "aes_quarter_upper_right_source.npz",
-    "aes_quarter_lower_left_source.npz",
-    "aes_quarter_corner_sourcev3.npz"
-
-    # "aes_FULLGRID_center_source.npz",
-    # "aes_FULLGRID_top_middle_source.npz",
-    # "aes_FULLGRID_upper_right_source.npz",
-    # "aes_FULLGRID_lower_left_source.npz",
-    # "aes_FULLGRID_corner_sourcev3.npz"
-]
-
-RECEIVER_INDICES = [0, 15] # Example indices common in small grids (81 pts)
+RECEIVER_INDICES = [0, 5, 10, 15] #
+# RECEIVER_INDICES = [i for i in range(16)] # All receivers in 4x4 grid
 
 # Configurable list of methods to plot (matches typical keys in .npz)
 METHODS_TO_PLOT = [
@@ -51,7 +47,7 @@ from matplotlib.widgets import CheckButtons, Button
 import analysis.analysis as an
 import analysis.EchoDensity as ned
 
-def custom_interactive_plot_paged(pages_payload, Fs):
+def custom_interactive_plot_paged(pages_payload, Fs, all_rx_pos=None, source_pos_list=None, room_dims=None):
     """
     Paged interactive plot.
     pages_payload: list of dicts {'rirs_dict': ..., 'coords': ..., 'idx': ...}
@@ -68,6 +64,7 @@ def custom_interactive_plot_paged(pages_payload, Fs):
     fig.set_constrained_layout_pads(w_pad=2/72, h_pad=2/72, hspace=0.02, wspace=0.02)
     
     # GridSpec: [Rows: NED/EDC, Legend, RIR, Nav] 
+    # GridSpec: [Rows: NED/EDC, Legend, RIR, Nav] 
     gs = plt.GridSpec(4, 3, height_ratios=[0.38, 0.12, 0.42, 0.08], width_ratios=[1, 1, 0.25])
     
     ax_ned = fig.add_subplot(gs[0, 0])
@@ -75,7 +72,11 @@ def custom_interactive_plot_paged(pages_payload, Fs):
     ax_legend = fig.add_subplot(gs[1, 0:2])
     ax_legend.axis('off')
     ax_rir = fig.add_subplot(gs[2, 0:2])
-    ax_check = fig.add_subplot(gs[:3, 2]) # Checkbox spans top 3 rows
+    
+    # Split right column for Toggle Button + Checkboxes
+    gs_right = gs[:3, 2].subgridspec(2, 1, height_ratios=[0.05, 0.95], hspace=0.1)
+    ax_toggle = fig.add_subplot(gs_right[0])
+    ax_check = fig.add_subplot(gs_right[1])
     
     # Navigation Buttons Area
     ax_prev = fig.add_subplot(gs[3, 0])
@@ -87,19 +88,32 @@ def custom_interactive_plot_paged(pages_payload, Fs):
     active_objects = {
         'lines': [], # list of all line artists
         'check': None,
-        'legend': None
+        'legend': None,
+        'toggle_btn': None
     }
+    
+    # Persistence State
+    visibility_state = {} # dict: label -> bool
+    view_state = {} # dict: ax_name -> (xlim, ylim)
+    is_initialized = [False]
     
     # Color Cycle
     prop_cycle = plt.rcParams['axes.prop_cycle']
     base_colors = prop_cycle.by_key()['color']
     
     def render_page(p_idx):
+        # Save View State if initialized
+        if is_initialized[0]:
+            view_state['rir'] = (ax_rir.get_xlim(), ax_rir.get_ylim())
+            view_state['edc'] = (ax_edc.get_xlim(), ax_edc.get_ylim())
+            view_state['ned'] = (ax_ned.get_xlim(), ax_ned.get_ylim())
+
         # Clear Axes
         ax_rir.clear()
         ax_edc.clear()
         ax_ned.clear()
         ax_check.clear()
+        ax_toggle.clear()
         if hasattr(fig, 'shared_legend') and fig.shared_legend:
             fig.shared_legend.remove()
         
@@ -109,14 +123,19 @@ def custom_interactive_plot_paged(pages_payload, Fs):
         coords = data['coords']
         rx_idx = data['idx']
         
+        # Sort Labels
+        sorted_labels = sorted(rirs_dict.keys())
+        
+        # Initialize Persistence for new labels
+        for lbl in sorted_labels:
+            if lbl not in visibility_state:
+                visibility_state[lbl] = True
+        
         # Title
         fig.suptitle(f"Receiver {rx_idx} Analysis\nPosition: {coords}", fontsize=14, fontweight='bold')
         ax_page_info.text(0.5, 0.5, f"Page {p_idx+1} / {num_pages}", ha='center', va='center', fontsize=12)
         ax_page_info.axis('off') # Ensure off
 
-        # Sort Labels
-        sorted_labels = sorted(rirs_dict.keys())
-        
         # Color Mapping (Consistent per page)
         source_color_map = {} 
         c_i = 0
@@ -127,6 +146,7 @@ def custom_interactive_plot_paged(pages_payload, Fs):
         
         for label in sorted_labels:
             rir = rirs_dict[label]
+            is_visible = visibility_state[label]
             
             # Determine Color
             base_name = label.replace(" (Ref)", "").split("(")[0].strip()
@@ -144,14 +164,17 @@ def custom_interactive_plot_paged(pages_payload, Fs):
             # Plot
             t = np.arange(len(rir)) / Fs
             l_rir, = ax_rir.plot(t, rir, label=label, color=color, ls=ls, alpha=alpha, lw=lw/2, zorder=z)
+            l_rir.set_visible(is_visible)
             
             edc, t_edc, _ = an.compute_edc(rir, Fs, label=label, plot=False)
             l_edc, = ax_edc.plot(t_edc, edc, label=label, color=color, ls=ls, alpha=alpha, lw=lw, zorder=z)
+            l_edc.set_visible(is_visible)
             
             if CALCULATE_NED:
                 ned_prof = ned.echoDensityProfile(rir, fs=Fs)
                 t_ned = np.arange(len(ned_prof)) / Fs
                 l_ned, = ax_ned.plot(t_ned, ned_prof, label=label, color=color, ls=ls, alpha=alpha, lw=lw, zorder=z)
+                l_ned.set_visible(is_visible)
                 ned_lines[label] = l_ned
             
             rir_lines[label] = l_rir
@@ -160,16 +183,87 @@ def custom_interactive_plot_paged(pages_payload, Fs):
         # Styling Axes
         ax_rir.set_title('Impulse Response'); ax_rir.grid(True, alpha=0.3); ax_rir.set_xlabel('Time (s)')
         ax_edc.set_title('Energy Decay Curve'); ax_edc.grid(True, alpha=0.3); ax_edc.set_ylim(-65, 5); ax_edc.set_xlabel('Time (s)')
-        ax_ned.set_title('Normalized Echo Density'); ax_ned.grid(True, alpha=0.3); ax_ned.set_xlabel('Time (s)')
-        
+
+        if CALCULATE_NED:
+            ax_ned.set_title('Normalized Echo Density'); ax_ned.grid(True, alpha=0.3); ax_ned.set_xlabel('Time (s)')
+        else:
+            # --- ROOM GRID VISUALIZATION ---
+            ax_ned.set_title(f'Room Layout (R{rx_idx} Highlighted)')
+            ax_ned.set_xlabel('Width (m)')
+            ax_ned.set_ylabel('Depth (m)')
+            ax_ned.grid(True, alpha=0.3)
+            ax_ned.set_aspect('equal')
+            
+            if room_dims:
+                w, d = room_dims
+                ax_ned.plot([0, w], [0, 0], 'k-')
+                ax_ned.plot([0, w], [d, d], 'k-')
+                ax_ned.plot([0, 0], [0, d], 'k-')
+                ax_ned.plot([w, w], [0, d], 'k-')
+            
+            if all_rx_pos is not None:
+                # Plot all receivers
+                rx_x = [p[0] for p in all_rx_pos]
+                rx_y = [p[1] for p in all_rx_pos]
+                ax_ned.scatter(rx_x, rx_y, c='blue', s=20, alpha=0.4, label='Receivers')
+                
+                # Highlight current
+                if 0 <= rx_idx < len(all_rx_pos):
+                    curr = all_rx_pos[rx_idx]
+                    ax_ned.scatter(curr[0], curr[1], c='red', s=100, marker='*', label=f'R{rx_idx}')
+
+            if source_pos_list:
+                print("Plotting source positions...")
+                for s_item in source_pos_list:
+                    if len(s_item) >= 3:
+                        sx, sy, s_name = s_item[:3]
+                        # Match color from source_color_map
+                        # Ensure key matching is robust (strip spaces)
+                        c_key = s_name.strip()
+                        # If the source hasn't been assigned a color yet (e.g. not in this page's plot), 
+                        # assign one from the cycle if needed, but safer to default to black or specific cycle
+                        if c_key not in source_color_map:
+                            source_color_map[c_key] = base_colors[c_i % len(base_colors)]
+                            c_i += 1
+                        
+                        col = source_color_map[c_key]
+                        ax_ned.scatter(sx, sy, c=col, s=60, marker='x', linewidth=2)
+                    else:
+                        sx, sy = s_item
+                        ax_ned.scatter(sx, sy, c='green', s=40, marker='x', label='Sources')
+
+            
+            # Only add legend if items exist
+            if all_rx_pos is not None or source_pos_list:
+                # Deduplicate legend for sources
+                handles, labels = ax_ned.get_legend_handles_labels()
+                by_label = dict(zip(labels, handles))
+                ax_ned.legend(by_label.values(), by_label.keys(), loc='upper right', fontsize='x-small')
+
+        # Restore View State
+        if 'rir' in view_state:
+            ax_rir.set_xlim(view_state['rir'][0]); ax_rir.set_ylim(view_state['rir'][1])
+        if 'edc' in view_state:
+            ax_edc.set_xlim(view_state['edc'][0]); ax_edc.set_ylim(view_state['edc'][1])
+        if 'ned' in view_state:
+            ax_ned.set_xlim(view_state['ned'][0]); ax_ned.set_ylim(view_state['ned'][1])
+            
+        is_initialized[0] = True
+
         # Checkboxes
-        ax_check.set_title("Toggle Visibility", fontweight='bold')
+        ax_check.set_title("Visibility", fontweight='bold')
         ax_check.axis('off')
         wrapped = [textwrap.fill(l, 25) for l in sorted_labels]
-        check = CheckButtons(ax_check, wrapped, [True]*len(wrapped))
+        actives = [visibility_state[l] for l in sorted_labels]
+        
+        check = CheckButtons(ax_check, wrapped, actives)
         active_objects['check'] = check
         
-        # Legend Logic
+        # Toggle All Button
+        btn_toggle = Button(ax_toggle, "Select/Deselect All")
+        active_objects['toggle_btn'] = btn_toggle # Keep Ref
+
+        # Logic
         def update_legend():
             vis_handles = [l for l in rir_lines.values() if l.get_visible()]
             vis_labels = [l.get_label() for l in rir_lines.values() if l.get_visible()]
@@ -181,17 +275,38 @@ def custom_interactive_plot_paged(pages_payload, Fs):
 
         update_legend()
         
-        # Layout lookup
         label_lookup = dict(zip(wrapped, sorted_labels))
         
         def on_check(lbl):
             real = label_lookup[lbl]
+            new_state = not visibility_state[real]
+            visibility_state[real] = new_state
+            
             for d in [rir_lines, edc_lines, ned_lines]:
-                if real in d: d[real].set_visible(not d[real].get_visible())
+                if real in d: d[real].set_visible(new_state)
             update_legend()
             fig.canvas.draw_idle()
             
         check.on_clicked(on_check)
+        
+        def on_toggle_all(event):
+            # Check current state of visible items on this page
+            current_page_labels = sorted_labels
+            current_actives = [visibility_state[l] for l in current_page_labels]
+            
+            # If all True, set all False. Otherwise set all True
+            if all(current_actives):
+                new_val = False
+            else:
+                new_val = True
+            
+            for l in current_page_labels:
+                visibility_state[l] = new_val
+                
+            # Re-render page to sync checkboxes (CheckButtons doesn't support batch set_active cleanly)
+            render_page(current_page[0])
+
+        btn_toggle.on_clicked(on_toggle_all)
         
         # Redraw
         fig.canvas.draw_idle()
@@ -222,6 +337,11 @@ def analyze_variations():
     print("--- Starting EDC Source Variation Analysis ---")
     data_map = {}
     
+    # Vars for grid viz
+    all_receiver_positions = None
+    room_dims = None
+    all_source_positions = []
+    
     # 1. Load Data
     for filename in FILES_TO_PROCESS:
         path = os.path.join(DATA_DIR, filename)
@@ -231,8 +351,36 @@ def analyze_variations():
             sim_data = load_data(path)
             
             # Extract clean source name
-            name_clean = filename.replace("aes_quarter_", "").replace("aes_FULLGRID_", "").replace(".npz", "").replace("_", " ").title()
+            name_clean = config.extract_source_name_for_display(filename)
             
+            # Setup Grid info once
+            if all_receiver_positions is None:
+                all_receiver_positions = sim_data['receiver_positions']
+            if room_dims is None and sim_data.get('room_params'):
+                rp = sim_data['room_params']
+                room_dims = (rp['width'], rp['depth'])
+            
+            # Track Source Pos
+            src_x, src_y = None, None
+            
+            # Priority 1: Direct 'source_pos' key
+            if 'source_pos' in sim_data:
+                sp = sim_data['source_pos']
+                if len(sp) >= 2:
+                    src_x, src_y = sp[0], sp[1]
+                    print(f"    Source (from 'source_pos'): ({src_x:.2f}, {src_y:.2f})")
+
+            # Priority 2: room_params
+            if src_x is None and sim_data.get('room_params'):
+                rp = sim_data['room_params']
+                src_x, src_y = rp.get('source x'), rp.get('source y')
+                print(f"    Source (from 'room_params'): ({src_x}, {src_y})")
+            
+            if src_x is not None and src_y is not None:
+                all_source_positions.append((src_x, src_y, name_clean))
+            else:
+                print("    WARNING: Could not determine source position.")
+
             # Check available methods in the loaded structure
             available_methods = list(sim_data['edcs'].keys())
             print(f"  Available keys in '{filename}': {available_methods}")
@@ -258,8 +406,7 @@ def analyze_variations():
                     if data.size > 0:
                         print(f"      Stats: Min={np.min(data):.2e}, Max={np.max(data):.2e}, Mean={np.mean(data):.2e}")
                         if np.any(np.isnan(data)): print("      WARNING: Contains NaNs")
-                        if np.any(data < 0): print("      WARNING: Contains Negatives")
-                    
+
                     # Store RIR if available
                     if method_key in sim_data['rirs']:
                         loaded_rirs[method_key] = sim_data['rirs'][method_key]
@@ -345,8 +492,17 @@ def analyze_variations():
 
     # 3. Launch Paged Interactive Plot
     print(f"\nPrepared {len(pages_payload)} pages. Launching Interactive Plot...")
-    custom_interactive_plot_paged(pages_payload, Fs=44100)
+    
+    custom_interactive_plot_paged(
+        pages_payload, 
+        Fs=44100, 
+        all_rx_pos=all_receiver_positions,
+        source_pos_list=all_source_positions,
+        room_dims=room_dims
+    )
+    
     print("Plot closed.")
+    return(sim_data)
 
 if __name__ == "__main__":
-    analyze_variations()
+    sim_data = analyze_variations()

@@ -31,11 +31,14 @@ from functools import partial
 from copy import deepcopy
 
 import numpy as np
-from scipy.optimize import minimize_scalar
+from scipy.optimize import basinhopping, minimize_scalar, differential_evolution
 
 import geometry
 from analysis import analysis as an
-from rir_calculators import calculate_sdn_rir_fast, rir_normalisation, enable_basis_disk_cache
+from rir_calculators import calculate_sdn_rir_fast, rir_normalisation, enable_basis_disk_cache, calculate_sdn_rir
+from analysis import plot_room as pp
+import matplotlib.pyplot as plt
+from research.data_config import DataConfig
 
 
 # -----------------------------------------------------------------------------
@@ -44,25 +47,23 @@ from rir_calculators import calculate_sdn_rir_fast, rir_normalisation, enable_ba
 # Get absolute path to results directory (works regardless of where script is run from)
 _script_dir = os.path.dirname(os.path.abspath(__file__))
 _project_root = os.path.dirname(_script_dir)  # Go up one level from research/ to project root
-DATA_DIR = os.path.join(_project_root, "results", "paper_data")
-REFERENCE_METHOD = "RIMPY-neg10"
-ERROR_DURATION_MS = 50  # compare first 50 ms of the EDC
 
-# Bounds for ``c``.  Can be changed to ``(-3, 7)`` if needed in the future.
+# === DATA SOURCE CONFIGURATION ===
+# Option 1: Legacy mode
+config = DataConfig(mode="legacy", legacy_files=["cube6_FULLGRID_center_source.npz"])
+
+# Option 2: Experiment mode (uncomment to use)
+# config = DataConfig(mode="experiment", experiment_name="aes_fullgrid_perpair_srcgrid3x5_corner2.0_per_pair")
+
+DATA_DIR = config.get_data_dir()
+FILES_TO_PROCESS = config.get_files()
+
+REFERENCE_METHOD = 'RIMPY-neg10'
+err_duration_ms = 50
+
+# --- Optimizer Selection ---
+OPTIMIZER = 'minimize_scalar'
 BOUNDS = (1.0, 7.0)
-
-FILES_TO_PROCESS = [
-
-    "cube6_FULLGRID_center_source.npz",
-    "cube6_FULLGRID_top_middle_source.npz",
-    "cube6_FULLGRID_upper_right_source.npz",
-    "cube6_FULLGRID_lower_left_source.npz",
-
-    # "aes_FULLGRID_center_source.npz",
-    # "aes_FULLGRID_top_middle_source.npz",
-    # "aes_FULLGRID_upper_right_source.npz",
-    # "aes_FULLGRID_lower_left_source.npz",
-]
 
 grid_name = "fullgrid"
 
@@ -213,7 +214,7 @@ if __name__ == "__main__":
     source_names = []
     
     for i, dataset in enumerate(datasets):
-        source_name = FILES_TO_PROCESS[i].replace('aes_room_spatial_edc_data_', '').replace('.npz', '').replace('_', ' ').title()
+        source_name = config.extract_source_name_for_display(FILES_TO_PROCESS[i])
         source_names.append(source_name)
         
         mean_rmse, individual_rmses = compute_dataset_rmse(optimal_c, dataset, ERROR_DURATION_MS, base_cfg, return_individual=True)

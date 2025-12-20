@@ -39,32 +39,39 @@ from functools import partial
 from analysis import plot_room as pp
 import matplotlib.pyplot as plt
 from copy import deepcopy
+from research.data_config import DataConfig
 
 # --- Configuration ---
 # Get absolute path to results directory (works regardless of where script is run from)
 _script_dir = os.path.dirname(os.path.abspath(__file__))
 _project_root = os.path.dirname(_script_dir)  # Go up one level from research/ to project root
-DATA_DIR = os.path.join(_project_root, "results", "paper_data")
+
+# === DATA SOURCE CONFIGURATION ===
+# Choose one mode: "legacy" or "experiment"
+
+# Option 1: Legacy mode (flat file structure)
+config = DataConfig(mode="legacy", legacy_files=[
+    "cube6_FULLGRID_center_source.npz",
+    # "cube6_FULLGRID_top_middle_source.npz",
+    # "cube6_FULLGRID_lower_left_source.npz",
+])
+
+# Option 2: Experiment mode (uncomment to use)
+# config = DataConfig(
+#     mode="experiment",
+#     experiment_name="aes_fullgrid_perpair_srcgrid3x5_corner2.0_per_pair"
+# )
+
+# Get paths from config
+DATA_DIR = config.get_data_dir()
+FILES_TO_PROCESS = config.get_files()
+
 REFERENCE_METHOD = 'RIMPY-neg10'
 err_duration_ms = 50  # 50 ms
 
 # --- Optimizer Selection ---
 OPTIMIZER = 'minimize_scalar'  # Options: 'minimize_scalar', 'basin_hopping', 'differential_evolution'
 BOUNDS = (1.0, 7.0)  # Bounds for c parameter
-
-# List of data files to process. Each will be optimized independently.
-FILES_TO_PROCESS = [
-
-    # "cube6_FULLGRID_center_source.npz",
-    # "cube6_FULLGRID_top_middle_source.npz",
-    # "cube6_FULLGRID_upper_right_source.npz",
-    # "cube6_FULLGRID_lower_left_source.npz",
-
-    # "aes_FULLGRID_center_source.npz",
-    # "aes_FULLGRID_top_middle_source.npz",
-    # "aes_FULLGRID_upper_right_source.npz",
-    # "aes_FULLGRID_lower_left_source.npz",
-]
 
 grid_name = "fullgrid"
 # --- Objective Function ---
@@ -244,8 +251,8 @@ if __name__ == "__main__":
 
         print(f"\n--- Optimizing for file: {filename} ---")
 
-        # Extract source name from filename
-        source_name = filename.replace('aes_room_spatial_edc_data_', '').replace('.npz', '').replace('_', ' ').title()
+        # Extract source name from filename using config
+        source_name = config.extract_source_name_for_display(filename)
         source_names.append(source_name)
 
         # 1. Load data
