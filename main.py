@@ -1,7 +1,7 @@
 import numpy as np
 import geometry
 import matplotlib.pyplot as plt
-import pickle 
+import pickle
 
 from analysis import plot_room as pp
 from analysis import path_tracker
@@ -27,7 +27,7 @@ RUN_SDN_Test1b = False
 RUN_SDN_Test1c = False
 PLOT_TREBLE = False
 
-PICKLE_LOAD_RIRS = False # Load RIRs from pickle file
+PICKLE_LOAD_RIRS = False  # Load RIRs from pickle file
 # file_name = "rirs_c_cSN_cSPMAT_rimneg_ho3ho2.pkl"
 # file_name = "rirs_c_cSN_cSPMAT_rimneg_ho3ho2.pkl"
 # file_name = "rirs_c_cSN.pkl"
@@ -52,7 +52,6 @@ Print_RIR_comparison_metrics = True
 interactive_rirs = True  # Set to True to enable interactive RIR comparison
 pulse_analysis = "upto_4"
 plot_smoothed_rirs = False
-
 
 # --- Room Setup ---
 # Use active room from experiment_configs
@@ -106,10 +105,10 @@ def run_sdn_test(test_name, config):
             print(f"Using Dirac impulse for {test_name}")
 
     if config.get('use_fast_method', False):
-         print(f"--- Running {test_name} with FAST method (Analytic Reconstruction) ---")
-         sdn, rir, label, is_default = calculate_sdn_rir_fast(room_parameters, test_name, room, duration, Fs, config)
+        print(f"--- Running {test_name} with FAST method (Analytic Reconstruction) ---")
+        sdn, rir, label, is_default = calculate_sdn_rir_fast(room_parameters, test_name, room, duration, Fs, config)
     else:
-         sdn, rir, label, is_default = calculate_sdn_rir(room_parameters, test_name, room, duration, Fs, config)
+        sdn, rir, label, is_default = calculate_sdn_rir(room_parameters, test_name, room, duration, Fs, config)
 
     if 'source_signal' in config:
         room.source.signal = original_signal
@@ -306,8 +305,8 @@ if __name__ == '__main__':
                 # For SDN original
                 sdn_rir = rirs.get('SDN-Original:  ')
                 if sdn_rir is not None:
-                     sdn_nonzero = np.sum(np.abs(sdn_rir[:sample_idx_3rd]) > threshold)
-                     print(f"\nSDN nonzero samples up to 4rd order ({arrival_time_3rd:.3f}s): {sdn_nonzero}")
+                    sdn_nonzero = np.sum(np.abs(sdn_rir[:sample_idx_3rd]) > threshold)
+                    print(f"\nSDN nonzero samples up to 4rd order ({arrival_time_3rd:.3f}s): {sdn_nonzero}")
 
                 # For ISM rimPy negative
 
@@ -328,6 +327,7 @@ if __name__ == '__main__':
         else:
             import importlib
             from analysis import plot_room as pp
+
             importlib.reload(pp)
             pp.create_interactive_rir_plot(rirs, Fs)
             plt.show(block=False)
@@ -397,28 +397,29 @@ if __name__ == '__main__':
     if Print_RIR_comparison_metrics:
         # Compute all RIR metrics in batch (moved to analysis.py)
         rirs_analysis = an.compute_rir_metrics_batch(rirs, Fs)
-        
+
         # Print individual RIR metrics
         an.print_rir_metrics(rirs_analysis)
-        
+
         # Store comparison results for both energy and smoothed signals
         comparison_results = {
             'early_energy': [],
             'smoothed_energy': []
         }
-        
+
         # Compare energy signals between all pairs
         energy_comparisons = an.compare_rir_pairs(rirs_analysis, method_pairs, comparison_type='early_energy')
         comparison_results['early_energy'] = energy_comparisons
         an.print_comparison_results(energy_comparisons, "Energy (squared RIRs) Signal Comparison Results")
-        
+
         # Compare smoothed signals between all pairs
         smoothed_comparisons = an.compare_rir_pairs(rirs_analysis, method_pairs, comparison_type='smoothed_energy')
         comparison_results['smoothed_energy'] = smoothed_comparisons
-        an.print_comparison_results(smoothed_comparisons, "Smoothed (hann windowed squared RIRs) Signal Comparison Results")
-        
+        an.print_comparison_results(smoothed_comparisons,
+                                    "Smoothed (hann windowed squared RIRs) Signal Comparison Results")
+
         print("\n")
-        
+
         # Compare EDCs between all pairs
         edc_comparisons = an.compare_edc_pairs(rirs, get_method_pairs(), Fs)
         an.print_edc_comparisons(edc_comparisons)

@@ -58,6 +58,13 @@ config = DataConfig(mode="legacy", legacy_files=[
     "aes_FULLGRID_upper_right_source.npz",
     "aes_FULLGRID_lower_left_source.npz",
     "aes_FULLGRID_corner_sourcev3.npz",
+
+    # Quarter grid (legacy):
+    # "aes_quarter_center_source.npz",
+    # "aes_quarter_top_middle_source.npz",
+    # "aes_quarter_upper_right_source.npz",
+    # "aes_quarter_lower_left_source.npz",
+    # "aes_quarter_corner_sourcev3.npz",
 ])
 
 # Option 2: Experiment mode (uncomment to use)

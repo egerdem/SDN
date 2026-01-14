@@ -56,8 +56,8 @@ room_cube6 = {
     }
 
 # Default Active Room
-# active_room = room_aes
-active_room = room_aes_rx00
+active_room = room_aes
+# active_room = room_aes_rx00
 # active_room = room_journal
 # active_room = room_cube6
 
@@ -103,11 +103,11 @@ RUN_SDN_Test1_spec = False
 RUN_SDN_Test_2 = TR
 RUN_SDN_Test_3 = TR
 RUN_SDN_Test0 = False
-RUN_SDN_Test1 = True  # c=1 original
+RUN_SDN_Test1 = False     # c=1 original
 RUN_SDN_Test2 = TR
-RUN_SDN_Test3 = True
+RUN_SDN_Test3 = TR
 RUN_SDN_Test4 = TR
-RUN_SDN_Test5 = True
+RUN_SDN_Test5 = TR
 RUN_SDN_Test6 = TR
 RUN_SDN_Test7 = TR
 
@@ -116,9 +116,9 @@ RUN_SDN_Test4_71 = False # Test2.998
 
 RUN_SDN_Test_micX = False
 RUN_SDN_Test2_mic = False
-RUN_SDN_Test3_mic = True
+RUN_SDN_Test3_mic = False
 RUN_SDN_Test4_mic = False
-RUN_SDN_Test5_mic = True
+RUN_SDN_Test5_mic = False
 
 SDN_SW_v2_kk000 = False
 SDN_SW_v2_kkk00 = False
@@ -155,9 +155,9 @@ RUN_SDN_Test2_noatt =   False
 
 # HO-SDN Tests (Reference Leny)
 RUN_HO_N1 = False
-RUN_HO_N2 = False
+RUN_HO_N2 = True
 RUN_HO_N2g = False
-RUN_HO_N3 = False
+RUN_HO_N3 = True
 RUN_HO_N3g = False
 
 # HO-SDN Tests (My Implementation)

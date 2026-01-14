@@ -40,8 +40,25 @@ from research.data_config import DataConfig
 _script_dir = os.path.dirname(os.path.abspath(__file__))
 _project_root = os.path.dirname(_script_dir)
 
+grid_name = "FULLGRID"
 # === DATA SOURCE CONFIGURATION ===
-config = DataConfig(mode="legacy", legacy_files=["cube6_FULLGRID_center_source.npz"])
+config = DataConfig(mode="legacy", legacy_files=[
+
+    # "journal_FULLGRID_center_source.npz",
+    # "journal_FULLGRID_top_middle_source.npz",
+    "journal_FULLGRID_upper_right_source.npz",
+    # "journal_FULLGRID_lower_left_source.npz",
+
+    # "cube6_FULLGRID_center_source.npz",
+    # "cube6_FULLGRID_top_middle_source.npz",
+    # "cube6_FULLGRID_lower_left_source.npz",
+
+    # "aes_FULLGRID_center_source.npz",
+    # "aes_FULLGRID_top_middle_source.npz",
+    # "aes_FULLGRID_upper_right_source.npz",
+    # "aes_FULLGRID_lower_left_source.npz",
+])
+
 # config = DataConfig(mode="experiment", experiment_name="aes_fullgrid_perpair_srcgrid3x5_corner2.0_per_pair")
 
 DATA_DIR = config.get_data_dir()
@@ -52,6 +69,7 @@ err_duration_ms = 50
 
 OPTIMIZER = 'minimize_scalar'
 BOUNDS = (1.0, 7.0)
+BOUNDS = [(1.0, 7.0)] * 6
 
 # Limit number of receivers for testing (set to None to use all)
 MAX_RECEIVERS = 16  # For trial runs, limit to first 2 receivers
@@ -223,7 +241,7 @@ if __name__ == "__main__":
     obj = partial(
         compute_total_rmse, #compute_total_cost
         datasets=datasets,
-        err_duration_ms=ERROR_DURATION_MS,
+        err_duration_ms=err_duration_ms,
         base_cfg=base_cfg,
         # reg_weight=0.0,  # Regularization weight
     )
@@ -237,7 +255,7 @@ if __name__ == "__main__":
     #     obj,
     #     x0,
     #     method="Nelder-Mead",  # <<< Change the method here
-    #     bounds=BOUNDS_VEC,
+    #     bounds=BOUNDS,
     #     # A generous tolerance might be needed for such a long function
     #     options={"maxiter": 500, "xatol": 1e-3, "fatol": 1e-3, "adaptive": True},
     # )
@@ -248,18 +266,18 @@ if __name__ == "__main__":
     #     obj,  # The full objective function with all data
     #     best_x0_from_stage_1,
     #     method="Nelder-Mead",
-    #     bounds=BOUNDS_VEC,
+    #     bounds=BOUNDS,
     #     options={"xatol": 1e-1, "fatol": 1e-1, "adaptive": True},  # Use a slightly tighter tolerance
     # )
 
     # DIFFERENTIAL EVOLUTION APPROACH
     # Robust, global optimizer. Does not require an initial guess (x0).
     print(f"--- Starting Differential Evolution Optimization ---")
-    print(f"Bounds: {BOUNDS_VEC}")
+    print(f"Bounds: {BOUNDS}")
     print(f"Processing {len(datasets)} datasets...")
     result = differential_evolution(
         obj,
-        bounds=BOUNDS_VEC,
+        bounds=BOUNDS,
         strategy='best1bin',  # Default strategy, good balance
         maxiter=5,  # Max generations (increase if not converging)
         popsize=15,  # Population size multiplier (15*6 = 90 candidates)
@@ -278,7 +296,7 @@ if __name__ == "__main__":
     # # Configure the local minimizer to be used for each "hop"
     # minimizer_kwargs = {
     #     "method": "Nelder-Mead",  # Using Nelder-Mead for local search is robust
-    #     "bounds": BOUNDS_VEC,
+    #     "bounds": BOUNDS,
     #     "options": {"xatol": 1e-1, "fatol": 1e-1, "adaptive": True}
     # }
     #
@@ -304,7 +322,7 @@ if __name__ == "__main__":
         source_name = config.extract_source_name_for_display(FILES_TO_PROCESS[i])
         source_names.append(source_name)
         
-        mean_rmse, individual_rmses = compute_dataset_rmse(optimal_c_vec, dataset, ERROR_DURATION_MS, base_cfg, return_individual=True)
+        mean_rmse, individual_rmses = compute_dataset_rmse(optimal_c_vec, dataset, err_duration_ms, base_cfg, return_individual=True)
         all_results[source_name] = {
             'optimal_c_vec': optimal_c_vec,
             'mean_rmse': mean_rmse,
@@ -354,7 +372,7 @@ if __name__ == "__main__":
     output_dir = DATA_DIR  # Use the same directory as input data
     os.makedirs(output_dir, exist_ok=True)
     room_name_clean = room_info.get('display_name').lower().replace(' ', '_')
-    output_path = os.path.join(output_dir, f"optimization_{room_name_clean}_{file_prefix}_{grid_name}_wall_c_ref_{REFERENCE_METHOD}.txt")
+    output_path = os.path.join(output_dir, f"optimization_{room_name_clean}_globNODE_{file_prefix}_{grid_name}_wall_c_ref_{REFERENCE_METHOD}.txt")
     
     with open(output_path, 'w') as f:
         f.write("--- SDN WALL C-VECTOR OPTIMIZATION RESULTS ---\n")

@@ -1,0 +1,991 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+% The preceding line is only needed to identify funding in the first footnote. If that is unneeded, please comment it out.
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{verbatim} %comments
+\usepackage{nameref}
+\usepackage{caption}
+\usepackage{multirow}
+\usepackage{subcaption}
+\usepackage{booktabs}
+\usepackage{makecell}
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+\begin{document}
+
+
+\title{Understanding SDN - Notes and Findings}
+\maketitle
+
+\section*{Outline}
+\begin{enumerate}
+\item \nameref{sec:understanding} 
+\item \nameref{sec:ISM} 
+\item \nameref{sec:fast} 
+\item \nameref{sec:pickup}
+\textcolor{gray}{
+\item \nameref{sec:extended_unitary}
+\item \nameref{sec:adaptive_scattering}
+\item \nameref{sec:statespace}
+\item \nameref{sec:experiment_notes}
+\item \nameref{sec:insights}}
+\end{enumerate}
+
+\newpage
+
+\section{Deep insights on ISM and SDN behaviors--incomplete}
+\label{sec:understanding}
+
+Fig.\ref{fig:spatial_errors_row} (EDC-RMSE maps) indicates a consistent dependence of the SDN–ISM mismatch on source proximity to room boundaries. Overall, the original SDN matches the ISM EDC more closely when the source is placed near one or more walls; conversely, the largest EDC-RMSE occurs for the central source, particularly when the receiver is close to the source. Across the uniform receiver grid, the maximum error decreases monotonically as the source moves from the room interior to increasingly boundary-adjacent locations (center $>$ top-middle $>$ upper-right and lower-left). To understand the reasoning behind the varying SDN performance across different source–microphone positions, we need to first clarify how EDC and RIR amplitudes modeled by image source method behave.
+
+Consider a room with same absorption across each wall. As source approaches a wall, the corresponding image sources for that wall move closer to the real source, making the associated first-order reflection path lengths more similar to the direct path length for a fixed receiver. Consequently, the earliest reflections arrive closer in time and amplitude to the direct sound. Boundary-adjacent placement therefore reduces direct-path dominance unless the receiver is moved extremely close to the source. In this reduced-dominance regime, energy is “shared” more between the direct arrival and a small set of strong early reflections, thus the EDC exhibits less of a single, abrupt initial drop driven almost entirely by the direct sound, but instead have more than one sharp decay steps matching with the number of strong early reflections. For example, when comparing two different source locations with equal source–receiver distance, hence exact direct-path amplitude, a source closer to two walls exhibit a slightly larger early-energy release than a source close to only one wall, as the early reflections become slighlt more prominent in the former compared to latter. Importantly, the more the number of strong reflections occur in the early part, the less energy left for the tail. This is the exact root cause why SDN is counter-intuitively best performing at source near wall cases: SDN has always strong direct and first order reflections relative to its weak tail, due to the intrinsic energy loss starting at 2nd order reflection onwards, which accidentally achieves direct to reverberant ratio very similar to the near-wall-source ISM generated early EDC curves.
+
+On the contrary, when the source lies in the room interior --and the receiver is very close--, the direct-path amplitude greatly exceeds that of reflected paths due to the larger reflection distances, producing a pronounced early energy drop in the ISM. In SDN, the intrinsic amplitude loss increases the relative dominance of the direct component in this configuration, yielding an even steeper early EDC than the ISM reference and thus a larger EDC-RMSE. This explains why the central-source configuration, especially with near-source receivers represents the most challenging regime for (unmodified) SDN, whereas boundary-adjacent source placements yields accurate EDC early decays.
+
+\begin{figure*}
+    \centering
+    % Adjust caption spacing if necessary
+    \captionsetup{justification=centering}
+    % --- 1. Center Source ---
+    \begin{subfigure}[b]{0.25\textwidth}
+        \includegraphics[width=\linewidth]{fig_spatial_edc_err_aes_FULLGRID_center_source_ref_RIMPY-neg10 copy.png}
+        %\caption*{Centre} % Optional: Uncomment for sub-labels
+    \end{subfigure}%
+    % --- 2. Lower-Left Source ---
+    \begin{subfigure}[b]{0.25\textwidth}
+        \includegraphics[width=\linewidth]{fig_spatial_edc_err_aes_FULLGRID_top_middle_source_ref_RIMPY-neg10 copy.png}
+        %\caption*{Lower-Left}
+    \end{subfigure}%
+    % --- 3. Top-Middle Source ---
+    \begin{subfigure}[b]{0.25\textwidth}
+        \includegraphics[width=\linewidth]{fig_spatial_edc_err_aes_FULLGRID_upper_right_source_ref_RIMPY-neg10 copy.png}
+        %\caption*{Top-Middle}
+    \end{subfigure}%
+    % --- 4. Upper-Right Source ---
+    \begin{subfigure}[b]{0.25\textwidth}
+        \includegraphics[width=\linewidth]{fig_spatial_edc_err_aes_FULLGRID_lower_left_source_ref_RIMPY-neg10 copy.png}
+        %\caption*{Upper-Right}
+    \end{subfigure}
+    \caption{Spatial distribution of EDC-RMSE across the uniform receiver grid for the four source positions.}
+    \label{fig:spatial_errors_row}
+\end{figure*}
+
+\newpage
+\section{EDC Formulation on ISM}
+\label{sec:ISM}
+
+Starting from Allen $\&$ Berkley’s time-domain Green’s function (their Eq. (8)):
+
+\begin{equation}
+p(t,\mathbf X,\mathbf X')
+  = \sum_{p=1}^{8} \sum_{\mathbf r=-\infty}^{\infty}
+    \frac{
+      \delta\!\left[
+        t - \frac{\lVert \mathbf R_p + \mathbf R_r \rVert}{c}
+      \right]
+    }{
+      4\pi \,\lVert \mathbf R_p + \mathbf R_r \rVert
+    },
+\label{eq:allen-pt}
+\end{equation}
+
+where $\mathbf X = (x,y,z)$ and $\mathbf X' = (x',y',z')$ are the source and receiver coordinates respectively, c is the speed of sound.
+
+With an 8-sign permutation $R_p$ and $R_r$ the ... :
+\begin{align}
+\mathbf R_p &= (x \pm x',\, y \pm y',\, z \pm z'), \quad p = 1,\dots,8,
+\label{eq:Rp-def} \\[3pt]
+\mathbf R_r &= (2nL_x,\, 2lL_y,\, 2mL_z), \quad n,l,m \in \mathbb Z,
+\label{eq:Rr-def}
+\end{align}
+Define a single composite index
+$k=(p,r),$ for image sources and set $R_k$ as the image source to receiver distance,
+
+\begin{align}
+R_k &= \bigl\lVert \mathbf R_p + \mathbf R_r \bigr\rVert,
+ \quad 
+t_k = \frac{R_k}{c},
+\quad a_k = \frac{1}{4\pi R_k}.
+\end{align}
+
+Then \eqref{eq:allen-pt} can be written compactly as
+\begin{equation}
+p(t) = \sum_{k} a_k \,\delta(t - t_k).
+\label{eq:p-compact}
+\end{equation}
+
+Defining the (backwards) energy–decay curve (EDC) as
+\begin{equation}
+d(\tau) = \int_{\tau}^{\infty} p^2(t)\,\mathrm dt.
+\label{eq:edc-def}
+\end{equation}
+
+Formally, $p^2(t)
+  = \Bigl( \sum_k a_k \delta(t-t_k) \Bigr)
+    \Bigl( \sum_\ell a_\ell \delta(t-t_\ell) \Bigr) $
+
+\begin{equation}
+   = \sum_{k,\ell} a_k a_\ell \,\delta(t-t_k)\,\delta(t-t_\ell).
+\label{eq:p2-formal}
+\end{equation}
+
+Assuming non-overlapping dirac pulses, only $k=l$ terms contribute to the energy, therefore
+
+\begin{equation}
+p^2(t)
+  \;\approx\; \sum_{k} a_k^2 \,\delta(t-t_k),
+\label{eq:p2-approx}
+\end{equation}
+so that the energy of the impulse at time $t_k$ is approximately $E_k \approx a_k^2$
+
+Substituting \eqref{eq:p2-approx} into \eqref{eq:edc-def}:
+\begin{align}
+d(\tau)
+  &= \int_{\tau}^{\infty}
+       \sum_k a_k^2 \,\delta(t-t_k)\,\mathrm dt
+     \approx \sum_k a_k^2 \int_{\tau}^{\infty} \delta(t-t_k)\,\mathrm dt
+  \\[3pt]
+  &= \sum_{k: t_k \ge \tau} a_k^2.
+\end{align}
+
+Using $a_k = \frac{1}{4 \pi R_k}$ and $t_k = R_k/c$, this becomes
+
+\begin{equation}
+d(\tau)
+  \;\approx\;
+  \sum_{k :\, t_k \ge \tau} \frac{1}{(4\pi R_k)^2}
+  \;=\;
+  \sum_{k :\, R_k \ge c\tau} \frac{1}{16\pi^2 R_k^2}.
+\label{eq:edc-Rk}
+\end{equation}
+
+Equivalently, in Allen–Berkley’s terms:
+\begin{equation}
+d(\tau;\mathbf X,\mathbf X')
+  \;\approx\;
+  \sum_{p=1}^{8}
+  \sum_{\mathbf r:\,\lVert \mathbf R_p + \mathbf R_r \rVert \ge c\tau}
+    \frac{1}{16\pi^2 \,\lVert \mathbf R_p + \mathbf R_r \rVert^2}.
+\label{eq:edc-AB}
+\end{equation}
+
+For a finite-energy RIR (e.g. with absorption, or after truncation at some finite time T), the total energy is
+
+\begin{equation}
+E_{\mathrm{tot}}
+  = \int_0^{\infty} p^2(t)\,\mathrm dt
+  \;\approx\; \sum_k a_k^2.
+\label{eq:Etot-def}
+\end{equation}
+
+\begin{equation}
+d(0) \approx E_{\mathrm{tot}}.
+\end{equation}
+
+\subsection{Comparing two source-receiver configurations}
+
+Let $p_A(t)$ and $p_B(t)$ be the RIRs for two different source–receiver configurations in the same room, with corresponding EDCs
+$d_A(\tau) = \int_{\tau}^{\infty} p_A^2(t)\,\mathrm dt$ and $d_B(\tau)=\int_{\tau}^{\infty} p_B^2(t)\,\mathrm dt$ 
+and total energies $E_{\mathrm{tot}}^{A} = \int_0^{\infty} p_A^2(t)\,\mathrm dt$ and $E_{\mathrm{tot}}^{B} = \int_0^{\infty} p_B^2(t)\,\mathrm dt$.
+
+Then for each $\tau$,
+
+\begin{align}
+d_A(\tau)
+  &= \int_{\tau}^{\infty} p_A^2(t)\,\mathrm dt
+   = \int_0^{\infty} p_A^2(t)\,\mathrm dt
+     - \int_0^{\tau} p_A^2(t)\,\mathrm dt
+\\
+  &= E_{\mathrm{tot}}^{A}
+     - \int_0^{\tau} p_A^2(t)\,\mathrm dt,
+\label{eq:dA-split}
+\end{align}
+
+\begin{equation}
+d_B(\tau)
+  = E_{\mathrm{tot}}^{B}
+    - \int_0^{\tau} p_B^2(t)\,\mathrm dt.
+\label{eq:dB-split}
+\end{equation}
+
+Therefore the difference in EDCs is
+
+\begin{align}
+\Delta d(\tau)
+  &= d_A(\tau) - d_B(\tau)
+\\
+  &= \bigl(E_{\mathrm{tot}}^{A} - E_{\mathrm{tot}}^{B}\bigr)
+     - \int_0^{\tau}
+         \bigl(p_A^2(t) - p_B^2(t)\bigr)\,\mathrm dt.
+\label{eq:Delta-d-def}
+\end{align}
+
+Assuming $E_{\mathrm{tot}}^{A} \approx E_{\mathrm{tot}}^{B}$ due to identical source signal and room conditions,
+
+\begin{equation}
+\Delta d(\tau)
+  \;\approx\;
+  - \int_0^{\tau}
+      \bigl(p_A^2(t) - p_B^2(t)\bigr)\,\mathrm dt,
+\label{eq:Delta-d-approx}
+\end{equation}
+
+Differentiating \eqref{eq:edc-def} w.r.t. $\tau$
+
+\begin{equation}
+\frac{\mathrm d}{\mathrm d\tau} d(\tau)
+  = \frac{\mathrm d}{\mathrm d\tau}
+    \int_{\tau}^{\infty} p^2(t)\,\mathrm dt
+  = -\,p^2(\tau).
+\label{eq:edc-derivative}
+\end{equation}
+
+Thus the instantaneous slope of the EDC at time $\tau$ is determined by the local squared impulse response at
+$\tau$. If $p^2(\tau)$ is larger for small $\tau$, its derivative gives a larger amplitude, i.e a steeper decay in that region.
+
+
+
+\newpage
+
+\section{Fast SW-SDN Method via Superposition (Incomplete)}
+\label{sec:fast}
+
+Since scattering network applies only linear operations (gain, scattering, and summation), the room impulse response (RIR), denoted as $h[n]$, follows the principle of superposition. For the proposed single-parameter injection strategy where non-dominant weights are defined as $c_n = \frac{5-c}{4} = 1.25 - 0.25c$, the injection vector $\mathbf{c}$ decomposes into a constant component and a variable component scaled by $c$:
+
+\begin{equation}
+\mathbf{c} = \begin{bmatrix} c_k \\ c_n \\ \vdots \\ c_{n,k} \end{bmatrix} = \underbrace{\begin{bmatrix} 0 \\ 1.25 \\ \vdots \\ 1.25 \end{bmatrix}}_{\mathbf{w}_{const}} + c_k \cdot \underbrace{\begin{bmatrix} 1 \\ -0.25 \\ \vdots \\ -0.25 \end{bmatrix}}_{\mathbf{w}_{var}}
+\label{eq:vector_decomposition}
+\end{equation}
+
+For the generalized optimization case where the system is defined by a global configuration vector $\mathbf{c} = [c_1, \dots, c_6]$, (assigning a unique weighting coefficient to each of the $N=6$ walls), the total response is reconstructed via:
+
+\begin{equation} h_{\mathbf{c}}[n] = h_{base}[n] + \sum_{k=1}^{6} c_k \cdot \left( h_{basis, k}[n] - h_{base}[n] \right) \label{eq:fast_reconstruction} \end{equation}
+
+
+\noindent where:
+\begin{itemize}
+    \item $h_{base}[n]$ is the RIR simulated with $\mathbf{c} = \mathbf{0}$
+    (i.e., injecting only the constant background $\mathbf{w}_{const}$ at all walls)
+    \item $h_{basis, k}[n]$ is the RIR generated when only wall $k$ is activated with $c_k=1$ and all other walls have $c=0$.
+    \item The term $(h_{basis, k}[n] - h_{base}[n])$ represents the \textit{slope response}, isolating the system's impulse response to the variable vector $\mathbf{w}_{var}$ applied specifically at wall $k$.
+\end{itemize}
+
+This method decouples acoustic simulation from the optimization loop. For a typical optimization requiring 100 iterations across 16 receivers, the computational load reduces from \textbf{1,600 simulations} (re-running the network per iteration) to \textbf{112 simulations} (7 pre-computed basis functions $\times$ 16 receivers), yielding a $14\times$ speedup.
+
+
+$$ RIR(c) = R_{baseline} + \sum_{i=1}^{6} c_i \times (R_{basis, i} - R_{baseline}) $$
+
+$$ RIR_{total} = R_{base} + c \times R_{shape} $$
+l
+This simplifies to our interpolation formula:
+$$ RIR(c) = RIR(c=0) + c \times \text{SlopeRIR} $$
+Where $\text{SlopeRIR}$ is simply the difference between the $c=1$ RIR and the $c=0$ RIR.
+
+
+$$ RIR(c_1, \dots, c_6) = R_{base} + \sum_{i=1}^{6} c_i \times R_{slope, i} $$
+
+\newpage
+\section{Receiver-Weighted SDN}
+\label{sec:pickup}
+
+\textbf{(mathematical derivation is in the next two subsections)}
+
+Recall the unified SDN matrix:
+
+\begin{equation}
+\label{eq:augmented_matrix}
+\begin{bmatrix}
+    \mathbf{S} & \frac{1}{2}\mathbf{1}_{N-1} \\
+    \frac{2}{N-1}\mathbf{1}_{N-1}^T & 1
+\end{bmatrix}
+\begin{bmatrix}
+\mathbf{p_k^+} \\
+p_{S}
+\end{bmatrix}
+=
+\begin{bmatrix}
+\mathbf{p_k^-} \\
+p_k
+\end{bmatrix}
+\end{equation}
+
+where we later introduced the source injection vector $\mathbf{w}_k= [c, c_{\text{n}}, \ldots ,c_{\text{n}}]^T$ to the top-right block of the matrix:
+
+\begin{equation}
+\label{eq:tunable_sdn_matrix}
+\begin{bmatrix} 
+\mathbf{S} & \frac{1}{2}\mathbf{S}\mathbf{w}_k \\ 
+\frac{2}{N-1}\mathbf{v}_k^T & 1 
+\end{bmatrix} 
+\begin{bmatrix} \mathbf{p_k^+} \\ p_S \end{bmatrix}
+= \begin{bmatrix} \mathbf{p_k^-} \\ p_k \end{bmatrix}
+\end{equation}
+
+noting that $\mathbf{w}_k = \mathbf{1}$ simplifies back to the original form since $\mathbf{S}\mathbf{1} = \mathbf{1}$). Similarly, we can introduce a corresponding pickup weighting vector $\mathbf{v}_k^T$ to the bottom-left block \eqref{eq:tunable_sdn_matrix}. This block, previously referred to as pressure summation vector, calculates the pressure state of the node to be sent to the receiver. Following the same method as SW-SDN, for each node $k$, we assign a weighting vector $\mathbf{v}_k = [v, v_{\text{n}}, \ldots ,v_{\text{n}}]^T$, where $v$ is the weight associated with the specular direction relative to the receiver. This direction can be selected according to the best target direction previously introduced (i.e identify the neighboring node that would receive the specular reflection if the microphone were acting as a source emitting towards the wall node $k$), or randomly. To ensure the first-order reflection amplitudes remain physically consistent, the same sum constraint imposed: $\sum_{i=1}^{N-1} v_i = N-1$.
+
+Although this introduces an additional set of parameters for tuning the SDN to match ground-truth energy decay, the physical interpretation differs from source injection. The source injection vector modifies $\mathbf{p}_k^+$, the wave variable entering the scattering junction. This modified wave is then scattered by $\mathbf{S}$ and propagates to other nodes, meaning every subsequent reflection in the recursive network is influenced by this initial directional loading. In contrast, changing the receiver weighting is a post-processing step that occurs after the scattering operation, at the point where pressure is collected for the microphone. This operation does not alter the wave amplitudes propagating within the recursive delay lines; rather, it modifies the readout amplitude. Physically, this effectively models a coarse microphone directivity. 
+
+%However, due to the linearity of SDN operations, weighting the energy entering the loop (injection) or exiting the loop (collection) achieve nearly identical energy decay correction.
+
+Empirical results confirm that applying a source injection vector with any weight $c$ yields an Energy Decay Curve (EDC) almost identical to that obtained by applying a microphone weighting with same $v=c$ (while keeping injection uniform, i.e c=5). 
+We conclude that for the purpose of correcting early energy deficiency, these two methods are functionally equivalent, offering the flexibility to apply the correction at either the source or the receiver side, due to the linearity of the operations. 
+However, they do not provide a distinctly non-redundant set of tunable parameters for independent control. If both source injection and microphone weighting are applied simultaneously (e.g., $c > 1$ and $v > 1$), their combined effect on the EDC cannot be easily predicted by simple summation or multiplication, as the recursive structure starts with the initial loading $c$, which is then mixed and smeared among many paths before the new weighting $v$ is applied, preventing the energy effect from being represented simply as their cascade (e.g., $\sum c_i \cdot \sum v_i$).
+
+\subsection{\textbf{The General Path Equation}}
+
+The pressure contribution of a specific path of order $m$ to the microphone can be generalized as the result of the initial injection, $m-1$ scattering operations, and the final pickup summation:
+$$p_{path}^{(m)} = g_{total} \cdot \left( \text{Pickup} \right) \cdot \left( \text{Scattering Chain} \right) \cdot \left( \text{Injection} \right) \cdot p_S$$
+
+\textbf{Injection Term:} The $i$-th component of the weighted source vector $\frac{1}{2}\mathbf{S}\mathbf{w}_{k_1}$.
+
+\textbf{Scattering Chain:} The product of $m-1$ scattering operations $\mathbf{S}$ and path selection matrices $\mathbf{M}$ representing the delay-line connections between nodes.
+
+\textbf{Pickup Term:} The summation at the final node $k_m$ via $\frac{2}{N-1}\mathbf{v}_{k_m}^T$
+
+For a specific propagation path of order $m$ through nodes $\{k_1, k_2, \dots, k_m\}$:
+
+Case A: Source-Weighted ($c > 1, v = 1$)The pressure is a result of the weighted launch being processed by $m-1$ scattering matrices:$$p_{A}^{(m)} = \frac{2}{N-1} \mathbf{1}^T \left( \prod_{j=2}^{m} \mathbf{M}_{j} \mathbf{S} \right) \left[ \frac{1}{2} \mathbf{S} \mathbf{w}_{k_1} \right] p_S$$Here, $\mathbf{w}_{k_1}$ is the weighted injection vector. The term in the brackets is the initial directional wave launch.Case B: Receiver-Weighted ($v > 1, c = 1$)The pressure is a result of uniform waves being "filtered" by the pickup vector at the very end:$$p_{B}^{(m)} = \frac{2}{N-1} \mathbf{v}_{k_m}^T \left( \prod_{j=2}^{m} \mathbf{M}_{j} \mathbf{S} \right) \left[ \frac{1}{2} \mathbf{1} \right] p_S$$$\mathbf{v}_{k_m}^T$ is the weighted pickup vector applied only at the final node. Because $\mathbf{S}\mathbf{1} = \mathbf{1}$, the injection term simplifies to a uniform $1/2$ scalar.
+
+$p_A$ and $p_B$ are not equal unless the scattering matrix $\mathbf{S}$ and the path selection matrices $\mathbf{M}_j$ commute with the weighting vectors. $\mathbf{S}$ is a dense mixing matrix ($\mathbf{S} = \frac{2}{N-1}\mathbf{1}\mathbf{1}^T - \mathbf{I}$), which immediately redistributes the initial directional injection $\mathbf{S}\mathbf{w}_{k_1}$ across all channels. Consequently, the weighted energy in Case A is "smeared" by the chain of scattering matrices before reaching the output, whereas in Case B, the energy traverses the chain uniformly and is only weighted at the final step. Equality only holds strictly if the matrices allow the weights to transport through the chain unchanged, which implies they must be diagonal.
+
+\textbf{If S is a diagonal matrix:} Let $\mathbf{S} = \text{diag}(s_1, s_2, \dots, s_{N-1})$. For a path of order $m$, let $\mathbf{M}_{total} = \prod_{j=2}^{m} \mathbf{M}_{j}$ represent the selection of specific delay lines. This diagonal structure implies that the channels are decoupled, meaning energy launched in direction $i$ propagates solely along that path without mixing. Consequently, the matrix chain product collapses into a sequence of scalar gains which are commutative.
+
+\textbf{Case A:} Source-Weighted ($c > 1, v = 1$). The pressure contribution is:$$p_{A}^{(m)} = \frac{2}{N-1} \mathbf{1}^T \mathbf{M}_{total} \mathbf{S}^{m-1} \left( \frac{1}{2} \mathbf{S} \mathbf{w} \right) p_S$$ If we follow a specific path along the $i$-th direction of the network:$$p_{A}^{(m)} = \frac{1}{N-1} (s_i)^m w_i p_S$$
+
+\textbf{Case B:} Receiver-Weighted ($v > 1, c = 1$)The pressure contribution is:$$p_{B}^{(m)} = \frac{2}{N-1} \mathbf{v}^T \mathbf{M}_{total} \mathbf{S}^{m-1} \left( \frac{1}{2} \mathbf{1} \right) p_S$$Again, following the $i$-th direction:$$p_{B}^{(m)} = \frac{1}{N-1} v_i (s_i)^{m-1} p_S$$. 
+For $p_A = p_B$, the weights must satisfy:$$(s_i) w_i = v_i$$This shows that if $\mathbf{S}$ were diagonal, applying a weight $w_i$ at the source is mathematically identical to applying a weight $v_i = s_i w_i$ at the receiver for a given path
+
+\begin{figure*}
+    \centering
+    \includegraphics[width=1.\linewidth]{pickup_inject.png}
+    \caption{Comparison of the EDC's of source injection with $c=3$ and $c=5$ and the equivalent receiver collection with $v=3$ and $v=5$, showing nearly identical energy decay behaviour}
+    \label{fig:pickup}
+\end{figure*}
+
+\subsection{\textbf{The General Path Equation in State-Space}}
+
+For fixed room geometry, wall filters, and delay-line lengths, an SDN defines a linear time-invariant (LTI) mapping from the source signal $u[n]$ to the microphone signal $y[n]$. By stacking all travelling-wave samples in the bidirectional delay lines into a global state vector $\mathbf{x}[n]$, the SDN can be written in state-space form as
+\begin{equation}
+\mathbf{x}[n\!+\!1] = \mathbf{A}\mathbf{x}[n] + \mathbf{B}(\mathbf{w})\,u[n], 
+\qquad
+y[n] = \mathbf{C}(\mathbf{v})\mathbf{x}[n] + d\,u[n],
+\end{equation}
+where the source-injection weights $\mathbf{w}$ affect only the input operator $\mathbf{B}(\mathbf{w})$, while the receiver (pickup) weights $\mathbf{v}$ affect only the readout operator $\mathbf{C}(\mathbf{v})$.
+
+In the $z$-domain, the transfer function is
+\begin{equation}
+H_{\mathbf{w},\mathbf{v}}(z)
+= d + \mathbf{C}(\mathbf{v})\big(\mathbf{I}-z^{-1}\mathbf{A}\big)^{-1}\mathbf{B}(\mathbf{w}).
+\end{equation}
+
+Therefore, applying source weighting alone ($\mathbf{v}=\mathbf{1}$) yields
+$H_{\mathbf{w}}(z)=d+\mathbf{C}_0 G(z)\mathbf{B}(\mathbf{w})$,
+whereas applying receiver weighting alone ($\mathbf{w}=\mathbf{1}$) yields
+$H_{\mathbf{v}}(z)=d+\mathbf{C}(\mathbf{v}) G(z)\mathbf{B}_0$,
+with $G(z)=(\mathbf{I}-z^{-1}\mathbf{A})^{-1}$ and $(\mathbf{B}_0,\mathbf{C}_0)$ denoting the baseline SDN operators with $\mathbf{C}_0 = \frac{2}{N-1}\mathbf{1}^T$, $\mathbf{C}(\mathbf{v}) = \frac{2}{N-1}\mathbf{v}^T$, and $\mathbf{B}_0 = \frac{1}{2}\mathbf{S}\mathbf{1} = \frac{1}{2}\mathbf{1}$, $\mathbf{B}(\mathbf{w}) = \frac{1}{2}\mathbf{S}\mathbf{w}$.
+
+To analyze the specific interactions within the recursive network, we expand $G(z)$ as a Neumann series, where each term corresponds to a reflection order $k$:\begin{equation}G(z) = \sum_{k=0}^{\infty} \mathbf{A}^k z^{-(k+1)}.\end{equation}
+
+Therefore, resulting transfer functions are:
+
+\begin{equation}H_{w}(z) = \sum_{k=0}^{\infty} \left[ \mathbf{C}_0 \mathbf{A}^k \mathbf{B}(\mathbf{w}) \right] z^{-(k+1)} + d\end{equation}
+
+\begin{equation}H_{v}(z) = \sum_{k=0}^{\infty} \left[ \mathbf{C}(\mathbf{v}) \mathbf{A}^k \mathbf{B}_0 \right] z^{-(k+1)} + d\end{equation}
+
+The condition for exact equivalence, $H_{\mathbf{w}}(z) \equiv H_{\mathbf{v}}(z)$, requires equality for every power of $z^{-k}$:
+
+\begin{equation}\mathbf{C}_0 \mathbf{A}^k \mathbf{B}(\mathbf{w}) = \mathbf{C}(\mathbf{v}) \mathbf{A}^k \mathbf{B}_0 \quad \forall k \geq 0\end{equation}
+
+
+
+Let the system matrix be $\mathbf{A}(z) = \mathbf{M}(z)\mathbf{S}$, where $\mathbf{M}(z) = \text{diag}(z^{-d_i})$ contains the delay operators for each path. Substituting the SDN-specific definitions and analyzing the term for the first recursion ($k=1$), which corresponds to second-order reflections:
+
+$$ \mathbf{1}^T \mathbf{M}(z) \mathbf{S} (\mathbf{S} \mathbf{w}) = \mathbf{v}^T \mathbf{M}(z) \mathbf{S} \mathbf{1} $$
+
+Simplifying with $\mathbf{S}^2 = \mathbf{I}$ and $\mathbf{S}\mathbf{1} = \mathbf{1}$, the difference term $$\Delta_1 = \mathbf{1}^T \mathbf{M}(z)\mathbf{w} - \mathbf{v}^T \mathbf{M}(z) \mathbf{1}$$ can be expanded using the individual delays:
+
+$$\Delta_1 \propto \sum_{i=1}^{N-1} z^{-d_i} w_i - \sum_{i=1}^{N-1} z^{-d_i} v_i$$ implying we must have $w_i = v_i$ for every branch $i$ for difference to be zero. However, the "specular direction" for the source at node $k$ is generally different from the "specular direction" for the microphone at node $k$. Thus, the indices of the weights $w_i$ and $v_i$ will not align on the same delay lines $z^{-d_i}$.
+
+However, EDC (we should show: EDC could be near identical as it depends on the norms of v and w vector)
+
+
+%In other words, source weighting modifies the internal wavefield by changing how energy is launched into the recursive network, whereas receiver weighting leaves the internal recursion unchanged and only alters the measurement of that wavefield. Consequently, the two parameterisations are not redundant in a strict input--output sense, and they need not produce identical sample-accurate RIRs except in degenerate cases (e.g., purely scalar re-scaling).
+
+%Nevertheless, we observe that for the purpose of matching early energy decay (EDC), receiver weighting can behave similarly to source weighting. This is because the SDN scattering and unequal inter-node delays rapidly mix directional components; after several scattering updates, the port-wise wave distribution approaches a permutation-invariant regime in which different fixed readout vectors $\mathbf{v}$ yield similar energy summaries. Hence, while \eqref{eq:exact_equiv} does not hold in general, the two strategies can yield nearly indistinguishable EDCs over the early decay window considered in Fig.~\ref{fig:pickup}.
+
+
+\newpage
+\section{Extended Unitary Matrix}
+\label{sec:extended_unitary}
+
+Uncomment if needed.
+
+\begin{comment}
+Consider the node-to-node scattering described by the original unitary matrix S:
+\[
+S \in \mathbb{R}^{(K-1) \times (K-1)},
+\]
+which preserves energy among the \(K-1\) delay lines at a node. When extending the system to include the source and microphone as additional ports, we construct an \emph{extended} matrix:
+\[
+S_{\mathrm{ext}} = \begin{bmatrix}
+S & c \\
+b & d
+\end{bmatrix} \in \mathbb{R}^{K \times K},
+\]
+where the column vector \(c \in \mathbb{R}^{(K-1) \times 1}\) represents the injection coefficient from the source to the node, the row vector \(b \in \mathbb{R}^{1 \times (K-1)}\) represents the scaling factor applied to the incoming pressures at the node which is sent to the microphone, and \(d \in \mathbb{R}\) is the direct gain of the source contribution to the pressure state of the node for node-to-microphone connection.
+
+One way to design \(S_{\mathrm{ext}}\) so that it is unitary is to have $b=c=0$. 
+
+%Or,
+%\begin{enumerate}
+    \item Choose the coupling vector \(c\) with a small norm. Set \(d = \sqrt{1 - \|c\|^2}\) in order to satisfy energy conservation in the \((c, d)\) block
+    \item Choose the row vector \(b\) so that the off-diagonal terms cancel appropriately; one option is to define \(b = -\frac{S\,c}{d}\).
+%\end{enumerate}
+%With these choices, the extended matrix becomes
+%\[S_{\mathrm{ext}} = \begin{bmatrix} S & c \\
+%-\frac{S\,c}{d} & d\end{bmatrix}.
+%\]
+%By construction, this \(S_{\mathrm{ext}}\) satisfies \(S_{\mathrm{ext}}^\mathrm{T} S_{\mathrm{ext}} = I,\)
+%meaning that for any state vector \(x\), which is the collection of incoming pressure wave variables \(p^+\), the transformation is energy-preserving:
+%\[
+%\| S_{\mathrm{ext}}\, x \|_2 = \|x\|_2.
+%\]    
+%However, the resulting matrix,
+
+However, the resulting matrix, with zero (or close to zero) off diagonal elements implies the source is hardly injected into the nodes and consequently the nodes are not excited:
+
+\begin{equation}
+    S_{\mathrm{ext}} = \begin{bmatrix}
+        \mathbf{S} & -0.01 \cdot \mathbf{1} \\
+        0.01 \cdot \mathbf{1}^T & 1
+    \end{bmatrix}
+\end{equation}
+
+\subsubsection{Physical Interpretation of Evaluating Energy Characteristics of the Extended Matrixs}
+
+Making the extended matrix unitary is meaningful only for a \emph{closed, lossless} system. In our physical scenario, the source and microphone are \emph{external} ports. That is, the overall operation in time is not confined to redistributing energy within a closed network:
+\begin{itemize}
+    \item The \textbf{source} is an external driver that injects -new- energy into the system. If we treat the source as just another port in a
+    unitary matrix, the operation would imply that the source does not actually add any net energy; it merely redistributes what is already present. Hence, if the source is external (speaker), we’ve broken the condition $\| S_{\text{ext}} x \| = \| x \|$, because $x$ at the next time step should have more energy than $x$ at the previous step, by however much the source injected.
+
+    \item The \textbf{microphone} is an output that extracts energy from the system. In a fully unitary system, no net energy would ever leave the state vector since unitary operations merely rotate the energy.
+\end{itemize}
+Thus, when the entire extended matrix \(S_{\mathrm{ext}}\) is forced to be unitary, it effectively treats the source and microphone as if they were internal ports of a lossless junction which blocks any external net injection or extraction of energy. 
+\bigskip
+
+The source “port” can’t just magically add more energy at each time step, because that would violate energy conservation.
+We can only shuffle or rotate energy around the state vector, we can’t create it from nowhere. We imagine the source port “injects” and the mic port “receives.” But if the big matrix is unitary, then the “source dimension” must not be actually adding net energy, it can only reflect or pass existing energy around.
+\bigskip
+
+In summary:
+
+\begin{enumerate}
+    \item The \textbf{sub-block} \(S\) being unitary ensures that the pressure exchanges among the nodes are energy-preserving.
+    \item The \textbf{extended matrix} \(S_{\mathrm{ext}}\) can be forced to be unitary by appropriately choosing \(c\), \(b\), and \(d\). However, making \(S_{\mathrm{ext}}\) fully unitary would imply that the entire system (including the source and microphone ports) is lossless and closed. 
+\end{enumerate}
+
+Forcing the extended matrix to be strictly unitary seems not physically appropriate.
+\end{comment}
+
+
+\newpage
+
+\section{ Adaptive Scattering via Dynamic Matrix Permutation}
+\label{sec:adaptive_scattering}
+
+Uncomment if needed.
+
+\begin{comment}
+    
+While the Source-Weighted (SW-SDN) approach detailed in Section~\ref{sec:source_weighting_strategy} primarily addresses the specularity of the initial source-to-node energy injection, the subsequent node-to-node interactions are still governed by the inherent characteristics of the chosen scattering matrix \(\mathbf{S}\). As established in [], a purely diffuse scattering matrix is crucial for realistic late reverberation, yet it does not preserve the directional energy of strong, isolated wave components arriving from other nodes during the early reflection sequence.
+
+To introduce a degree of specularity into these node-to-node interactions without fundamentally altering the diffuse nature of \(\mathbf{S}\) or resorting to pre-computed specular matrices (which were found to inadequately model energy decay [] ), we introduce an adaptive scattering mechanism. This approach, termed ``specular node pressure enhancement,'' dynamically and temporarily modifies the permutation of the standard diffuse scattering matrix \(\mathbf{S}\) for a single scattering event at a node \(k\).
+
+The core idea is to identify the dominant incoming wave from a neighboring node and attempt to redirect its corresponding scattered energy towards its ideal specular reflection path to another node. The process for a given node \(k\) at time \(n\) is as follows:
+
+\begin{enumerate}
+    \item \textbf{Identify Dominant Incoming Wave:} From the vector of incoming waves \(\mathbf{p_k^+} = [p_{k1}^{\text{node}}, \ldots, p_{k(K-1)}^{\text{node}}]^T\) (excluding direct source contributions for this specific mechanism), the component with the maximum absolute amplitude is identified. Let this correspond to the wave arriving from a neighboring node \(j_{\text{in}}\).
+    
+    \item \textbf{Determine Specular Target:} Using the pre-computed `node to node mappings` (derived from node-to-node geometric angles, as distinct from source-to-node angles), the optimal specular reflection target node \(j_{\text{out}}\) is determined for a wave incident from node \(j_{\text{in}}\) and reflecting off the current node \(k\).
+    
+    \item \textbf{Dynamic Matrix Permutation:} The standard diffuse scattering matrix \(\mathbf{S}\) is temporarily modified. If the row index in \(\mathbf{S}\) corresponding to the output direction towards \(j_{\text{out}}\) is different from the row index corresponding to the input direction from \(j_{\text{in}}\) (when considering the ordered list of \(K-1\) neighbors), these two rows of \(\mathbf{S}\) are swapped. This permutation aims to map the scattering transformation that would have applied to the dominant input component \(p_{kj_{\text{in}}}^{\text{node}}\) onto the output direction towards \(j_{\text{out}}\).
+    
+    \item \textbf{Scattering and Restoration:} The outgoing wave vector \(\mathbf{p_k^-}\) is computed using this temporarily permuted matrix: \(\mathbf{p_k^-} = \mathbf{S}_{\text{permuted}} \mathbf{\tilde{p}_{k}^+}\). Immediately after this computation, the scattering matrix is restored to its original diffuse state by reversing the swap (or re-initializing from a canonical copy), ensuring the modification is localized to the current node and time step.
+\end{enumerate}
+
+This adaptive permutation acts upon the output distribution of the diffuse scattering matrix. It does not change the numerical values within \(\mathbf{S}\) itself but rather redirects one of its transformed components. The efficacy of this redirection depends on the characteristics of \(\mathbf{p_k^+}\). If \(\mathbf{p_k^+}\) contains a single, clearly dominant component (e.g., \([0, 0, A, 0, 0]^T\)), the swapping mechanism can more effectively steer the subsequently scattered energy. However, if \(\mathbf{p_k^+}\) is already highly diffuse, with multiple components of similar magnitude (e.g., \([A, B, C, D, E]^T\) where A-E are comparable), swapping rows based on a single \(\mathrm{argmax}\) may have a less pronounced directional effect, as the chosen row of \(\mathbf{S}\) still operates on the entire mixed input vector. Preliminary results indicate that this adaptive mechanism can lead to a further reduction in early energy drop and a marginal increase in reverberation time, though the perceptual significance versus computational overhead for real-time applications requires careful consideration.
+
+\end{comment}
+
+
+
+\newpage
+\section{SDN as a state-space system}
+\label{sec:statespace}
+
+Uncomment if needed.
+
+\begin{comment}
+
+The core operations of SDN (without wall absorption and distance attenuation) can be written in a standard state-space form:
+
+\begin{equation}
+    x(n+1) = A x(n) + B u(n), \qquad y(n) = C x(n) + D u(n)
+\end{equation}
+
+where \( u(n) = p_S(n) \) is the source pressure and \( y(n) = \mathbf{p}_r(n) \in \mathbb{R}^{N \times 1} \) is the output node pressure sent to the microphone from each node.
+
+The state vector $x(n)$, combines the incoming pressure vectors at each node, \( \mathbf{p}^+_i(n) \in \mathbb{R}^{K-1 \times 1} \), into a unified block matrix:
+
+\begin{equation}
+    x(n) = \mathbf{p}^+(n) = \left[\mathbf{p}^+_1(n), \ldots, \mathbf{p}^+_N(n)\right]^\top \in \mathbb{R}^{K(K-1) \times 1}
+\end{equation}
+
+Total incoming pressure expression in \eqref{eq:p_tilde_new} now have its block matrix correspondence, representing not only a single node operation but all pressure operations at each node $k$:
+
+\begin{equation}
+     \mathbf{\tilde p}^+(n) = \mathbf{p}^+(n) + \frac{p_S(n)}{2} (\mathbf{1}_N \otimes \mathbf{c}) ,  \quad \mathbf{c} \in \mathbb{R}^{K-1}
+\end{equation}
+
+Consequently, the outgoing pressure vector becomes:
+
+\begin{equation}
+    \mathbf{ p}^-(n) = (\mathbf{I}_N \otimes \mathbf{S}) \mathbf{\tilde p}^+(n)
+\end{equation}
+
+The recursive part can be written using a permutation matrix \( \mathbf{P} \in \mathbb{R}^{N(N-1) \times N(N-1)} \) with: \[ P_{ij} = \delta_{i,f(j)}, \qquad \text{where} \quad f(i) = \left(6i - (i-1)_N - 1\right) \bmod N(N-1) + 1\]
+
+The delay correspond to the flight time between all connected nodes, \( m \), is used to relate outgoing pressures of one node to the incoming pressures of other nodes in future time instances:
+
+\begin{equation}
+    \mathbf{p}^+(n + 2m) = \mathbf{P} \tilde{\mathbf{p}}^-(n) = \mathbf{P} \left( \left(\mathbf{I}_N \otimes \mathbf{S}\right) \mathbf{p}^+(n) + \frac{p_S(n)}{2} \left( \mathbf{1}_N \otimes \mathbf{S} \mathbf{c} \right) \right)
+\end{equation}
+
+\begin{equation}
+\mathbf{p}_r(n) = \left( \mathbf{I}_N \otimes \mathbf{w}^\top \right) \tilde{\mathbf{p}}^+(n) = \left( \mathbf{I}_N \otimes \mathbf{w}^\top \mathbf{S} \right) \mathbf{p}^+(n) + p_S(n) \mathbf{1}_N
+\end{equation}
+
+
+In the frequency domain:
+
+\[
+D_{2m}(z)\mathbf{P}^+(z) = \mathbf{P} (\mathbf{I}_N \otimes \mathbf{S}) \mathbf{P}^+(z) + \frac{1}{2} \mathbf{P} (\mathbf{1}_N \otimes \mathbf{S} \mathbf{v}) P_S(z)
+\]
+\[
+\mathbf{P}_r(z) = (\mathbf{I}_N \otimes \mathbf{w}^\top \mathbf{S}) \mathbf{P}^+(z) + P_S(z) \mathbf{1}_N
+\]
+
+For an impulse \( p_S(n) = \delta(n) \), the transfer function becomes:
+\[
+\mathbf{P}^+_i(z) = \frac{1}{2} \left( D_{2m}(z) - \mathbf{P}(\mathbf{I}_N \otimes \mathbf{S}) \right)^{-1} \left( \mathbf{1}_N \otimes \mathbf{S} \mathbf{v} \right)
+\]
+
+\[
+H_r(z) = (\mathbf{I}_N \otimes \mathbf{w}^\top \mathbf{S}) \mathbf{P}^+(z) + \mathbf{1}_N
+\]
+
+\[
+H(z) = \frac{1}{2} (\mathbf{1}_N^\top \otimes \mathbf{w}^\top \mathbf{S}) \left( D_{2m}(z) - \mathbf{P}(\mathbf{I}_N \otimes \mathbf{S}) \right)^{-1} \mathbf{P}(\mathbf{1}_N \otimes \mathbf{S} \mathbf{v}) + \mathbf{1}_N^\top \mathbf{1}_N + z^{-r_S}
+\]
+
+where \( r_S \) is the delay between the source and the microphone.
+
+To preserve energy:
+\begin{itemize}
+  \item The feedback matrix \( \mathbf{P}(\mathbf{I}_N \otimes \mathbf{S}) \) must be unitary.
+  \item The input/output projections \( \mathbf{S}\mathbf{v} \) and \( \mathbf{w}^\top \mathbf{S} \) must have norm \(1/\sqrt{N}\), which gives:
+\[
+\mathbf{w}^\top \mathbf{w} = \frac{1}{N}, \quad \mathbf{v}^\top \mathbf{v} = \frac{1}{N}
+\]
+\end{itemize}
+
+This ensures:
+\[
+(\mathbf{1}_N^\top \otimes \mathbf{w}^\top \mathbf{S})(\mathbf{1}_N \otimes \mathbf{S}^\top \mathbf{w}) = \mathbf{1}_N^\top \mathbf{1}_N \otimes \mathbf{w}^\top \mathbf{S}^\top \mathbf{S} \mathbf{w} = N \cdot \frac{1}{N} = 1
+\]
+and similarly for \( \mathbf{P}(\mathbf{1}_N \otimes \mathbf{S} \mathbf{v}) \).
+
+\end{comment}
+
+
+\newpage
+\section{Experiment Notes}
+\label{sec:experiment_notes}
+
+For center source, basinhopping optimization ("xatol": 1e-2 or e-1 same, "fatol": 1e-2 or e-1 same, iter: 5 or 20 similar):
+\begin{itemize}
+\item achieves $0.214$ rmse with $[4.79,6.20,1.00,7.00,1.00,2.09]$, 
+c bounds: $[1.0, 7.0]$
+\item $[-3.0, 7.0]$ achieves $0.204$ with $[3.09,6.43,-2.83,7.00,0.58,2.07]$, 
+\item $[-5.0, 10.0]$achieves 0.195 with $[4.35,6.05,-2.85,-4.02,-1.68,2.17]$, 
+
+\end{itemize}
+
+\section{Insights}
+\label{sec:insights}
+
+\begin{itemize}
+
+\item When src and/or mic are closer to the wall, negative c's amplify too much, create nonrealisticly large early pulse. this is another justification to not use negative c's. or (check if this is solved with random best targets)
+\item Smoothed RIR errors are not improving compare to original sdn (pulses are same temporally, only amplitudes changing. not much room for improvement there?). I was "designing" this mostly for: "EDC shows energy loss and we have to improve it", so it seems edc-ned will be the metrics, not smoothed energy. is that ok? Only HO-SDN can improve that metric. But HO-SDN EDC will be worse than SW-SDN since EDC is not causal as we've talked. (justification of EDC (only) cant be a good metric for RIR accuracy)
+\end{itemize}
+
+\subsection{\textbf{Previous}}
+\begin{itemize}
+
+\item higher c values increase the early energy  
+\item negative c's also good energy-wise (results align with the energy-gain factor in table 1' (showing l2 norm of the initial outgoing vector, which I find as a representation of the early energy) but bad in terms of NED because the amplitudes of nontarget directions are smaller for negative c's (delays the NED rise). This will be one of the justifications to use positive c's
+\item SR, the ratio of dominant to non-dominant
+outgoing wave magnitude) is another parameter for understanding the specularity of various c choices 
+ \end{itemize}
+
+
+\begin{table}[h]
+\centering
+\caption{Optimised $c$ coefficients and resulting 50ms EDC-RMSE (dB) for four source positions in Room A.
+“Single”=one $c$ per source; “Global”=one $c$ shared by all sources; “wall” assigns six coefficients $[c_{1}\dots c_{6}]$ per source (wall-single), 
+or shared by all sources (wall-glob). \textbf{Ref:} ISM (rimpy-neg10).}
+\label{tab:c_optim}
+
+\footnotesize  % Font size is now smaller
+\setlength{\tabcolsep}{2pt} % Column spacing is now tighter
+\renewcommand{\arraystretch}{1.1}
+
+% Required package: \usepackage{makecell}
+\begin{tabular}{l|cc|cc|cc|cc|c}
+\toprule
+% --- HEADER ---
+\textbf{Room A} &
+  \multicolumn{2}{c|}{Centre} &
+  \multicolumn{2}{c|}{\makecell{Lower-left}} &
+  \multicolumn{2}{c|}{\makecell{Top-middle}} &
+  \multicolumn{2}{c|}{\makecell{Upper-right}} &
+  \textbf{Avg.} \\
+\textbf{SW-SDN} & $c$ & RMSE & $c$ & RMSE & $c$ & RMSE & $c$ & RMSE & \textbf{RMSE} \\
+\midrule
+% --- BODY ---
+$c_{\text{original}}$ & 1 & 2.48& 1 & 0.73& 1 & 0.68& 1 & \textbf{0.47} & 1.10\\[2pt]
+$c_{\text{single}}$ & 4.77& 0.24& 2.39& 0.43& 3.03& 0.28& 1.00& 0.47& 0.36\\[2pt]
+  
+$c_{\text{global}}$
+  & 3.06& 1.12& 3.06& 0.74& 3.06& 0.28& 3.06& 0.60& 0.69\\[2pt]
+$c_{\text{wall-single}}$
+& \multicolumn{1}{c}{$\begin{bmatrix}
+           5.53 \\
+           4.27 \\
+           6.51 \\
+ 	      1.59\\
+ 	      4.69\\
+   	    1.22 \end{bmatrix}$} & \textbf{0.22}
+  & \multicolumn{1}{c}{$\begin{bmatrix}
+       2.96 \\
+       1.73 \\
+       1.00 \\
+ 	    1.00\\
+ 	      1.00\\
+   	    1.29 \end{bmatrix}$} & \textbf{0.41}
+  & \multicolumn{1}{c}{$\begin{bmatrix}
+           1.34   \\
+           6.36  \\
+           1.00  \\
+ 	      1.00  \\
+ 	      6.51 \\
+   	  1.17 \end{bmatrix}$} & \textbf{0.24}
+     &   \multicolumn{1}{c}{$\begin{bmatrix}
+           1.0   \\
+           1.00  \\
+           1.00  \\
+ 	      1.00  \\
+ 	      1.00 \\
+   	  1.00 \end{bmatrix}$} & 0.47  & \textbf{0.33} \\[2pt]
+      \midrule
+  $c_{\text{wall-glob}}$
+& $\mathbf{c}_{wg}$ & 0.63 
+    & $\mathbf{c}_{wg}$ & 0.38 
+      & $\mathbf{c}_{wg}$ & 0.26
+      & $\mathbf{c}_{wg}$ & 0.57
+       & \textbf{0.47} \\[2pt]
+       \midrule
+   $c_{\text{predictedv1}}$
+& 5.84 & 0.48
+    & 3.44 & 1.04
+      & 4.43 & 0.46
+      & 2.56 & 0.59
+       & \textbf{0.64} \\[2pt]
+\bottomrule
+\multicolumn{10}{l}{\footnotesize * $\mathbf{c}_{wg} = [1.07, 1.42, 4.73, 1.00, 7.00, 7.00]^\top$ (Shared Global Vector)} \\
+\end{tabular}
+\end{table}
+
+\begin{table*}[tbh]
+    \centering
+    \caption{Optimization results and corresponding 50ms EDC-RMSE (dB) across 16 \textbf{uniformly distributed} receiver positions for \textbf{Room A} and \textbf{Room Cube6} (New).
+             \textbf{Reference Method}: ISM (rimpy-neg10).}
+    \label{tab:unified-fullgrid-results}
+    \renewcommand{\arraystretch}{1.25}
+    \setlength{\tabcolsep}{2pt}
+    %\tiny % Reduced font size to fit the merged table
+    
+    \begin{tabular}{l | cc cc cc cc c | cc cc cc cc c}
+        \toprule
+        & \multicolumn{9}{c|}{\textbf{Room A (Fullgrid)}} 
+        & \multicolumn{9}{c}{\textbf{Cube6 Room (Fullgrid)}} \\
+        \cmidrule(lr){2-10} \cmidrule(l){11-19}
+        \textbf{Source}
+        & \multicolumn{2}{c}{Centre} & \multicolumn{2}{c}{Lower-Left} & \multicolumn{2}{c}{Top-Middle} & \multicolumn{2}{c}{Upper-Right} & \textbf{Avg.} 
+        & \multicolumn{2}{c}{Centre} & \multicolumn{2}{c}{Lower-Left} & \multicolumn{2}{c}{Top-Middle} & \multicolumn{2}{c}{Upper-Right} & \textbf{Avg.} \\
+        
+        \textbf{RMSE} & $c$ & RMSE & $c$ & RMSE & $c$ & RMSE & $c$ & RMSE & \textbf{RMSE} 
+                        & $c$ & RMSE & $c$ & RMSE & $c$ & RMSE & $c$ & RMSE & \textbf{RMSE} \\
+        \midrule
+        
+        % --- ORIGINAL ---
+        $c_{\text{original}}$
+        & 1 & 2.33 & 1 & 0.45 & 1 & 1.21 & 1 & 0.62 & 1.15
+        & 1 & 1.63 & 1 & 0.55 & 1 & 1.07 & 1 & 0.60 & 0.96 \\[3pt]
+        \midrule
+
+        % --- SINGLE SCALAR ---
+        $c_{\text{single}}$
+        & 4.78 & \textbf{0.24} & 0.09 & 0.39 & 3.52 & 0.33 & 0.98 & 0.62 & 0.40
+        & 4.03 & 0.31 & 2.23 & 0.41 & 3.28 & 0.24 & 1.33 & 0.58 & 0.39 \\[3pt]
+        \midrule
+
+        % --- GLOBAL SCALAR ---
+        $c_{\text{global}}$
+        & 3.66 & 0.61 & 3.66 & 0.77 & 3.66 & 0.34 & 3.66 & 1.04 & 0.69
+        & 3.22 & 0.49 & 3.22 & 0.61 & 3.22 & 0.24 & 3.22 & 1.01 & 0.59 \\[3pt]
+        \midrule
+
+        % --- WALL SINGLE (VECTORS) ---
+        $c_{\text{wall-s}}$
+        % ROOM A BLOCK
+        & \multicolumn{1}{c}{$\begin{bmatrix} 5.57\\4.43\\7.00\\3.16\\1.00\\1.93 \end{bmatrix}$} & \textbf{0.21}
+        & \multicolumn{1}{c}{$\begin{bmatrix} 1.00\\1.23\\4.95\\1.00\\1.00\\1.00 \end{bmatrix}$} & \textbf{0.31}
+        & \multicolumn{1}{c}{$\begin{bmatrix} 1.00\\4.82\\4.95\\6.28\\1.00\\1.00 \end{bmatrix}$} & \textbf{0.27}
+        & \multicolumn{1}{c}{$\begin{bmatrix} 1.06\\1.00\\1.00\\1.00\\1.00\\1.00 \end{bmatrix}$} & 0.62 & \textbf{0.35}
+        % CUBE6 BLOCK
+        & \multicolumn{1}{c}{$\begin{bmatrix} 7.00\\1.47\\5.18\\1.00\\1.00\\5.11 \end{bmatrix}$} & 0.17
+        & \multicolumn{1}{c}{$\begin{bmatrix} 2.81\\1.00\\1.00\\1.00\\3.14\\1.00 \end{bmatrix}$} & 0.38
+        & \multicolumn{1}{c}{$\begin{bmatrix} 2.84\\1.29\\6.82\\1.00\\1.00\\2.77 \end{bmatrix}$} & \textbf{0.19}
+        & \multicolumn{1}{c}{$\begin{bmatrix} 1.43\\1.34\\1.00\\1.00\\1.00\\1.35 \end{bmatrix}$} & 0.58 & 0.38$^\dagger$ \\[20pt] 
+        \midrule
+
+        % --- WALL GLOBAL (SHARED VECTOR) ---
+        $c_{\text{wall-g}}$
+        & $\mathbf{c}_{wg1}$ & 0.44 & $\mathbf{c}_{wg1}$ & 0.47 & $\mathbf{c}_{wg1}$ & 0.29 & $\mathbf{c}_{wg1}$ & 0.78 & 0.50
+        & $\mathbf{c}_{wg2}$ & \textbf{0.25} & $\mathbf{c}_{wg2}$ & 0.45 & $\mathbf{c}_{wg2}$ & 0.22 & $\mathbf{c}_{wg2}$ & 0.73 & 0.41 \\
+        \midrule
+           $c_{\text{predMCv1}}$
+        & 5.84 & 0.44
+            & 3.44 & 0.70
+              & 4.43 & 0.48
+              & 2.56 & 0.81
+               & \textbf{0.61}  
+        & $c_{\text{predMCv1}}$ & & & & & & & & \\[2pt]
+
+        $c_{\text{pred13srcpoly}}$
+        & 5.80 & 0.43 & 1.86 & 0.41 & 3.05 & 0.41 & 1.31 & 0.63 &  \textbf{0.47}  
+        &  &  &  &  &  &  &  &  & \\[2pt]
+
+        % --- PredMC v2 (New Line) ---
+        $c_{\text{predDIAGlin}}$
+        & 5.1 & 0.27 & 1.86 & 0.41 & 3.20 & 0.37 & 1.00 & 0.62 &  \textbf{0.42}  
+        &  &  &  &  &  &  &  &  & \\[2pt]
+
+                % --- PredMC v2 (New Line) ---
+        $c_{\text{predDIAGpoly}}$
+        & 5.22 & 0.30 & 1.92 & 0.41 & 3.10 & 0.40 & 1.09 & 0.62 &  \textbf{0.43}  
+        &  &  &  &  &  &  &  &  & \\[2pt]
+        
+        \bottomrule
+        \multicolumn{19}{l}{\footnotesize  * $\mathbf{c}_{wg1}$ (Room A) $= [1.00, 1.03, 5.80, 1.00, 6.24, 7.00]^\top$} \\
+        \multicolumn{19}{l}{\footnotesize  * $\mathbf{c}_{wg2}$ (Cube6) $= [1.33, 1.14, 7.00, 1.00, 1.41, 6.85]^\top$} \\
+    \end{tabular}
+\end{table*}
+
+\begin{table*}[tbh]
+    \centering
+    \caption{Mean 50ms EDC-RMSE (dB) comparison across three scenarios: \textbf{Room A (Specific Positions)}, \textbf{Room A (Uniform Grid)}, and \textbf{Cube6 Room}. Values in parentheses denote SW-SDN results using random–target selection. \textbf{Reference}: ISM (rimpy-neg10).}
+    \label{tab:merged-results-3blocks}
+    \renewcommand{\arraystretch}{1.15}
+    % Reduce font size and padding to fit 16 columns
+    \scriptsize
+    \setlength{\tabcolsep}{2.5pt}
+    
+    \begin{tabular}{l ccccc | ccccc | ccccc}
+        \toprule
+        & \multicolumn{5}{c|}{\textbf{Room A (Quadrant Receivers)}} & \multicolumn{5}{c|}{\textbf{Room A (Uniform Receivers)}} & \multicolumn{5}{c}{\textbf{Room Cube6 (Uniform Receivers)}} \\
+        \cmidrule(lr){2-6} \cmidrule(lr){7-11} \cmidrule(l){12-16}
+        \textbf{Method} & Cent. & L-Left & T-Mid & U-Right & \textbf{Avg.} & Cent. & L-Left & T-Mid & U-Right & \textbf{Avg.} & Cent. & L-Left & T-Mid & U-Right & \textbf{Avg.} \\
+        \midrule
+        
+        SDN Orig. ($c=1$)
+            & 2.48\,() & 0.73\,() & 0.68\,() & \textbf{0.47}\,() & 1.10 
+            & 2.33\,() & 0.45\,() & 1.21\,() & \textbf{0.62}\,() & 1.15 
+            & 1.63\,() & 0.55\,() & 1.07\,() & \textbf{0.60}\,() & 0.96\,() \\
+        \midrule
+        
+        SW-SDN ($c=-3$)
+            & 0.43\,() & 2.42\,() & 0.52\,() & 0.67\,() & 1.01\,() 
+            & 0.49\,() & 1.08\,() & 0.65\,() & 1.30\,() & 0.88\,() 
+            & 0.67\,() & 1.14\,() & 0.75\,() & 1.41\,() & 0.99\,() \\
+            
+        SW-SDN ($c=-2$)
+            & 0.81\,() & 1.89\,() & 0.47\,() & 0.65\,() & 0.96\,() 
+            & 0.85\,() & 0.90\,() & 0.59\,() & 1.18\,() & 0.88\,() 
+            & 0.72\,() & 0.95\,() & 0.59\,() & 1.27\,() & 0.89\,() \\
+            
+        SW-SDN ($c=2$)
+            & 2.00\,() & \textbf{0.53\,()} & 0.44\,() & \textbf{0.55\,()} & 0.88\,() 
+            & 1.83\,() & \textbf{0.40\,()} & 0.86\,() & 0.70\,() & 0.95\,() 
+            & 1.25\,() & \textbf{0.42\,()} & 0.73\,() & 0.66\,() & 0.77\,() \\
+            
+        SW-SDN ($c=3$)
+            & 1.17\,() & 0.70\,() & \textbf{0.28\,()} & 0.60\,() & \textbf{0.69\,()} 
+            & 1.05\,() & 0.56\,() & 0.42\,() & 0.90\,() & 0.73\,() 
+            & 0.61\,() & 0.54\,() & \textbf{0.28\,()} & 0.95\,() & \textbf{0.59\,()} \\
+            
+        SW-SDN ($c=4$)
+            & 0.48\,() & 1.47\,() & 0.40\,() & 0.62\,() & 0.74\,() 
+            & 0.44\,() & 0.86\,() & \textbf{0.39\,()} & 1.10\,() & \textbf{0.70\,()} 
+            & \textbf{0.31\,()} & 0.84\,() & 0.43\,() & 1.19\,() & 0.69\,() \\
+            
+        SW-SDN ($c=5$)
+            & \textbf{0.26\,()} & 2.06\,() & 0.52\,() & 0.62\,() & 0.87\,() 
+            & \textbf{0.26\,()} & 1.07\,() & 0.60\,() & 1.24\,() & 0.79\,() 
+            & 0.48\,() & 1.06\,() & 0.75\,() & 1.36\,() & 0.91\,() \\
+            
+        SW-SDN ($c=6$)
+            & 0.53\,() & 2.47\,() & 0.59\,() & 0.63\,() & 1.05\,() 
+            & 0.47\,() & 1.21\,() & 0.76\,() & 1.33\,() & 0.94\,() 
+            & 0.76\,() & 1.21\,() & 0.97\,() & 1.47\,() & 1.10\,() \\
+            
+        SW-SDN ($c=7$)
+            & 0.75\,() & 2.76\,() & 0.63\,() & 0.63\,() & 1.19\,() 
+            & 0.65\,() & 1.30\,() & 0.87\,() & 1.39\,() & 1.05\,() 
+            & 0.95\,() & 1.31\,() & 1.12\,() & 1.54\,() & 1.23\,() \\
+        \midrule
+        
+        HO-SDN ($N=2$)
+            & 1.58 & 1.42 & 1.34 & 1.13 & 1.37 
+            & 1.24 & 1.16 & 0.97 & 1.10 & 1.12 
+            & 0.65 & 0.93 & 0.84 & 0.86 & 0.82 \\
+            
+        HO-SDN ($N=3$)
+            & 1.30 & 1.15 & 1.28 & 1.16 & 1.22 
+            & 0.97 & 0.95 & 0.97 & 0.88 & 0.94 
+            & 0.82 & 0.78 & 0.93 & 0.85 & 0.85 \\
+        \bottomrule
+    \end{tabular}
+\end{table*}
+
+
+\begin{table*}[tbh]
+    \centering
+    \caption{Comparison of Mean 50ms EDC-RMSE (dB) and Optimal Control Parameters ($c$) between \textbf{Quadrant Positions} (Reference) and \textbf{Uniformly Distributed Positions} (New) in Room A.
+    \textbf{Reference Method}: ISM (rimpy-neg10).}
+    \label{tab:unified-optimization-results}
+    \renewcommand{\arraystretch}{1.25}
+    \setlength{\tabcolsep}{1.5pt}
+    \tiny % Reduced font size to fit the merged table
+    
+    \begin{tabular}{l | cc cc cc cc c | cc cc cc cc c}
+        \toprule
+        & \multicolumn{9}{c|}{\textbf{Room A: Lower-left Quadrant}} 
+        & \multicolumn{9}{c}{\textbf{Room A: Uniform Grid (New)}} \\
+        \cmidrule(lr){2-10} \cmidrule(l){11-19}
+        
+        & \multicolumn{2}{c}{Centre} & \multicolumn{2}{c}{Lower-Left} & \multicolumn{2}{c}{Top-Middle} & \multicolumn{2}{c}{Up-Right} & \textbf{Avg.} 
+        & \multicolumn{2}{c}{Centre} & \multicolumn{2}{c}{Lower-Left} & \multicolumn{2}{c}{Top-Middle} & \multicolumn{2}{c}{Up-Right} & \textbf{Avg.} \\
+        
+        \textbf{Method} & $c$ & RMSE & $c$ & RMSE & $c$ & RMSE & $c$ & RMSE & \textbf{RMSE} 
+                        & $c$ & RMSE & $c$ & RMSE & $c$ & RMSE & $c$ & RMSE & \textbf{RMSE} \\
+        \midrule
+        
+        % --- ORIGINAL ---
+        $c_{\text{orig}}$ ($c=1$)
+        & 1 & 2.48 & 1 & 0.73 & 1 & 0.68 & 1 & \textbf{0.47} & 1.10
+        & 1 & 2.33 & 1 & 0.45 & 1 & 1.21 & 1 & 0.62 & 1.15 \\[3pt]
+        \midrule
+
+        % --- SINGLE SCALAR ---
+        $c_{\text{single}}$
+        & 4.77 & 0.24 & 2.39 & 0.43 & 3.03 & 0.28 & 1.00 & 0.47 & 0.36
+        & 4.78 & \textbf{0.24} & 0.09 & 0.39 & 3.52 & 0.33 & 0.98 & 0.62 & 0.40 \\[3pt]
+        \midrule
+
+        % --- GLOBAL SCALAR ---
+        $c_{\text{global}}$
+        & 3.06 & 1.12 & 3.06 & 0.74 & 3.06 & 0.28 & 3.06 & 0.60 & 0.69
+        & 3.66 & 0.61 & 3.66 & 0.77 & 3.66 & 0.34 & 3.66 & 1.04 & 0.69 \\[3pt]
+        \midrule
+
+        % --- WALL SINGLE (VECTORS) ---
+        $c_{\text{wall-s}}$
+        % SPECIFIC BLOCK
+        & \multicolumn{1}{c}{$\begin{bmatrix} 5.53\\4.27\\6.51\\1.59\\4.69\\1.22 \end{bmatrix}$} & \textbf{0.22}
+        & \multicolumn{1}{c}{$\begin{bmatrix} 2.96\\1.73\\1.00\\1.00\\1.00\\1.29 \end{bmatrix}$} & \textbf{0.41}
+        & \multicolumn{1}{c}{$\begin{bmatrix} 1.34\\6.36\\1.00\\1.00\\6.51\\1.17 \end{bmatrix}$} & \textbf{0.24}
+        & \multicolumn{1}{c}{$\begin{bmatrix} 1.00\\1.00\\1.00\\1.00\\1.00\\1.00 \end{bmatrix}$} & 0.47 & \textbf{0.33}
+        % UNIFORM BLOCK
+        & \multicolumn{1}{c}{$\begin{bmatrix} 5.57\\4.43\\7.00\\3.16\\1.00\\1.93 \end{bmatrix}$} & \textbf{0.21}
+        & \multicolumn{1}{c}{$\begin{bmatrix} 1.00\\1.23\\4.95\\1.00\\1.00\\1.00 \end{bmatrix}$} & \textbf{0.31}
+        & \multicolumn{1}{c}{$\begin{bmatrix} 1.00\\4.82\\4.95\\6.28\\1.00\\1.00 \end{bmatrix}$} & \textbf{0.27}
+        & \multicolumn{1}{c}{$\begin{bmatrix} 1.06\\1.00\\1.00\\1.00\\1.00\\1.00 \end{bmatrix}$} & 0.62 & \textbf{0.35} \\[18pt] % Extra space for vectors
+        \midrule
+
+        % --- WALL GLOBAL (SHARED VECTOR) ---
+        $c_{\text{wall-g}}$
+        & $\mathbf{c}_{wg1}$ & 0.63 & $\mathbf{c}_{wg1}$ & 0.38 & $\mathbf{c}_{wg1}$ & 0.26 & $\mathbf{c}_{wg1}$ & 0.57 & 0.47
+        & $\mathbf{c}_{wg2}$ & 0.44 & $\mathbf{c}_{wg2}$ & 0.47 & $\mathbf{c}_{wg2}$ & 0.29 & $\mathbf{c}_{wg2}$ & 0.78 & 0.50 \\
+        
+        \bottomrule
+        \multicolumn{19}{l}{\tiny * $\mathbf{c}_{wg1}$ (Specific Global) $= [1.07, 1.42, 4.73, 1.00, 7.00, 7.00]^\top$} \\
+        \multicolumn{19}{l}{\tiny * $\mathbf{c}_{wg2}$ (Uniform Global) $= [1.00, 1.03, 5.80, 1.00, 6.24, 7.00]^\top$} \\
+    \end{tabular}
+\end{table*}
+
+\begin{figure*}[b]
+    \centering
+    %-------------------------------- 1st row –– Center source
+    \begin{subfigure}[b]{\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figs/fig_spatial_edc_err_aes_quarter_center_source_ref_RIMPY-neg10.png}
+        \caption{Center source}
+    \end{subfigure}
+
+    %-------------------------------- 2nd row –– Lower-left source
+    \begin{subfigure}[b]{\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figs/fig_spatial_edc_err_aes_quarter_top_middle_source_ref_RIMPY-neg10.png}
+        \caption{Top-middle source}
+    \end{subfigure}
+
+    %-------------------------------- 3rd row –– Upper-right source
+    \begin{subfigure}[b]{\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figs/fig_spatial_edc_err_aes_quarter_upper_right_source_ref_RIMPY-neg10.png}
+        \caption{Upper-right source}
+    \end{subfigure}
+
+    %-------------------------------- 4th row –– Top-middle source
+    \begin{subfigure}[b]{\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figs/fig_spatial_edc_err_aes_quarter_lower_left_source_ref_RIMPY-neg10.png}
+        \caption{Lower-left source}
+    \end{subfigure}
+
+    \caption{Spatial EDC RMSE contour maps for four source positions (rows) and four SDN configurations $c=1,2,3,5$ (columns).  
+    Per-receiver 50 ms EDC RMSE [dB] error according to the reference method ISM (rimpy-rand10cm) shown in their corresponding location with the overall mean error in the lower-right corner.}
+    \label{fig:rmse_mosaic_RIMPY}
+\end{figure*}
+
+
+\end{document}
+

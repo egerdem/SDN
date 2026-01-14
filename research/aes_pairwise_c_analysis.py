@@ -53,23 +53,28 @@ from research.data_config import DataConfig
 # config = DataConfig(mode="legacy")
 
 # Option 2: Experiment mode (uncomment to use)
-config = DataConfig(
-    mode="experiment",
-    # experiment_name="aes_fullgrid_perpair_srcgrid3x5_corner2.0_per_pair",
-    experiment_name="aes_fullgrid_8src_diagonal",
-)
+# config = DataConfig(
+#     mode="experiment",
+#     experiment_name="aes_fullgrid_perpair_srcgrid3x5_corner2.0_per_pair",
+    # experiment_name="aes_fullgrid_8src_diagonal",
+# )
 
 # Option 3: Legacy mode with custom file selection
-# config = DataConfig(
-#     mode="legacy",
-#     legacy_files=[
-        # "aes_FULLGRID_center_source.npz",
-        # "aes_FULLGRID_top_middle_source.npz",
-        # "aes_FULLGRID_upper_right_source.npz",
-        # "aes_FULLGRID_lower_left_source.npz",
+config = DataConfig(
+    mode="legacy",
+    legacy_files=[
+        "aes_FULLGRID_center_source.npz",
+        "aes_FULLGRID_top_middle_source.npz",
+        "aes_FULLGRID_upper_right_source.npz",
+        "aes_FULLGRID_lower_left_source.npz",
         # "aes_FULLGRID_corner_sourcev3.npz",
-#     ]
-# )
+
+    # "journal_FULLGRID_center_source.npz",
+    #     "journal_FULLGRID_top_middle_source.npz",
+    #     "journal_FULLGRID_upper_right_source.npz",
+    #     "journal_FULLGRID_lower_left_source.npz",
+    ]
+)
 
 # Get paths from config
 DATA_DIR = config.get_data_dir()

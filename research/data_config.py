@@ -102,13 +102,14 @@ class DataConfig:
                 return self._legacy_files
             else:
                 # Default legacy files
-                return [
-                    "aes_FULLGRID_center_source.npz",
-                    "aes_FULLGRID_top_middle_source.npz",
-                    "aes_FULLGRID_upper_right_source.npz",
-                    "aes_FULLGRID_lower_left_source.npz",
-                    "aes_FULLGRID_corner_sourcev3.npz",
-                ]
+                assert False, "Default legacy files have been commented out for customization."
+                # return [
+                #     "aes_FULLGRID_center_source.npz",
+                #     "aes_FULLGRID_top_middle_source.npz",
+                #     "aes_FULLGRID_upper_right_source.npz",
+                #     "aes_FULLGRID_lower_left_source.npz",
+                #     "aes_FULLGRID_corner_sourcev3.npz",
+                # ]
         else:  # experiment mode
             if num_sources is None:
                 # Auto-detect by scanning directory

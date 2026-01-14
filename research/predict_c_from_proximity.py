@@ -21,6 +21,13 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(script_dir)
 if project_root not in sys.path: sys.path.append(project_root)
 
+# =====================================================================
+# CONFIGURATION FLAGS
+# =====================================================================
+SAVE_JSON = False           # Save c_prediction_model_params.json
+PLOT_FIRST_FIGURE = False   # Plot the first figure (d_sm_norm vs optimal_c)
+SAVE_FIGURE = True         # Save the plotted figure to PNG
+
 
 # =====================================================================
 # 1. LOAD DATA
@@ -147,64 +154,68 @@ print(f"\n*** Best Model: {best_model_name} (R²={best_r2:.4f}) ***")
 # 4. VISUALIZATION
 # =====================================================================
 
-fig, axes = plt.subplots(1, 2, figsize=(16, 7))
-
-# Plot 1: d_sm_norm vs optimal_c (NEW - shows source-mic distance relationship)
-ax1 = axes[0]
-
-# Extract d_sm_norm (only available for per_pair mode)
-has_d_sm = 'd_sm_norm' in results[0]
-if has_d_sm:
-    d_sm_norms = np.array([r.get('d_sm_norm', np.nan) for r in results])
+# Determine number of subplots based on PLOT_FIRST_FIGURE flag
+if PLOT_FIRST_FIGURE:
+    fig, axes = plt.subplots(1, 2, figsize=(16, 7))
+    ax1 = axes[0]
+    ax2 = axes[1]
     
-    sc1 = ax1.scatter(d_sm_norms[inlier_mask], opt_cs[inlier_mask], 
-                      c=rmses[inlier_mask], cmap='viridis', alpha=0.6, s=60, label='Inliers')
-    if np.sum(outlier_mask) > 0:
-        ax1.scatter(d_sm_norms[outlier_mask], opt_cs[outlier_mask], 
-                   c='red', marker='x', s=100, linewidths=3, label='Outliers')
-    
-    # Fit line to d_sm_norm vs c
-    d_inlier = d_sm_norms[inlier_mask]
-    c_inlier_d = opt_cs[inlier_mask]
-    if len(d_inlier) > 1:
-        coeffs_d = np.polyfit(d_inlier, c_inlier_d, 1)
-        d_range = np.linspace(d_inlier.min(), d_inlier.max(), 100)
-        c_fit_d = coeffs_d[1] + coeffs_d[0] * d_range
-        ax1.plot(d_range, c_fit_d, 'r--', linewidth=2, alpha=0.7,
-                label=f'Fit: C = {coeffs_d[1]:.2f} + {coeffs_d[0]:.2f}·d_sm')
+    # Plot 1: d_sm_norm vs optimal_c (NEW - shows source-mic distance relationship)
+    # Extract d_sm_norm (only available for per_pair mode)
+    has_d_sm = 'd_sm_norm' in results[0]
+    if has_d_sm:
+        d_sm_norms = np.array([r.get('d_sm_norm', np.nan) for r in results])
         
-        # Compute correlation
-        corr_d = np.corrcoef(d_inlier, c_inlier_d)[0, 1]
-        ax1.text(0.05, 0.95, f'Correlation: {corr_d:+.3f}', 
-                transform=ax1.transAxes, fontsize=10, verticalalignment='top',
-                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
-    
-    ax1.set_xlabel('Normalized Source-Mic Distance (d_sm / V^(1/3))', fontsize=11)
-    ax1.set_ylabel('Optimal C', fontsize=11)
-    ax1.set_title('Source-Mic Distance vs Optimal C', fontsize=12, fontweight='bold')
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-    plt.colorbar(sc1, ax=ax1, label='Min RMSE')
+        sc1 = ax1.scatter(d_sm_norms[inlier_mask], opt_cs[inlier_mask], 
+                          c=rmses[inlier_mask], cmap='viridis', alpha=0.6, s=60, label='Inliers')
+        if np.sum(outlier_mask) > 0:
+            ax1.scatter(d_sm_norms[outlier_mask], opt_cs[outlier_mask], 
+                       c='red', marker='x', s=100, linewidths=3, label='Outliers')
+        
+        # Fit line to d_sm_norm vs c
+        d_inlier = d_sm_norms[inlier_mask]
+        c_inlier_d = opt_cs[inlier_mask]
+        if len(d_inlier) > 1:
+            coeffs_d = np.polyfit(d_inlier, c_inlier_d, 1)
+            d_range = np.linspace(d_inlier.min(), d_inlier.max(), 100)
+            c_fit_d = coeffs_d[1] + coeffs_d[0] * d_range
+            ax1.plot(d_range, c_fit_d, 'r--', linewidth=2, alpha=0.7,
+                    label=f'Fit: C = {coeffs_d[1]:.2f} + {coeffs_d[0]:.2f}·d_sm')
+            
+            # Compute correlation
+            corr_d = np.corrcoef(d_inlier, c_inlier_d)[0, 1]
+            ax1.text(0.05, 0.95, f'Correlation: {corr_d:+.3f}', 
+                    transform=ax1.transAxes, fontsize=10, verticalalignment='top',
+                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        
+        ax1.set_xlabel('Normalized Source-Mic Distance (d_sm / V^(1/3))', fontsize=11)
+        ax1.set_ylabel('Optimal C', fontsize=11)
+        ax1.set_title('Source-Mic Distance vs Optimal C', fontsize=12, fontweight='bold')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        plt.colorbar(sc1, ax=ax1, label='Min RMSE')
+    else:
+        # Fallback if d_sm_norm not available: show H_src with outliers
+        sc1 = ax1.scatter(h_src_norms[inlier_mask], opt_cs[inlier_mask], 
+                          c=rmses[inlier_mask], cmap='viridis', alpha=0.6, s=60, label='Inliers')
+        ax1.scatter(h_src_norms[outlier_mask], opt_cs[outlier_mask], 
+                   c='red', marker='x', s=100, linewidths=3, label='Outliers (C≥6.9, RMSE>0.4)')
+        ax1.set_xlabel('Normalized H_src (H_src / V^(1/3)) [Lower=Corner]', fontsize=11)
+        ax1.set_ylabel('Optimal C', fontsize=11)
+        ax1.set_title('Source Proximity vs Optimal C (Outliers Marked)', fontsize=12, fontweight='bold')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        plt.colorbar(sc1, ax=ax1, label='Min RMSE')
 else:
-    # Fallback if d_sm_norm not available: show H_src with outliers
-    sc1 = ax1.scatter(h_src_norms[inlier_mask], opt_cs[inlier_mask], 
-                      c=rmses[inlier_mask], cmap='viridis', alpha=0.6, s=60, label='Inliers')
-    ax1.scatter(h_src_norms[outlier_mask], opt_cs[outlier_mask], 
-               c='red', marker='x', s=100, linewidths=3, label='Outliers (C≥6.9, RMSE>0.4)')
-    ax1.set_xlabel('Normalized H_src (H_src / V^(1/3)) [Lower=Corner]', fontsize=11)
-    ax1.set_ylabel('Optimal C', fontsize=11)
-    ax1.set_title('Source Proximity vs Optimal C (Outliers Marked)', fontsize=12, fontweight='bold')
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-    plt.colorbar(sc1, ax=ax1, label='Min RMSE')
+    # Only plot the second figure (H_src_norm with fitted models)
+    fig, ax2 = plt.subplots(1, 1, figsize=(10, 7))
 
 # Plot 2: H_src_norm with all three fitted models
-ax2 = axes[1]
 ax2.scatter(h_src_norms[inlier_mask], opt_cs[inlier_mask], 
            c=rmses[inlier_mask], cmap='viridis', alpha=0.6, s=60)
 ax2.set_xlabel('Normalized H_src', fontsize=11)
-ax2.set_ylabel('Optimal C', fontsize=11)
-ax2.set_title('Fitted Models (Inliers Only)', fontsize=12, fontweight='bold')
+ax2.set_ylabel('Optimal c', fontsize=11)
+# ax2.set_title('Fitted Models (Inliers Only)', fontsize=12, fontweight='bold')
 ax2.grid(True, alpha=0.3)
 
 # Plot model predictions
@@ -213,28 +224,31 @@ h_range = np.linspace(h_src_norms[inlier_mask].min(), h_src_norms[inlier_mask].m
 # Linear
 c_pred_linear = model_linear.predict(h_range)
 ax2.plot(h_range, c_pred_linear, 'r-', linewidth=2.5, 
-        label=f'Linear: C = {model_linear.intercept_:.2f} + {model_linear.coef_[0]:.2f}·H (R²={r2_linear:.3f})')
+        label=f'Linear: c = {model_linear.intercept_:.2f} + {model_linear.coef_[0]:.2f}·H (R²={r2_linear:.3f})')
 
 # Polynomial
 h_range_poly = poly_features.transform(h_range)
 c_pred_poly = model_poly.predict(h_range_poly)
 ax2.plot(h_range, c_pred_poly, 'g--', linewidth=2.5, 
-        label=f'Poly: C = {model_poly.intercept_:.2f} + {model_poly.coef_[0]:.2f}·H + {model_poly.coef_[1]:.2f}·H² (R²={r2_poly:.3f})')
+        label=f'Poly: c = {model_poly.intercept_:.2f} + {model_poly.coef_[0]:.2f}·H + {model_poly.coef_[1]:.2f}·H² (R²={r2_poly:.3f})')
 
 # Power
 c_pred_power = a_power * h_range.flatten()**b_power
 ax2.plot(h_range, c_pred_power, 'b:', linewidth=2.5, 
-        label=f'Power: C = {a_power:.2f}·H^{b_power:.2f} (R²={r2_power:.3f})')
+        label=f'Power: c = {a_power:.2f}·H^{b_power:.2f} (R²={r2_power:.3f})')
 
 ax2.legend(fontsize=9, loc='best')
 
 plt.tight_layout()
 
-# Save to experiment directory
-output_dir = os.path.dirname(RESULTS_FILE)
-output_path = os.path.join(output_dir, "c_prediction_analysis.png")
-plt.savefig(output_path, dpi=150)
-print(f"\nPlots saved to {output_path}")
+# Save to experiment directory (if SAVE_FIGURE is True)
+if SAVE_FIGURE:
+    output_dir = os.path.dirname(RESULTS_FILE)
+    output_path = os.path.join(output_dir, "c_prediction_analysis.png")
+    plt.savefig(output_path, dpi=150)
+    print(f"\nPlots saved to {output_path}")
+else:
+    print("\nFigure not saved (SAVE_FIGURE=False)")
 
 # =====================================================================
 # 5. CREATE PREDICTION FUNCTION
@@ -282,12 +296,17 @@ all_models_params = {
     'best_model': best_model_name.lower()
 }
 
-# Save to experiment directory (same as RESULTS_FILE)
-params_file = os.path.join(output_dir, "c_prediction_model_params.json")
-with open(params_file, 'w') as f:
-    json.dump(all_models_params, f, indent=2)
-print(f"\nAll model parameters saved to: {params_file}")
-print(f"Best model: {best_model_name} (R²={best_r2:.4f})")
+# Save to experiment directory (same as RESULTS_FILE) if SAVE_JSON is True
+if SAVE_JSON:
+    output_dir = os.path.dirname(RESULTS_FILE)
+    params_file = os.path.join(output_dir, "c_prediction_model_params.json")
+    with open(params_file, 'w') as f:
+        json.dump(all_models_params, f, indent=2)
+    print(f"\nAll model parameters saved to: {params_file}")
+    print(f"Best model: {best_model_name} (R²={best_r2:.4f})")
+else:
+    print(f"\nJSON not saved (SAVE_JSON=False)")
+    print(f"Best model: {best_model_name} (R²={best_r2:.4f})")
 
 # =====================================================================
 # 6. VALIDATION EXAMPLES

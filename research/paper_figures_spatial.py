@@ -388,8 +388,8 @@ def calculate_and_plot_error_maps(sim_data, output_path: str, reference_method: 
     fig, axes = plt.subplots(1, n_comparisons, figsize=(7 * n_comparisons, 8), squeeze=False)
     axes = axes.flatten()
 
-    all_errors = np.concatenate([data['errors'].flatten() for data in error_maps.values()])
-    vmin, vmax = np.min(all_errors), np.max(all_errors)
+    # Fixed colorbar range for consistent comparisons across different plot runs
+    vmin, vmax = 0.0, 3.5
 
     for i, (comparison_key, data) in enumerate(error_maps.items()):
         mean_error = np.mean(data['errors'])
@@ -422,9 +422,29 @@ if __name__ == "__main__":
     # === DATA SOURCE CONFIGURATION ===
     # Option 1: Legacy mode
     config = DataConfig(mode="legacy", legacy_files=[
-        "aes_FULLGRID_center_source.npz",
-        "aes_FULLGRID_top_middle_source.npz",
+
+        "journal_FULLGRID_center_source.npz",
+        "journal_FULLGRID_top_middle_source.npz",
+        "journal_FULLGRID_upper_right_source.npz",
+        "journal_FULLGRID_lower_left_source.npz",
+
+        # "aes_FULLGRID_center_source.npz",
+        # "aes_FULLGRID_top_middle_source.npz",
+        # "aes_FULLGRID_lower_left_source.npz",
+        # "aes_FULLGRID_upper_right_source.npz",
+
+        # "cube6_FULLGRID_center_source.npz",
+        # "cube6_FULLGRID_top_middle_source.npz",
+        # "cube6_FULLGRID_upper_right_source.npz",
+        # "cube6_FULLGRID_lower_left_source.npz",
+
+        # "aes_quarter_center_source.npz",
+        # "aes_quarter_top_middle_source.npz",
+        # "aes_quarter_upper_right_source.npz",
+        # "aes_quarter_lower_left_source.npz",
+        # "aes_quarter_corner_sourcev3.npz",
     ])
+
     
     # Option 2: Experiment mode (uncomment to use)
     # config = DataConfig(mode="experiment", experiment_name="aes_fullgrid_perpair_srcgrid3x5_corner2.0_per_pair")
@@ -445,9 +465,11 @@ if __name__ == "__main__":
     # REFERENCE_METHOD = 'ISM-pra-rand10'
     # REFERENCE_METHOD = 'ISM'
     # Specify which methods to plot. Leave empty or set to None to plot all.
-    # METHODS_TO_PLOT = ['SDN-Test_3', 'SDN-Test_2', 'SDN-Test1', 'SDN-Test2', 'SDN-Test3', 'SDN-Test4','SDN-Test5',
+    METHODS_TO_PLOT = ['SDN-Test_3', 'SDN-Test_2', 'SDN-Test1', 'SDN-Test2', 'SDN-Test3', 'SDN-Test4','SDN-Test5',
+                       'SDN-Test6', 'SDN-Test7', 'HO-SDN-N2', 'HO-SDN-N3']
+    # METHODS_TO_PLOT = ['SDN-Test-3', 'SDN-Test-2', 'SDN-Test1', 'SDN-Test2', 'SDN-Test3', 'SDN-Test4','SDN-Test5',
     #                    'SDN-Test6', 'SDN-Test7', 'HO-SDN-N2', 'HO-SDN-N3']
-    METHODS_TO_PLOT = ['SDN-Test1', 'SDN-Test2', 'SDN-Test3', 'SDN-Test5']
+    # METHODS_TO_PLOT = ['SDN-Test5']
     # METHODS_TO_PLOT = ["SDN-c_center", "SDN-c_lower_left", 'SDN-Test2.998', "SDN-c_upper_right"]
     # METHODS_TO_PLOT = ['SDN-Test2.998']
     # METHODS_TO_PLOT = ['SDN-fast4_71'] #not fast actually, fyi. name wrong.

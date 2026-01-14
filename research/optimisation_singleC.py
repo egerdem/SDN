@@ -51,9 +51,20 @@ _project_root = os.path.dirname(_script_dir)  # Go up one level from research/ t
 
 # Option 1: Legacy mode (flat file structure)
 config = DataConfig(mode="legacy", legacy_files=[
-    "cube6_FULLGRID_center_source.npz",
+
+    "journal_FULLGRID_center_source.npz",
+    "journal_FULLGRID_top_middle_source.npz",
+    "journal_FULLGRID_upper_right_source.npz",
+    "journal_FULLGRID_lower_left_source.npz",
+
+    # "cube6_FULLGRID_center_source.npz",
     # "cube6_FULLGRID_top_middle_source.npz",
     # "cube6_FULLGRID_lower_left_source.npz",
+
+    # "aes_FULLGRID_center_source.npz",
+    # "aes_FULLGRID_top_middle_source.npz",
+    # "aes_FULLGRID_upper_right_source.npz",
+    # "aes_FULLGRID_lower_left_source.npz",
 ])
 
 # Option 2: Experiment mode (uncomment to use)
@@ -269,7 +280,7 @@ if __name__ == "__main__":
         # Store room info (same for all files)
         if room_info is None:
             room_info = {
-                'name': room_parameters.get('display_name', 'Unknown Room'),
+                'name': room_parameters.get('display_name'),
                 'dimensions': f"{room_parameters['width']}x{room_parameters['depth']}x{room_parameters['height']}",
                 'absorption': room_parameters['absorption'],
                 'duration': duration,

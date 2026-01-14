@@ -1,0 +1,1449 @@
+%\documentclass{article}
+%\usepackage[a4paper, margin=1in]{geometry}
+\documentclass[journal]{IEEEtran}
+\usepackage{amsmath, amssymb}
+\usepackage{graphicx} % Add this to the preamble
+%\usepackage{natbib}
+\usepackage{subcaption}
+\usepackage{cite}
+\usepackage{caption}
+\usepackage{multirow}
+\usepackage{booktabs}
+\usepackage{stfloats}   % lets table* go to bottom if you want [b]
+\usepackage{verbatim} %comments
+\usepackage{makecell}
+\usepackage{xcolor}
+
+\bibliographystyle{IEEEtran}
+
+\begin{document}
+\title{Source-Weighted Scattering Delay Networks}
+\author{Ege Erdem}
+
+\maketitle
+\begin{abstract}
+Scattering Delay Networks (SDNs) are lightweight artificial reverberation algorithms that synthesise full room impulse responses (RIRs) in real time by connecting inter-wall delay lines via unitary, isotropic pressure scattering. They render the direct sound and first-order reflections exactly, while higher-order reflections are generated recursively through repeated scattering. We show that the uniform source injection rule in SDN, inherited from digital waveguide meshes imposes a fixed, room independent attenuation of $1/(N-1)$ on second-order reflections in an $N$-wall cuboid space, leading to diminished early portion of the generated RIRs. We introduce Source-Weighted SDN (SW-SDN) to mitigate the energy loss by replacing the uniform injection vector with a single-parameter, direction-dependent weighting that increases launch specularity of the network, thereby allowing more energy into the system starting from the second-order reflections onward. We derive closed-form expressions that link each weighting to launch specularity, instantaneous injected power, and node pressure evolution, clarifying the trade-offs among alternative injection schemes. Across three simulated rooms the modification reduces the 0–50 ms energy decay curve RMSE to within 0.5 dB of a reference image source method (ISM), while preserving the late reverberation decay rate and the low computational cost of the original algorithm.
+
+%Scattering Delay Network (SDN) is a room acoustics simulation technique motivated by both geometrical and numerical methods in a cost-efficient way to produce artificial reverberation, suitable for real-time immersive audio applications. It renders the first-order reflections correctly whilst approximates the remaining reflections coarsely in a spatio-temporally acceptable range without compromising the perceptual validity and naturalness. This work reveals the root cause of the early energy loss behaviour of SDN and mitigates the problem by weighting the originally uniform source injection. Results show greatly improved energy behavior according to the baseline image source methods (ISM), without affecting the computational complexity and late reverberation benefits of the original SDN framework.
+
+%This work focuses on the intrinsic early energy drop phenomenon in
+%SDN, which is previously observed in \cite{waspaa2023} but did not prevent SDN from providing benefits especially for cost-effective
+%late reverberation simulation. The fundamental cause of the energy loss is examined, possible solutions are proposed. The perceptual importance and effect of early energy decay is investigated -with subjective listening experiments.
+\end{abstract}
+
+\section{Introduction}\label{sec:intro}
+Artificial reverberation remains a cornerstone of spatial audio, architectural acoustics, virtual and augmented reality (VR/AR), interactive gaming, and other immersive media applications. 
+The ability to synthesize perceptually plausible and computationally efficient room acoustics is crucial for creating a convincing sense of presence, realism, and immersion. 
+Artificial reverberators are commonly grouped into \emph{physical modelling}, \emph{convolution‐based}, and \emph{delay‐network} classes~\cite{valimakiFiftyYearsArtificial2012}. Each approach has distinct structural characteristics and trade-offs in perceptual quality, computational cost, and suitability for real-time immersive use.\\
+
+Of these classes, \emph{delay networks} are one of the earliest and most influential approaches. 
+Early variants such as the Schroeder comb–allpass filter architecture and Moorer’s tapped-delay enhancement~\cite{Schroeder1962,Moorer1979} demonstrated that a handful of short recirculating delays could generate a dense exponential decay with modest cost. 
+Stautner and Puckette’s reverberator matrix explicitly cast these structures as a vector feedback system~\cite{StautnerPuckette1982}, and Jot and Chaigne formalised the modern FDN by proving that a unitary feedback matrix guarantees lossless energy circulation and modal uniformity~\cite{Jot1991}. 
+Rocchesso and Smith subsequently showed that a unitary FDN is mathematically equivalent to a single lossless scattering junction connecting $N$ bidirectional waveguides, thus linking FDNs to physical scattering theory~\cite{Rocchesso1997circulant}. 
+More recently, Schlecht and Habets fully characterised the class of diagonally-similar-unitary (lossless) feedback matrices\cite{Schlecht2017lossless}, enabling stable high-order designs and sign-agnostic spatial extensions~\cite{Schlecht2018SignAgnostic}. Building on that groundwork, Alary \emph{et al.} proposed the Directional FDN (DFDN), in which each delay-line group carries Ambisonic channels so that direction-dependent decay times can be imposed~\cite{Alary2020}. 
+Hybrid schemes now combine the FDN with the image source method to retain geometric early reflections while using the network for the diffuse tail~\cite{Wendt2014}. 
+Das and Abel later introduced grouped feedback delay networks that interconnect several FDN sub-blocks to model coupled rooms, reproducing the multi-slope energy decay characteristic of such spaces~\cite{das2021groupedfdn}. 
+In practice, FDNs are valued for their low memory footprint, simple parameter set (delay lengths, feedback gains/filters), and their ability to be tuned to a target reverberation time by inserting gain or frequency-dependent damping in each loop. 
+However, conventional FDNs lack an explicit geometric link to the room: direct sound and early specular reflections must be grafted on via separate FIR taps or hybridised with a geometrical method, and the delay lengths are often chosen heuristically rather than from physical path lengths. Consequently, while FDNs excel at producing a smooth late tail, they can under-represent the directional cues and energy build-up that dominate the first 50–100\,ms of a real room response~\cite{Moorer1979}. Listening tests have shown that these early-reflection cues are critical for perceived naturalness and externalisation~\cite{Djordjevic2020}. 
+
+In parallel to delay network architectures, researchers sought to replicate the underlying physics of sound propagation in enclosed spaces. \emph{Geometrical modelling techniques}, most notably the image source method (ISM) introduced by Allen and Berkley ~\cite{allen_ism_79},
+compute synthetic RIRs by modeling specular reflections as virtual “image” sources mirrored across room walls. These synthetic RIRs can then be used in convolution-based reverberation systems, especially for rectangular rooms where image paths are easy to compute.
+ISM was later generalized by Borish~\cite{borish_84} to handle arbitrary polyhedral room shapes. 
+Such geometrical techniques can produce very realistic early reflections (the first discrete sound arrivals following the direct path), and overall energy decay consistent with real rooms. 
+The accurate rendering of these components is perceptually critical, as the relationship between their energies, known as the Direct-to-Reverberant Ratio (DRR), is a primary acoustic cue that strongly influences the perceived character of a space. This ratio not only serves as a salient cue for estimating sound source distance~\cite{neidhardt2021drr}, but also fundamentally shapes our impression of a room's size, its reverberant qualities, and the clarity of the sound field ~\cite{DRRGriesinger_2009,Zahorik2002, DRRchen2017}. However, geometrical techniques are most reliable only above the Schröder frequency, where wavelengths are short relative to room dimensions. At lower frequencies, wave effects become significant and the models lose accuracy~\cite{Savioja2015_overview}. Moreover, purely geometric models assume infinitely short impulses and
+perfectly specular reflections, and they become computationally
+expensive as the number of reflections (image sources) grows combinatorially with reflection order.
+
+\emph{Convolution-based techniques} can use either recorded or synthesized RIRs convolved with the input signal to produce highly realistic reverb. 
+Convolution reverbs can provide “rich, high-fidelity reverberation” faithful to real spaces~\cite{prawda_2020}. However, they are inherently static. Since an impulse response (IR) corresponds to a fixed space and source/listener configuration, it is impractical to adapt to new environments on the fly or to moving listener positions, without an extensive database of IRs.
+Long IRs also incur high computational cost when using time-domain convolution. FFT-based partitioned convolution mitigates this by reducing system latency by dividing the IR into small blocks, at the cost of increased per-sample processing due to additional FFT overhead~\cite{Wefers2014}. In practice, convolution is popular in studio mixing (using curated IRs of halls, rooms, etc.), but less flexible for interactive applications such as games, VR/AR. Some immersive audio systems do use measured binaural RIRs (BRIRs) for realism, but require careful interpolation or cross-fading between IRs as the listener or source move~\cite{desenaEfficientSynthesisRoom2015}.
+
+\emph{Wave-based numerical methods} sit at the opposite end of the accuracy–efficiency spectrum, offering highly accurate and physically grounded simulations by directly solving the acoustic wave equation. Finite-difference time-domain (FDTD) schemes and finite-element or boundary-element methods can capture complex wave phnomena such as diffraction, interference, and room-mode behaviour, that geometric acoustics cannot~\cite{Bilbao2004}.
+In principle these methods can produce extremely authentic reverberation for arbitrary environments. In practice, though, full-bandwidth 3D
+FDTD room simulation for even a small room demands extremely fine spatial grids and small time-steps, resulting in prohibitively large computation times and memory usage, restricting them to offline computation or low-frequency approximation~\cite{murphy2014source_excitation_fdtd}. To alleviate this cost,
+\emph{digital waveguide meshes} (DWMs) approximate wave propagation with
+networks of scattering junctions on a grid. The idea originated from extending one-dimensional bidirectional digital waveguides~\cite{smith1992physicalmodellingusingdigitalwaveguides} to two-dimensional plates and membranes for musical instrument modelling ~\cite{vanduyne1993mesh}, and has since been applied to numerous fields, including room impulse response (RIR) synthesis, and artificial reverberation~\cite{murphy2007_DWMreview}.
+
+While DWMs are conceptually closer to physics and can incorporate diffusion and dispersion, a high spatial resolution is needed to avoid wave errors, again incurring heavy costs. Karjalainen et al.~\cite{karjalainen2005} therefore proposed a more sparsely connected "reduced" mesh to focus computational effort on perceptually salient propagation paths. In their structure, scattering junctions were placed at first reflection points and connected by delay lines, successfully reproducing the correct timing and amplitude of direct sound and first-order reflections while approximating higher-order reverberation with a recirculating network. This “sparse mesh” bridges physical modelling and algorithmic efficiency but requires careful manual (perceptual) ‘trial-and-error’ tuning of its parameters, and its topology must be re-tailored for each new room, limiting straightforward generalisation.
+
+The quest therefore continued for a reverberation algorithm that combines physical interpretability, perceptual realism, and computational efficiency. The next advance embedded geometric insight into a delay network topology, marrying the image source fidelity of geometrical methods with the efficiency and diffuseness of feedback delay networks (FDNs): \emph{Scattering Delay Network} (SDN), introduced by De~Sena et al.~\cite{SDNaes}, as a physically grounded delay network where each delay equals a wall-to-wall flight time and wall filters are fixed directly by room dimensions and surface properties, yet still supports real-time processing~\cite{SDNjournal}. In essence, an SDN is a drastically pruned digital waveguide network structured to mimic key propagation paths in a room. Like a physical model, it explicitly simulates the direct sound and first-order reflections with correct
+timing and amplitude, and like an FDN, it recycles energy in a feedback network to generate higher-order
+reflections in a statistically dense way. Once the network is excited by an input, energy
+scatters among the wall junctions via bidirectional delay lines connecting them in a loop. As the signal recirculates through the loop, it effectively produces second-order and higher order
+reflections in a progressively approximate manner: each cycle around the loop creates another wall bounce whose exact total travel distances are not individually modeled but whose aggregated
+effect (in terms of dense, exponentially decaying echoes) imitates a realistic late reverberation. In a non-interactive listening test, Djordjević \textit{et al.}~\cite{Djordjevic2020} compared an SDN reverberator with measured binaural RIRs, a ray-tracing simulation, and a conventional FDN. 
+The SDN was rated the most natural of the methods evaluated. Atalay \textit{et al.}~\cite{timu} showed that several SDN networks can be connected to model a coupled-volume SDN (CV-SDN). By linking the sub-rooms through an aperture of adjustable size, the model accurately reproduces the characteristic double-slope decay of coupled spaces. Recent work by Vinceslas \textit{et al.} has extended SDN beyond its original “first-order-only” accuracy by hybridising it with the image source method. 
+In the resulting Higher-Order SDN (HO-SDN), the direct path and all specular reflections up to a chosen order $K$ are injected explicitly, while the network takes over at order $K$ and produces the diffuse late reverberation. 
+The extra tapped-delay lines required for these early reflections grow with the number of required image sources per chosen order $K$, and not with the full impulse-response length. 
+Consequently, the computational overhead remains small, yet the method reproduces every specular reflection up to order $K$ with image-source accuracy~\cite{SDNwaspaa}. 
+The same paper also documented the unexpected energy drop observed in the early reflections for the first time, and left it as a future work. To date, no study has yet analysed why the standard SDN exhibits a systematic early-energy drop relative to ground-truth RIRs. 
+This paper investigates this phenomenon and introduces a directional \emph{source-weighted injection} that restores early energy without sacrificing the low-cost, diffuse late tail of the original SDN. The original SDN framework is reviewed in Section~\ref{sec:background}. 
+The early energy deficit is analysed and demonstrated in Section~\ref{sec:energy_drop_problem}.  Section~\ref{sec:proposed_approach} details the proposed source-weighting strategy, while Section~\ref{sec:results} presents objective evaluations. Conclusions and future directions are drawn in Section~\ref{sec:conclusion}.
+
+\section{Background}
+\label{sec:background}
+\subsection{Scattering Delay Networks}
+
+Scattering Delay Networks (SDNs) are efficient room acoustics
+simulators that are directly
+parameterized by the physical properties of the enclosure,
+specifically, the room dimensions, wall absorption coefficients and
+the positions of the source and receiver.  
+In SDN, each wall is approximated by a scattering node located at the
+point where the first-order reflection bounces (see Fig.\ref{fig:sdn_2d}). 
+
+\subsection{Scattering Nodes}
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.7\linewidth]{figs/sdn_2d.png}
+    \caption{\it Signal propagation topology of SDN \cite{SDNjournal}. Solid black lines represent
+    bidirectional delay lines linking the wall nodes, where S symbolizes the scattering matrix. Dash-dot lines indicate unidirectional
+    absorptive delay lines from the source to the nodes. Dashed lines show unidirectional
+    absorptive delay lines from the nodes to the microphone. The dotted line represents the
+    direct-path component.}
+    \label{fig:sdn_2d}
+\end{figure}
+The acoustic energy exchange within the enclosure is modeled through a network of bidirectional
+delay lines that connect \(N\) wall nodes. The delay line length \(D_{k,j}\) between the nodes
+\(k\) and \(j\) is determined by the distance between the nodes:
+
+\begin{equation}
+\label{eq:delay_line}
+D_{k,j} = \left\lfloor \frac{F_s \|x_{k} - x_{j}\|}{c} \right\rfloor
+\end{equation}
+%
+where \(c\) is the speed of sound and \(F_s\) is the
+sampling rate. Each node functions as a scattering junction that
+redistributes incoming acoustic waves \(p_i^+(n)\) among its \(N-1\)
+neighboring connections through a fixed unitary scattering matrix:
+%
+\begin{equation}
+\label{eq:S}
+\mathbf{S} = \frac{2}{N-1}\mathbf{1}_{(N-1)\times(N-1)} - \mathbf{I}_{(N-1)\times(N-1)}
+\end{equation}
+%
+where \(\mathbf{1}_{(N-1)\times(N-1)}\)s is a matrix of ones and 
+\(\mathbf{I}\) is the identity matrix. This recursive scattering
+propagation mechanism automatically approximates higher-order
+reflections without requiring explicit path calculations, offering
+significant computational advantages over ray-tracing or image-source methods.
+
+SDN allows for two approaches for modeling wall absorption. \textbf
+{Frequency-independent} absorption uses absorption
+ coefficients \(\alpha\), with reflection coefficients \(\beta = \sqrt
+ {1-\alpha}\), corresponding to the wall. These reflection coefficients
+can be incorporated into the scattering process through a diagonal
+attenuation matrix \(\mathbf{A}_k =\beta_k\mathbf{I}_{(N-1)\times(N-1)}\) where \(\beta_k\) is the reflection coefficient of the wall node \(k\).
+This attenuation matrix can be incorporated into the scattering matrix,
+effectively creating an updated scattering matrix 
+\(\mathbf{S}_{\text{eff}} = \mathbf{A} \cdot \mathbf{S}\)
+
+For more accurate modeling, \textbf{frequency-dependent} absorption can
+be achieved with minimum-phase IIR filters~\cite{SDNjournal}. In this approach, 
+wall $k$ is assigned a filter \(H_k(z)\) that models its frequency-dependent
+absorption characteristics, and is applied to the incoming pressure
+waves. In this paper, frequency-independent wall absorption will be used to focus on the root cause of intrinsic energy loss, which, as we will show, is a result of the SDN structure.
+
+\subsection{Wave Variable Formulation}\label{sec:wave_variable_formulation}
+At each discrete time step \(n\), a wall node \(k\) processes incoming
+waves from two distinct type of sources: direct sound from the
+source and reflected waves from neighboring nodes. The single incoming
+wave variable from direction \(i\) to node \(k\) is formulated as:
+
+\begin{equation}
+\label{eq:incoming_wave}
+\tilde p_{ki}^+[n] = p_{ki}^+[n] + \frac{p_{S}[n]}{2}
+\end{equation}
+%
+where \(p_{S}(n)\) represents the direct wave propagating from
+source to node \(k\), and \(p_{ki}^{+}(n)\) denotes the wave reflected from
+node \(i\) to node \(k\). Notably, half of the source
+pressure \(p_{S}\) is inserted into each incoming neighbor direction.
+At any given time index, a node processes $N-1$ distinct
+contributions through the total incoming wave:
+%
+\begin{equation}
+\label{eq:p_tilde}
+\tilde{\mathbf{p}}_k^+ = \mathbf{p}_k^+ + \frac{p_{S}[n]}{2}\,\mathbf{1}_N\quad \in \mathbb{R}^{K-1}
+\end{equation}
+%
+where $\mathbf{1}_{N-1}$ denotes a column vector of ones with length $N$.
+This vector undergoes transformation to produce the outgoing wave vector through the scattering operation:
+    
+\begin{equation}
+\label{eq:scattering_operation}
+{\mathbf{p}}_k^- = \mathbf{S}_{\text{eff}}\tilde{\mathbf{p}}_k^+
+\end{equation}
+%
+where \(\mathbf{p}_{k}^- = [p_{1}^-, \ldots, p_{K-1}^-]^T\) denotes the outgoing wave vector.
+
+A fundamental property of the SDN framework is its recursive nature,
+stemming from the integration of source pressures into the incoming
+delay lines and the scattering operation happening at nodes. 
+Consequently, nodes process the aggregate incoming pressure without
+distinguishing between direct source contributions and reflected
+neighbor components.
+
+While the outgoing wave vector propagates through the network via delay
+lines, the pressure state of node \(k\) at time \(n\) is calculated 
+by applying a scaled summation to the aggregate incoming pressure variables:
+
+\begin{equation}
+\label{eq:node_pressure}
+p_k[n] = \frac{2}{N-1} \sum_{i=1}^{N-1} \left(p_{ki}^+[n] + \frac{p_{S}[n]}{2}\right)
+\end{equation}
+
+Node pressure is then sent to the microphone with:
+
+\begin{equation}
+\label{eq:node_to_mic_gain}
+p_{k,r}[n] = p_k[n] \cdot g_{k,r}
+\end{equation}
+%
+where \(g_{k,r}\) is the node-to-receiver gain explained in Section \ref{sec:distance_based_attenuations}.  
+
+In summary, ~\eqref{eq:incoming_wave} calculates the total pressure received by a node from specific directions, which is then transformed by~\eqref{eq:scattering_operation} to be redistributed to outgoing neighboring directions, and this process is recursively repeated. At the same time,~\eqref{eq:node_pressure} computes the total pressure state of a node and send to receiver. The process will be examined further in Section~\ref{sec:pressure_distribution} to understand the energy circulation characteristics of SDN.
+
+
+\subsection{Distance-Based Losses}
+\label{sec:distance_based_attenuations}
+
+SDN incorporates physically-motivated loss factors to account for distance-dependent
+energy losses simulating spherical spreading. Unidirectional delay lines
+connect the source to each node with a gain factor \(g_{s,k}\):
+
+\begin{equation}
+\label{eq:source_node_gain}
+g_{s,k} = \frac{G}{|x_s - x_k|}
+\end{equation}
+
+where \(x_s\) and \(x_k\) represent the positions of the source and the
+node, respectively. The constant \(G = c/Fs\) is the unit-distance
+representing the minimum distance that sound propagates in one sample,
+which ensures the sound is never amplified for the smaller distances. 
+
+Similarly, the node-to-receiver gain is formulated as:
+
+\begin{equation}
+\label{eq:node_receiver_gain}
+g_{k,r} = \frac{1}{1 + \frac{|x_k - x_r|}{|x_s - x_k|}}
+\end{equation}
+
+This expression ensures that the amplitudes of first-order reflections
+maintain geometric accuracy by multiplying the source-to-node and node-to-receiver gains in series. The
+combined distance-based gain along an any complete path is therefore the
+product of the source-to-node gain and the node-to-receiver gain:
+
+\begin{equation}
+\label{eq:combined_gain}
+g_{s,k} \cdot g_{k,r} = \frac{G}{|x_s - x_k| + |x_k - x_r|}
+\end{equation}
+
+
+% ================================================================
+\subsection{Higher-Order SDN (HO-SDN)}
+% ================================================================
+The \emph{standard} SDN of Sec.~\ref{sec:wave_variable_formulation}
+injects the source through one delay line per wall node
+~\eqref{eq:incoming_wave}; the construction therefore reproduces
+the direct wave \((o = 0)\) and the six first-order reflections
+\((o = 1)\) with the exact spherical-spreading loss ~\eqref{eq:combined_gain}.
+
+For any image path \(r\) of order \(o > 1\) the last reflection still
+impinges on some wall node \(k(r)\), yet its
+\emph{source–to–node} distance  
+\(\alpha_{k,r} = \lVert x_s^{(r)} - x_{k(r)} \rVert\)
+depends on the individual image position \(x_s^{(r)}\).
+Consequently many different \(\alpha_{k,r}\) values share the
+\emph{same} node–to–receiver distance \(\beta_k\).
+With the original distance split of
+Eqs.~\eqref{eq:source_node_gain}–\eqref{eq:node_receiver_gain} it is
+impossible to choose a single \(g_{k,r}\) that satisfies every path
+simultaneously.
+
+% -----------------------------------------------------------------
+To overcome this limitation HO-SDN treats the reflections in two
+groups for a chosen accuracy order \(N\):
+
+\begin{itemize}
+\item \textbf{Exact early reflections.}\;
+      Each path \(r \in \mathcal{R}_o\;(o < K)\) is rendered by a tapped
+      delay line that runs straight from the source to the receiver with
+      the path delay \(\delta_r/c\) and distance attenuation \(1/\delta_r\).  
+      These taps bypass the recursive network, so they do not interact
+      with the scattering nodes.
+
+\item \textbf{Order–\(K\) reflections feeding the SDN.}\;
+      Every order-\(K\) image is injected into the wall node of its last
+      reflection.  Because the cuboid room has six walls, each node
+      receives \(5^{N-1}\) additional inputs, totalling
+      \(6 \times 5^{N-1}\) new source–to–node delay lines.  
+      Paths of order \(o \ge K+1\) are then produced recursively in the
+      usual way.
+\end{itemize}
+
+HO-SDN resolves the multiple–\(\alpha\) problem by swapping the
+original attenuation factors \eqref{eq:source_node_gain} and \eqref{eq:node_receiver_gain}:
+
+\begin{equation}\label{eq:ho_losses}
+g_{s k}^{(N)} = \frac{1}{1 + \dfrac{\alpha_{k,r}}{\beta_k}},\quad
+g_{k r}^{(N)} = \frac{1}{\beta_k},\quad
+g_{s k}^{(N)} g_{k r}^{(N)} = \frac{1}{\alpha_{k,r} + \beta_k}
+\end{equation}
+
+The path-specific corrective term now resides in the
+\emph{source-to-node} branch, which is unique for each image, whereas
+the simple \(1/\beta_k\) attenuation—common to all waves leaving the
+node—remains on the node-to-receiver branch.  Equation
+\eqref{eq:ho_losses} therefore restores the exact spherical-spreading
+loss for every order-\(N\) path.
+
+\textcolor{purple}{
+The six wall nodes of the original SDN are retained; only the
+number of source inputs increases to \(6 \times 5^{N-1}\).
+If \(K = 1\) no extra lines are required, and HO-SDN collapses t
+o the
+standard formulation with the gains of
+Eq.~\eqref{eq:combined_gain}.
+}
+For \(K > 1\) the scheme yields exact
+amplitudes for \emph{all} reflections up to order \(K\) while leaving
+the recursive scattering structure unchanged.
+
+\section{Investigation of Energy Loss in SDN}
+\label{sec:energy_drop_problem}
+This work investigates the root cause of the sudden energy drop in the early reflections in SDN and proposes an altered source injection approach to mitigate the problem.
+To demonstrate the issue, we analyze how source pressure is distributed through the network by tracking the injected energy into the system.
+
+\subsection{Tracking the Source Pressure}
+\label{sec:pressure_distribution}
+
+The scattering operation and node pressure calculation explained in 
+Section~\ref{sec:wave_variable_formulation} can be unified in a single expression:
+
+\begin{equation}
+\label{eq:augmented_matrix}
+\begin{bmatrix}
+    \mathbf{S} & \frac{1}{2}\mathbf{1}_{N-1} \\
+    \frac{2}{N-1}\mathbf{1}_{N-1}^T & 1
+\end{bmatrix}
+\begin{bmatrix}
+\mathbf{p_k^+} \\
+p_{S}
+\end{bmatrix}
+=
+\begin{bmatrix}
+\mathbf{p_k^-} \\
+p_k
+\end{bmatrix}
+\end{equation}
+
+where $\mathbf{S}$ is the $(N-1) \times (N-1)$ scattering matrix,  $1/2$ is the constant coefficient scaling the source pressure $p_{S}$ received at node $k$, and $\mathbf{p_k^+}$ is the vector of incoming waves from neighboring nodes, without any source contribution lumped. The augmented matrix in the left-hand side now combines:
+\begin{itemize}
+    \item The scattering matrix $\mathbf{S}$ that redistributes incoming waves
+    \item The source injection vector $\frac{1}{2}\mathbf{1}_{N-1}$ that lumps and distributes source pressure to neighboring directions
+    \item The pressure summation vector $\frac{2}{N-1}\mathbf{1}^T$ that calculates the node pressure
+\end{itemize}
+
+The source injection vector $\frac{1}{2}\mathbf{1}_{N-1}$ distributes the source signal uniformly across all incoming neighbor directions. The uniform injection simulates simultaneous reflections from all walls although the source wave has not actually reached any wall surfaces yet. Further explanation is provided in Section~\ref{sec:physical_relevance}.
+
+Right hand side of Eq.~\ref{eq:augmented_matrix} shows the resultant pressure value of each $(N-1)$ outgoing wave as the column vector $\mathbf{p_k^-}$, and the overall pressure state of node $k$ as $p_k$, which is sent to the receiver. 
+The receiver pressure is formed by scaled sum of the outgoing (reflected) waves, where the sum is equal to the sum of incoming waves due to the unitary structure of the scattering matrix. 
+
+As pressure calculations are done for each time step $n$, outgoing pressures become the incoming pressures for other nodes at next time steps, and the process is repeated until the simulation ends. 
+The first-order paths involve direct source-to-node propagation without node-to-node scattering.
+Thus, influence of the scattering network and source injection start at second-order reflections and beyond, when signals begin to propagate between nodes.
+
+To demonstrate how energy reaching the receiver is affected by the pressure equations, we consider a Dirac impulse with unit amplitude (i.e., $p_{S}[n] = 1$ for $n = 0$ and $p_{S}[n] = 0$ for $n \neq 0$) as the source signal. Simple cuboid room with $N=6$ (number of walls) is used throughout the paper. To isolate the problem only to the source injection and scattering operations, wall absorption and distance-based attenuations are removed (set to 1) in subsequent pressure analyses.
+
+\textbf{For the first order paths} $[source-node_{\text{k}}-mic]$, incoming waves from other nodes to node \(k\) are zero, $\mathbf{p}_k^+ = \mathbf{0}$. Since there are no separate source to node connections (i.e delay lines), the source signal is uniformly injected into each incoming neighbor wave $\tilde p_{ki}^+$, with a factor of $\frac{1}{2}$. 
+Then the intended source pressure at the node, $p_{k}$ (i.e the overall pressure state of node \(k\) at that time instant), is calculated as equal to the input dirac impulse,  $p_k=1=p_{S}[0]$, which is the expected pressure at the recevier, in the absence of any absorption or attenuation:
+
+\begin{equation}
+    \label{eq:matrix_formulation}
+\begin{bmatrix}
+    \mathbf{S} & \frac{1}{2}\mathbf{1}_{N-1} \\
+    \frac{2}{N-1}\mathbf{1}_{N-1}^T & 1
+\end{bmatrix}
+\begin{bmatrix}
+\mathbf{0} \\
+1
+\end{bmatrix}
+=
+\begin{bmatrix}
+\frac{1}{2}\mathbf{1}_{N-1} \\
+1
+\end{bmatrix}
+\end{equation}
+
+Eq.~\ref{eq:matrix_formulation} also shows that the outgoing wave vector is not changed by the scattering operation and stayed as $\mathbf{p}_k^- = \mathbf{p}_k^+ = \frac{1}{2}\mathbf{1}_{N-1}$,
+due to the energy-preserving structure of the scattering matrix. This means that each neighbor node receives the same portion of the source signal,  $\frac{p_S=1}{2}$, reflected from node \(k\). 
+%Generalizing this, any input vector $\mathbf{p}_k^+$ formed by same elements will go over a unitary transformation by S as the scattering matrix has circularly rotated rows, averaging the input vector.
+
+\textbf{For the second order paths,} consider the outgoing wave in the direction of node \(j\) which is the closest node to the current node \(k\). 
+By the time the reflected wave with amplitude \(p_{kj}^-(n)= \frac{1}{2}\) reaches node \(j\), there are no other non-zero incoming waves present at node \(j\). 
+This temporal isolation occurs because each path has a unique delay line length determined by the sampling rate and the physical distances between nodes, resulting in minimal temporal overlap between arrivals during the early reflection phase. 
+Therefore, the incoming wave vector to node \(j\), formed by the neighboring nodes can be represented as $\mathbf{p_j^+} = [\frac{1}{2}, 0, 0, 0, 0]^T$, 
+where the nonzero value is at the index corresponding to the direction of the neighbor node \(k\). The specific placement of the index of node \(k\) is arbitrary and could be at any other index as each node has the same scattering matrix but with indices representing its current neighbors.
+With the example vector $\mathbf{p_j^+}$, we are tracking one of the outgoing branches of node \(k\) which carries the pressure to node \(j\). At this instant where node \(j\) receives its only nonzero pressure transmitted to itself via node \(k\), all of the other incoming branches carry zero pressure. Consequently, $\mathbf{p_j^+}$ undergoes the scattering operation to determine the new outgoing pressures distributed from node \(j\) to its neighbors, as $\mathbf{p_j^-}=[-0.3, 0.2, 0.2, 0.2, 0.2]^T $. At the same time, $\mathbf{p_j^+}$ results in a node pressure of ${p_j}= \frac{1}{5}$, which is sent to the receiver. In summary, \(p_j= \frac{2}{N-1} \cdot \frac{p_{S}=1}{2} = \frac{1}{5}\) naturally appears due to the constant coefficient of the scattering matrix and the source injection factor as: 
+
+\begin{equation}
+\label{eq:second_order_pressure}
+\underset{N \times N}{\begin{bmatrix}
+    \scalebox{1.5}{$\mathbf{S}$} & \frac{1}{2}\mathbf{1} \\
+    \frac{2}{5}\mathbf{1}^T & 1
+\end{bmatrix}}
+\underset{N \times 1}{\begin{bmatrix}
+[\frac{1}{2}, 0, 0, 0, 0]^T \\
+0
+\end{bmatrix}}
+=
+\underset{N \times 1}{\begin{bmatrix}
+%\vdots
+\mathbf{p_j^-}
+\\
+p_j=1/5
+\end{bmatrix}}
+\end{equation}
+
+This calculation demonstrates how the source signal amplitude immediately drops from unit amplitude \(1 \cdot p_{S}\) to \(\frac{1}{5} \cdot p_{S}\) at the second reflections, the first instance where the SDN applies its recursive
+distribution mechanism. During the very first pulses, incoming wave arrays typically contain only one non-zero elements, making the pressure tracking easier to validate upon examining the generated impulse responses excluding the wall and distance attenuations. \textcolor{purple}{
+Figure~\ref{fig:rir_noabs} illustrates this behaviour for the
+original SDN and two SW-SDN variants proposed in this paper (see \ref{sec:proposed_approach}).
+}
+All distance gains and wall absorptions are set to unity so that the only
+attenuation present is the intrinsic decrease that arises
+from the scattering operations and the architecture of the recursive network. The green rectangle encloses the six first reflections, whose amplitudes are $1\!\cdot\!p_S$, as expected due to removed attenuations. One recursion later
+(yellow rectangle) the dominant second-order pulse appears with amplitude
+$\tfrac{1}{5}\,p_S$, confirming the factor derived above.
+At this very early stage each node receives only a single
+non-zero incoming wave, making the $1/(N{-}1)$ drop clearly visible.
+After a few more samples multiple branches begin to arrive
+simultaneously, incoming arrays with multiple non-zero elements begin to appear. 
+Because all absorptive mechanisms are disabled in this plot, the energy
+injected by the impulse is perfectly conserved and recirculates
+indefinitely among the nodes, producing the constant-level late tail
+seen for the whole simulation duration.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figs/rir_noabs.png}
+  \caption{RIRs computed for Room A (see Table~\ref{tab:rooms_single}), with no wall or distance losses. The light green rectangle marks the first order reflections (unity for all traces); the yellow band highlights the first second–order reflections arriving at the microphone. The derived energy drop factor of original SDN, $0.2$, can be observed inside the yellow band.}
+  \label{fig:rir_noabs}
+\end{figure}
+
+
+%((For the specific room geometry under consideration, this temporal isolation of arrivals persists for approximately the first 24 reflections.)) 
+
+A crucial insight out of this analysis is that, for the original SDN framework, the \(\frac{1}{N-1}\) pressure scaling factor occurs at the second order reflections (i.e the first outputs of the recursive part), indepedently from the room dimensions, source and receiver positions, absorptions, and distance attenuations.
+The detailed analysis and numerical relationship between the source injection distribution and the energy circulating in the network is presented in Section \ref{sec:source_weighting_strategy}, which provided the motivation for the proposed approach.
+
+Section~\ref{sec:energy_drop_problem} reveals fundamental phenomenon shaping the behavior of the SDN framework:
+
+\textbf{The source injection} distributes the source signal equally to \(N-1\) incoming (and consequenty to the outgoing) directions, which effectively treats the source as if it were reflected from the neighboring walls. This implicitly assumes the wave has
+already encountered all neighboring surfaces, and will reflect to all neighbors uniformly even at the first reflection, contrary to physical reality where initial reflections are predominantly specular. Lumping the source signal into all incoming directions is the way SDN manage to operates recursively. 
+Even if the source signal is distributed non-uniformly or specularly, \textbf{the scattering matrix} will still transform the incoming waves into a non-fully-specular outgoing wave vectors.
+This is because the scattering matrix is designed to redistribute energy among all directions, allowing it to simulate higher-order reflections without explicit path calculations. 
+However, this redistribution lead to excessive energy loss in early reflections with the original source injection strategy.
+Specifically, when only a single direction contains energy (as in early reflections), 
+the redistribution necessarily reduces the amplitude in any single outgoing direction in an excessive manner,
+resulting in energy drop immediately after first-order reflections, as observed in~\cite{SDNwaspaa}.
+Note that, since no node-to-node distance-based attenuation is applied in the SDN, the only mechanism that can reduce the amplitude of the outgoing wave during its successive wall reflections, other than wall absorption, is the scattering operation.
+However, there is no control or previous analysis over the amount of
+energy that is redistributed to each direction.
+    
+Consequently, the direct wave from the source is immediately spread out in SDN, rather than being directed towards a single specular reflection as would occur in a real room. 
+In Chapter~\ref{sec:proposed_approach}, alternative source injection strategies are investigated and proposed to mitigate the issue to obtain a more realistic early reflection behavior, without sacrificing the diffuse late reverberation and the low-cost recursive nature of the SDN framework.
+
+\section{Proposed Approach: Source-Weighted Injection (SW-SDN)}
+\label{sec:proposed_approach}
+Sec.~\ref{sec:energy_drop_problem} demonstrated that the standard SDN formulation, characterized by uniform source pressure injection~\eqref{eq:incoming_wave} and subsequent scattering~\eqref{eq:scattering_operation}, leads to a significant and geometry-independent pressure drop (scaling by 1/5 for any cuboid room) at the second-order reflections~\eqref{eq:second_order_pressure}. 
+This occurs because the initially diffuse source injection, when combined with the uniform energy-redistributing nature of the isotropic scattering matrix S, results in diminished wave amplitudes propagating into the recursive network. While the scattering matrix itself is essential for simulating the diffuse field, the uniform source injection introduces further diffuseness to the second order reflections and create overly rapid early energy decay. The specific distribution of this injection and its effect on early energy circulation has not been previously controlled or parameterized.
+
+To mitigate the energy loss, we propose the Source-Weighted SDN (SW-SDN) approach, which modifies the source injection strategy to be less diffuse and more aligned with specular reflection principles by controlling the uniformity of the source injection distribution, thereby influencing the energy propagation during the critical~\cite{karjalainen2005,Barron1988} early reflection phase.
+\textcolor{purple}{
+Remainder of the section explains the modified pressure equations and analyze the numerical effects of various source weightings and 
+different weighthing strategies
+}
+on the energy circulation in the network and how it can be used to control the early reflection behavior. 
+
+\subsection{Specular Weighting Strategy}
+\label{sec:source_weighting_strategy}
+
+In SW-SDN, we introduce a direction-dependent “specular” weighting of the source pressure, replacing the uniform distribution inherent in~\eqref{eq:incoming_wave}. For each node \(k\), we assign a coefficient vector \(\mathbf{c} = [c_1, c_2, \ldots, c_{N-1}]^T\) that governs how the raw source pressure \(p_{S}\) is split among the \(N-1\) incoming directions. The total pressure \(p_{ki}^+\) arriving at node \(k\) from the direction associated with node \(i\) is now:
+
+\begin{equation}
+    \label{eq:incoming_wave_easy}
+    \tilde p_{ki}^+[n] = p_{ki}^{+}[n] + \frac{p_{S}[n]}{2} \cdot c_{i}
+\end{equation}
+%
+where \(p_{ki}^{+}(n)\) is the wave arriving from neighboring node \(i\) due to previous scattering events, and \(c_{i}\) is the source pressure weighting coefficient for the contribution of the direct source signal \(p_{S}\) as if it is arriving from direction \(i\). Consequently, the vector form \eqref{eq:p_tilde} becomes:
+
+\begin{equation}
+\label{eq:p_tilde_new}
+\mathbf{\tilde p_{k}^{+}}
+= \mathbf{p_{k}^{+}}
++ \frac{p_{S}[n]}{2}\cdot\mathbf{c}\,\quad \in \mathbb{R}^{N-1}
+\end{equation}
+
+The node pressure \(p_k[n]\) is then calculated as:
+
+\begin{equation}
+    \label{eq:node_pressure_easy}
+    p_k[n] = \frac{2}{N-1} \sum_{i=1}^{K-1} \left(p_{ki}^+[n] + \frac{p_{S}[n]}{2} \cdot c_{i}\right)
+\end{equation}
+
+For $c_i = 1$, for all $i$, these pressure calculations remain identical to the original SDN. Recall that \textbf{the source pressure is lumped into the incoming wave variables in SDN}, and later redistributed by the scattering matrix. 
+This implies that, to control the directional dominance of outgoing wave distribution, we need to control the incoming wave distribution.
+
+\textbf{Constraint 1: Maintaining correct first-order pressures.}
+To ensure that the first-order node pressure correctly reflects the source amplitude regardless of the choice of $c$, we enforce the following constraint:
+
+\begin{equation}
+    \label{eq:constraint_ci}
+    \sum_{i=1}^{N-1} c_i = N-1
+\end{equation}
+%
+such that the calculated node pressure $p_{k}$ due to first source arrivals ($p_{ki}^{+} = 0$) remains correctly equal to the incoming source pressure $p_{S}(n)$: 
+
+\begin{equation}
+    \label{eq:node_pressure_swsdn_first}
+    p_k[n] = \frac{2}{N-1} \sum_{i=1}^{N-1} \left( 0 + c_{i} \cdot \frac{p_{S}[n]}{2}\right) = p_{S}[n]
+\end{equation}
+
+\begin{comment}
+Alternatively, this constraint can be derived using the vector notation of the node pressure equation \eqref{eq:node_pressure_easy} as: $p_k = \mathbf{w^T \tilde p^+_k}$, where the node pressure scaling constant $w=\frac{2}{N-1}$ is used as the microphone withdrawal vector $ \mathbf{w} = w \mathbf{1}_{N-1} $. For the first source arrival, $\mathbf{p^+_k} = 0$ and $\mathbf{\tilde p_k^+} = \frac{p_{S}}{2}\mathbf{c}$. The condition $p_k = p_{S}$ thus implies:
+
+\begin{equation}
+    \label{eq:node_pressure_first_order}
+    p_k=\mathbf{w^T}(\frac{p_{S}}{2}\mathbf{c}) = p_{S} \Longrightarrow 
+    \mathbf{w^T}\mathbf{c} = 2
+\end{equation}
+
+Substituting the original $\mathbf{w}$ yields the constraint:
+
+\begin{equation}
+\left( \frac{2}{N-1} \mathbf{1}^T \right) \mathbf{c} = 2 \quad \Longrightarrow \quad \mathbf{1}^T \mathbf{c} = N - 1 
+\end{equation}
+\end{comment}
+
+With the imposed constraint, the sum of the source injection coefficients matches that of the original SDN, ensuring correct first-order node pressure calculation, though its directional distribution changes. This distribution can be controlled by $c_i$ to be more specular or diffuse by adjusting the relationship between the coefficients associated with the target (dominant) direction and non-target (non-dominant) directions. This way, we aim to prioritize specific wall nodes, allowing an increased specular initiation of the node-to-node network.
+
+%\vspace{0.3em} \paragraph*{Dominant direction}
+%The index of the target (dominant) direction, \(i_{d}\), can be selected:
+%- randomly among the outgoing diractions, or,
+%- selected among the fixed set of \(N-1\) candidate neighbors, that minimizes the angular deviation \(\left|\theta_{sk} - \theta_{kj}\right|\), where \(\theta_{sk}\) is the incidence angle from source to node \(k\), and \(\theta_{kj}\) represents the reflection angle of node \(k\) to candidate node \(j\), given in \eqref{eq:specular_id_selection}. The selected index \(i_{d}\) represents the closest discrete approximation to the geometrical, mirror-like specular reflection. In SDN, since all node positions are fixed and same for all reflection orders, source-node and node-node reflection angles are pre-computed once during initialization, 
+
+\textit{Dominant direction:} The index of the dominant outgoing branch, \(i_d\), can be chosen in two
+ways:
+
+\begin{enumerate}
+  \item \textbf{Random:} pick \(i_d\) uniformly at random from the
+        \(N-1\) outgoing directions, yielding a stochastic but
+        unbiased launch pattern.
+  \item \textbf{Specular:} pick the neighbour that minimises the angular
+        deviation
+        \(\lvert\theta_{sk}-\theta_{kj}\rvert\), where
+        \(\theta_{sk}\) is the incidence angle from the source to node
+        \(k\) and \(\theta_{kj}\) is the reflection angle from node
+        \(k\) toward candidate node \(j\):
+        \begin{equation}
+        \label{eq:specular_id_selection}
+        i_{d} = \mathop{\mathrm{arg,min}}\limits_{j \in {K-1}} , \left| \theta_{sk} - \theta_{kj} \right|
+        \end{equation}
+        This gives the closest discrete approximation to a
+        mirror-like specular path.  Because SDN node positions are
+        fixed, all source–node and node–node angles can be
+        pre-computed once at initialisation, enabling constant-time lookup during simulation. For the same reason, the target direction will only be a coarse approximation of the true specular direction. The discrepancy depends on the first order image source locations (i.e node positions) which are governed by source and receiver positions, as well as the room geometry.
+\end{enumerate}
+
+\textit{One-parameter family.}
+A convenient way to steer the specularity of the source signal is to single out one “dominant” direction and assign it a coefficient c, while distributing the residual weight \(c_{\text{n}}\) equally across the remaining the remaining \(N-2\) “non-dominant” directions. This preserves the uniformity among non-target paths, maintaining resemblance to the original SDN.
+
+The constraint~\eqref{eq:constraint_ci} dictates the relationship between c and \(c_{\text{n}}\):
+
+\begin{equation}
+\label{eq:constraint_ci_simplified}
+ (N-2) \cdot c_{\text{n}} + c = N-1 \implies c_{\text{n}} = \frac{N-1-c}{N-2} = \frac{5-c}{4}
+\end{equation}
+
+Table~\ref{tab:c_properties} shows the values of the single parameter \(c\) and corresponding \(c_{\text{n}}\)'s for a cuboid room \((\text{hence }N=6)\). 
+When \(c=1\) (hence \(c_{\text{n}}=1\)), the injection is fully diffuse (original SDN); when \(c=5\), it is purely specular (all energy is assigned to the incoming target branch while non-dominant neighbors assigned $c_{\text{n}}=0$). 
+Intermediate values trade diffusion for directionality.
+
+However, the directional distribution of the incoming wave vector $ \mathbf{\tilde p}_k^+$, governed by the vector $\mathbf{c}$, does not necessarily coincide with that of the outgoing wave vector $\mathbf{p}_k^-$, since the scattering matrix $S$ enforces an isotropic redistribution of its inputs via \eqref{eq:scattering_operation}. For a fixed 
+$S$, the desired distribution of $\mathbf{p}_k^-$ can only be obtained by manipulating the distribution of $\mathbf{\tilde p}_{k}^{+}$, which itself depends on the choice of each $c_{i}$. In particular, whether the index of the dominant direction in the source injection is preserved after scattering hinges on the specific value of $c$. In Section \ref{sec:source_weighting_analysis}, by expressing each component of $\mathbf{p}_k^-$ as a function of weighting coefficients $c$ and $c_{n}$, we obtain a precise measure of how different injection coefficients reshape the very first wavefront’s energy propagation. 
+
+\begin{table*}[tb]
+    \centering
+    %\small  % Reduce font size
+   \caption{Analytical pressure and energy characteristics of the first‐order \emph{incoming} waves and their corresponding \emph{outgoing} waves as a function of the source-weighting parameter~$c$. The boldface column represents the original SDN.}
+
+    \label{tab:c_properties}
+    %\setlength{\tabcolsep}{3pt} % Reduce column padding
+    \renewcommand{\arraystretch}{1.3}
+    \resizebox{\linewidth}{!}{%
+    \begin{tabular}{|c|c|c|c|c|c|c|c|c|c|c|c|}
+    \hline
+    $c$ & -3 & -2 & -1 & 0 & \textbf{1} & 2 & 3 & 4 & 5 & 6 & 7 \\ \hline
+$c_{\text{n}}$ & 2 & 1.75 & 1.5 & 1.25 & \textbf{1.0} & 0.75 & 0.5 & 0.25 & 0.0 & -0.25 & -0.5 \\ \hline
+$|p^-_{\text{dom}}|=|1-\frac{c}{2}|$ & 2.5 & 2 & 1.5 & 1 & \textbf{0.5} & 0 & $|-0.5|$ & $|-1|$ & $|-1.5|$ & $|-2|$ & $|-2.5|$ \\ \hline
+$|p^-_{\text{non-dom}}|=|1-\frac{c_n}{2}|$ & 0 & 0.125 & 0.25 & 0.375 & \textbf{0.5} & 0.625 & 0.75 & 0.875 & 1 & 1.125 & 1.25 \\ \hline
+$SR^- = \frac{|2-c|}{|2-c_{\text{n}}|}$ & $\infty$ & 8 & 6 & 2.67 & \textbf{1} & 0 & 0.67 & 1.14 & 1.5 & 1.78 & 2 \\ \hline
+%$SR^+ = \frac{c}{c_{\text{n}}}$ & 1.5 & 1.14 & 0.67 & 0 & \textbf{1} & 2.67 & 6 & 8 & $\infty$ & -24 & -14 \\ \hline
+$||\mathbf{p}^+||_2^2=||\mathbf{p}^-||_2^2$ & 6.25 & 4.06 & 2.5 & 1.56 & \textbf{1.25} & 1.56 & 2.5 & 4.06 & 6.25 & 9.06 & 12.5 \\ \hline
+$\mathbf{\Gamma}(c)$ & 5.00 & 3.25 & 2.00 & 1.25 & \textbf{1.00} & 1.25 & 2.00 & 3.25 & 5.00 & 7.25 & 10.00 \\ \hline
+
+    %$||\mathbf{p}^+||_2^2=||\mathbf{p}^-||_2^2$ & 2.5 & 2.02 & 1.58 & 1.25 & 1.12 & 1.25 & 1.58 & 2.02 & 2.5 & 3.01 & 3.54 \\ \hline
+    
+    \end{tabular}
+    }
+\end{table*}
+
+% Our primary strategy in SW-SDN is to make the initial source injection more specular. 
+% We assign a larger coefficient, denoted c, to the direction i=0 that corresponds to the geometrically determined specular reflection path towards a target neighbor node J. 
+% The remaining K-2 non-dominant directions are assigned a smaller, equal coefficient, denoted \(c_{\text{n}}\). The constraint from Eq.~\eqref{eq:constraint_ci} dictates the relationship between c and \(c_{\text{n}}\):
+
+% \(c + (K-2) \cdot c_{\text{n}} = K-1 \), which yields c_{\text{n}} = \frac{K-1-c}{K-2}. (Note: This requires K > 2).
+
+\subsection{Source Weighting Effects on Energy Circulation}
+\label{sec:source_weighting_analysis}
+
+For the very first nonzero source arrival at node $k$ where $p_{ki}^{+}(n)= 0$, the initial incoming wave vector is determined solely by the source injection using the one-parameter family from Sec. \ref{sec:source_weighting_strategy} via \eqref{eq:p_tilde} as:
+
+\begin{equation}
+\label{eq:p_injection}
+\mathbf{\tilde p}_{k}^{+} = \frac{p_S}{2} \mathbf{c}
+\end{equation}
+
+where the first element of the source weighting vector \(\mathbf{c} = [c, c_{\text{n}}, \ldots ,c_{\text{n}}]^T\) is associated with the dominant direction, $i_d=1$, for convenience. 
+
+The resulting outgoing wave vector, $\mathbf{p}_k^- = \mathbf{S}\mathbf{\tilde p}_{k}^+$ can be derived by distributing the scattering matrix $\mathbf{S} = \frac{2}{K-1} \mathbf{11}^T - \mathbf{I}$ and applying the constraint $\mathbf{1}^T \mathbf{c}  = N - 1$\ as:
+
+\begin{equation}
+\mathbf{p}_{k}^{-} = \mathbf{S}\left(\frac{p_S}{2}\mathbf{c}\right) 
+= p_S \cdot(\mathbf{1} - \tfrac{1}{2}\mathbf{c}) 
+\end{equation}
+
+% derivation was:
+% = \frac{p_S}{2}\left(\frac{2}{N-1}\mathbf{11}^T - \mathbf{I}\right)\mathbf{c} \nonumber \\
+%&= \frac{p_S}{2}\left[\frac{2}{N-1}\mathbf{1}(\mathbf{1}^T\mathbf{c}) - \mathbf{c}\right] \nonumber \\
+%&= \frac{p_S}{2}\left[\frac{2}{N-1}\mathbf{1}(N-1) - \mathbf{c}\right] = 
+
+
+With $p_S = 1$ and \eqref{eq:constraint_ci_simplified}, the outgoing components simplify to:
+\begin{equation}
+\label{eq:pk_minus_dom}
+\begin{aligned}
+&(p_k^-)_{i=i_{\text{d}}} = 1-\frac{1}{2}c && \text{for } i_{\text{d}}=1 \\
+&(p_k^-)_i = 1 - \frac{1}{2}c_{\text{n}} = \frac{3 + c}{8} \quad &&\text{for } i = 2, 3, 4, 5
+\end{aligned}
+\end{equation}
+
+Here, $(p_k^-)_{i=i_{\text{d}}}$ represents the wave traveling towards the target node $j$, and $(p_k^-)_i$ for $i \neq 1$ represents waves traveling towards non-target nodes.
+
+\begin{figure*}
+    \centering
+    \includegraphics[width=1.\linewidth]{figs/sim-mic-pressures-c_4.png}
+    \caption{Evolution of node pressures along the single dominant (left) and non-dominant (right) propagation paths for various $c$ values. The x-axis denotes the number of recursive SDN updates (i.e., scattering iterations); thus, iteration $n$ corresponds to the pressure resulting from the $n+1$-th reflection order. The y-axis shows the resulting pressure under a no-loss condition (no wall or distance attenuation), isolating the effect of energy redistribution due solely to the scattering process. Note that the y-axis scales differ between the two subplots for visual clarity.}
+    \label{fig:sim-mic-pressures-c_4}
+\end{figure*}
+
+\textcolor{purple}{
+\textbf{Constraint 2: Preserving the Target Direction.}
+A crucial observation arises when comparing the magnitudes of the first outgoing components in the system. The initial intent of the modification was to increase the energy directed towards the target node $j$ by choosing $c>1$. However, the relationship
+\begin{equation}
+\label{C2_eqn}
+|\left(p_{k}^{-}\right)_{i=i_d}| > |\left(p_{k}^{-}\right)_{i\neq i_d}|
+\end{equation}
+only holds if 
+\begin{equation}
+\label{C1}
+|1-\frac{1}{2}c| > \left|\frac{3 + c}{8}\right|.
+\end{equation}
+This inequality is satisfied only when $c<1$ or $c\geq 11/3 \approx 3.67$.
+For the range $1<c<11/3$, the magnitude of the outgoing waves towards the non-target walls (nodes) is larger than the magnitude of the wave towards the target wall (i.e $ |1-\frac{c_{\text{n}}}{2}| >|1-\frac{c}{2}|$). For example, when $c=3$ (hence $c_n=0.5$),
+\begin{equation}
+\label{ex:target_gets_smaller_p}
+\mathbf{p_{k}^{-}} = \frac{1}{2}|[-1, 1.5, 1.5, 1.5, 1.5]^{T},
+\end{equation}
+clearly showing stronger propagation towards non-target directions in this initial scattering event. 
+When \( c = 1 \), the outgoing wave components \( (p_k^-)_i = \frac{1}{2} \), for all $i$, identical to the original SDN. If such a uniformly distributed outgoing wave components arrives at a subsequent node \( j \) (assuming it's the only arrival, i.e., \( \mathbf{\tilde p}_j^+ = [\frac{1}{2}, 0, \ldots, 0]^T \)), the node pressure at \( j \) would be:
+\begin{equation}
+    p_j = \frac{2}{N-1} \sum \mathbf {\tilde p}_j^+ = \frac{1}{N-1} = 0.2 \quad \text{(for } N - 1 = 5\text{)},
+\end{equation}
+which is the second-order node pressure drop observed in the original SDN, as demonstrated in Section~\ref{sec:pressure_distribution}. This constrained may be relaxed if the "random" selection rule is employed, instead of the deterministic specular selection in~\eqref{eq:specular_id_selection}.}
+
+\textbf{Constraint 3: second-order pressure amplification.} If the initial source injection weighting is non-uniform (\( c \neq \text{Const} \cdot \mathbf{1} \)), the components of the first outgoing wave,
+\(\mathbf p_k^-=\mathbf 1-\tfrac12\mathbf c\) (cf.\ Sec.~\ref{sec:source_weighting_analysis}), contains two distinct magnitudes: 
+\( |p^-_{i_d}|=\tfrac12|2-c| \) and \( |p^-_{i\neq i_d}|=\tfrac12|2-c_n|=\tfrac{|3 + c|}{8} \), toward the dominant and $N-2$ non-dominant ports, respectively.
+
+When these components arrive alone at their destination nodes (e.g to node $j$), the resulting second-order node pressure magnitudes for dominant and non-dominant ports are:
+
+\begin{equation}
+|p_j^{(2)}| = \frac{2\,|p^-_{i}|}{N - 1} =
+\begin{cases}
+\dfrac{|2 - c|}{N - 1} & \text{if } i = i_d \quad \text{(dom.)} \\
+\dfrac{|2 - c_n|}{N - 1}   & \text{if } i \neq i_d \quad \text{(non-dom.)}
+\end{cases}
+\end{equation}
+
+
+where the dominant port pressure is greater than the non-dominant pressure due to the imposed constraint \eqref{C2_eqn}.
+For a correct physical interpretation, the magnitude of the dominant node pressure component at the second-order reflections, $|p^{(2)}_j|$, should not exceed the amplitude of its input unit impulse (\(p_S=1\)), which gives the third constraint:
+
+\begin{equation}
+\label{constraint3}
+|p^{(2)}_j| = \frac{\lvert 2-c\rvert}{N-1} < 1
+\quad\Longrightarrow\quad
+        -3 < c < 7,  \quad \text{(for } N - 1 = 5\text{)}
+\end{equation}
+
+Note that when $c=1$ (original SDN) both magnitudes coincide,
+$p^-_{i_d}=p^-_{i\neq i_d}=\tfrac12$, giving the familiar
+second-order node pressure $p^{(2)}_j={1}/{(N-1)}$ that is demonstrated in Sec~\ref{sec:energy_drop_problem}. Fig.~\ref{fig:sim-mic-pressures-c_4}a tracks the node pressure generated by the the single strongest component, whereas Fig.~\ref{fig:sim-mic-pressures-c_4}b tracks the the non-dominant component for several \( c\)-values. This illustrates how the node pressure evolves when following the path of maximum (or minimum) amplitude at each scattering, while the other wall inputs are zero. Because wall and distance losses are disabled, the curves reveal only the redistribution imposed by the scattering matrix, demonstrating the direct impact of \( c \) on the very first reflections to be analysed next.
+
+\subsection{Physical Relevance of the coefficient $c_i$}
+\label{sec:physical_relevance}
+
+Simply boosting the coefficient \(c_i\) associated with the target direction J does not automatically guarantee that the outgoing wave towards J is the strongest, as demonstrated in Sec.\ref{sec:source_weighting_analysis}. 
+Table \ref{tab:c_properties} shows the relationship between the magnitudes of the target and non-dominant outgoing wave pressures. Choosing $c=5$ results in a specularity ratio (dominant/non-dominant outgoing wave magnitude) of $|1.5|/1$, whereas its complementary case, $c=-3$, yields what can be considered ideal initial specularity, with outgoing components of $-2.5$ and $0$ for the target and non-target directions, respectively.
+
+As outgoing distributions are determined by the scattering of the effective incoming distributions (which include the source injection terms $c_i$), negative $c$ values lead to a highly directional initial outgoing wave (i.e higher specularity ratio) compared to positive $c$'s.
+
+As Figure \ref{fig:sim-mic-pressures-c_4} shows the node pressure resulting from only the single strongest component of the outgoing wave vector arriving alone at the next node, it is less meaningful to interpret the pressure values after the first few orders in this simplified simulation, as by that time the incoming wave vector at a node in a full SDN simulation will likely include contributions from multiple neighbor arrivals. 
+It can be seen from the figure (and theory) that for $c=1$, the second-order node pressure from either the dominant or non-dominant path is identical. 
+Value of $c=-4$ exceeds the initial node pressure of $1$, amplifying the source signal which is non-physical. 
+Notably, $c=-3$ and $c=7$ results in a dominant second-order node pressure magnitude of $|2-(-3)|/(K-1)=1$, 
+effectively preserving the unit pressure of the first node into the second node, before considering the physical attenuations. Any value outside this range amplifies the second order pressures. In SDN, the scattering-induced reduction is interpreted as accounting for the energy spreading that occurs over inter-node distances, which are not explicitly modeled with attenuation factors (distance attenuation only covers the initial source-to-node path and final node-to-microphone path, see Sec.\ref{sec:distance_based_attenuations})). $c=-3$ and $c=7$ precisely counteract the inherent scattering-induced decrease for the dominant path at this early stage, specifically the second order pressures. Since the c-weighting only applies to the direct source injection (which is a Dirac impulse and thus zero after the initial wavefront), this local counteraction primarily affects the launch of the second order reflections. Preserving the same pressure at the second order node implies that the energy spreading due to the distance traveled between the first and the second node is ignored, which will overestimate the second order node pressures. Other consequences of the various weighting choices are discussed by examining the generated RIRs, EDC and NED plots, in Sec.~\ref{sec:results}.
+
+\subsection{Energy interpretation of $\mathbf{\tilde p_k^{+}}$}
+For the isotropic scattering matrix adopted in SDN, every port has unit
+characteristic admittance ($y_i=1$).
+Hence the squared Euclidean norm of a travelling–wave vector,
+%
+\[
+   \|\mathbf p^{\pm}\|_2^{2}
+   =\sum_{i=1}^{K-1}\lvert p^{\pm}_i\rvert^{2}
+\]
+%
+is numerically equal to the \emph{instantaneous acoustic
+power} carried by those waves \cite{Julius85,SDNjournal}. Injecting
+$\frac{p_{S}}{2}\mathbf c$ therefore injects the energy
+%%
+\begin{equation}
+   E_{\mathrm{inj}}=\frac{p_S^{2}}{4}\,\|\mathbf c\|_2^{2},
+   \label{eq:E_inj_general}
+\end{equation}
+%%
+whereas the original SDN (\,$\mathbf c=\mathbf1$\,) injects
+$E_0=\tfrac{p_S^{2}}{4}(N-1)$.  The \emph{energy–gain factor} of a
+chosen $\mathbf c$ compare to original SDN is thus
+%%
+\begin{equation}
+   \Gamma(\mathbf c)\;= \frac{E_{\mathrm{inj}}}{E_0}=\;
+      \frac{\|\mathbf c\|_2^{2}}{N-1}= \frac{4c^2+(5-c)^2}{4(N-1)}
+   \label{eq:gain_factor}
+\end{equation}
+%%
+For example, one obtains
+$\Gamma([5,0,0,0,0]^T)=5$ and
+$\Gamma([7,-0.5,-0.5,-0.5,-0.5]^T)=10$. In the present work we deliberately
+\emph{accept} this higher launch energy in order to compensate the
+early reflection loss reported in \cite{SDNwaspaa}.
+
+%\paragraph*{Direct-path contribution.}
+%The specular weighting only alters the \emph{wall–node} injections; the direct
+%source--receiver line in Fig.~\ref{fig:sdn_2d} is unchanged.
+%Let $g_{sr}=G/\|x_s-x_r\|$ be the distance–loss gain in
+%\eqref{eq:source_node_gain}.  A unit-pressure Dirac ($p_S=1$) therefore
+%delivers a direct-path pressure of $p_{\text{dir}}=g_{sr}$ at the
+%microphone, whose energy is
+%\[
+%   E_{\text{dir}} = g_{sr}^{2}.
+%\]
+%Denote by $E_0=\tfrac14(K-1)$ the energy injected into a \emph{single}
+%node in the baseline SDN and by
+%$E_c = \tfrac14\|\mathbf c\|_2^{2}$ the energy with weighting
+%$\mathbf c$ [cf.\ \eqref{eq:E_inj_general}].
+%Because the same injection is applied at every wall, the total
+%first-sample energy becomes
+
+%\[
+%   E_{\text{tot},0} = E_{\text{dir}} + K\,E_0, 
+%   \qquad
+%   E_{\text{tot},c} = E_{\text{dir}} + K\,E_c.
+%\]
+%With the gain factor
+%$\Gamma(\mathbf c)=\|\mathbf c\|_2^{2}/(K-1)$ from
+%\eqref{eq:gain_factor} we can write the relative increase as
+%
+%\[
+%   \frac{E_{\text{tot},c}}{E_{\text{tot},0}}
+%   \;=\;
+%   \frac{E_{\text{dir}} + \Gamma(\mathbf c)\,K\,E_0}
+%        {E_{\text{dir}} + K\,E_0}.
+%\]
+%When the source and receiver are far apart ($g_{sr}\ll 1$) the direct
+%term is negligible and the ratio approaches $\Gamma(\mathbf c)$; when
+%they are close together the direct term dominates, so the overall
+%energy rise is perceptually less dramatic even for large
+%$\Gamma(\mathbf c)$.
+
+
+\section{Source-Weighted Higher Order SDN}
+\label{sec:HO-SW-SDN}
+
+SW-SDN is designed specifically to cure the abrupt early energy drop
+seen in standard SDN RIRs. By minimising the energy decay curve loss it
+recovers the energy that the original network leaves out. The
+adjustment is purely amplitude based: it increases the magnitude of every pulse
+without introducing any temporal change. From the second-order reflections onwards every echo in the final RIR therefore appears with a larger amplitude than in the baseline SDN. \textcolor{purple}{In addition to fixing the early energy decay, this gain boost slightly narrows the gap between the smoothed
+squared-RIR envelopes, an independent accuracy measure that operates
+directly on the RIR rather than on the EDC.}
+
+However, when an application demand precise early reflections, the same
+weighting can be applied after higher order SDN (HO-SDN)
+that renders the first~$K$'th order image sources exactly
+\cite{SDNwaspaa}. We refer to the resulting algorithm as
+\textbf{SW-HO-SDN}. As can be seen in Fig.\ref{fig:energy_decay_curves},  the energy drop occurs later in HO-SDN as the recursive network only takes over from the $(K\!+\!1)$-st order onwards. The energy deficit reappears, and is in fact more severely, since the number of injection events now scales as $N\bigl(N-1\bigr)^{K}$ for a K'th order exact rendering. 
+
+Consequently, while the plain SDN injects energy only at the six
+source–to–wall paths ($N\!=\!6$), an HO-SDN with
+$K$ exact orders releases
+$N(N-1)^{K}$ independent source packets into the
+network at order $K\!+\!1$.  
+Each of those packets can in principle adopt its own
+specular weight~$c$, opening a richer optimisation landscape for
+fine-grained control of early energy behaviour.
+
+\textcolor{purple}{Expectedly, the resulting SW-HO-SDN eliminates the energy drop observed
+in HO-SDN's \cite{SDNwaspaa} (see Sec.~\ref{sec:results}) and unifies
+the benefits of geometrically exact early reflections with the
+efficiency of a weighted scattering delay
+network.}
+
+\section{Objective Evaluation of Generated Room Impulse Responses}
+\label{sec:results}
+%c=-7  and c=-3 preserves the unit pressure, meaning the second order node pressure will only include wall absorptions and source-node1 and node2-mic distance attenuations, ommiting any the node1-node2 attenuation that is normally compensated by the scattering matrix. In other words, since there are no node-node distance attenuations modeled in SDN, the inherent decrease casused by scattering matrix redistribution accounts for the real life node-node distances. 
+
+\textbf{Room Simulations.}
+We adopted three cuboid rooms from prior SDN literature. 
+Table~\ref{tab:rooms_single} lists the single source–receiver (S/R) pairs, room dimensions, and single frequency independent random incidence absorption coefficients retained from the original studies for Room A~\cite{SDNaes} and Room W~\cite{SDNwaspaa}; a new reference pair was chosen for the Room J as no single-pair simulation was used in \cite{SDNjournal}.
+
+\begin{table}[h]
+\setlength{\tabcolsep}{3pt} 
+  \caption{Reference rooms, single-pair coordinates, and theoretical reverberation times}
+  \label{tab:rooms_single}
+  \centering
+  \begin{tabular}{lccccc}
+    \toprule
+    Room & $W\!\times\!D\!\times\!H$ & $\alpha$ &
+          $\mathbf x_{\mathrm{src}}$ (m) & $\mathbf x_{\mathrm{mic}}$ (m) &
+          $T_{60}$ (Sabine) \\ \midrule
+    Room A & 9×7×4   & 0.20 & (4.5, 3.5, 2.0) & (2.0, 2.0, 1.5) & 0.80  \\
+    Room W & 6×7×4   & 0.10 & (3.6, 5.3, 1.3) & (1.2, 1.8, 2.4) & 1.44  \\
+    Room J & 3.2×4×2.7 & 0.10 & (2.0, 3.0, 2.0) & (1.0, 1.0, 1.5) & 0.86 \\ \bottomrule
+  \end{tabular}
+\end{table}
+
+For multi-position analysis we placed four discrete source positions per room, obtained from the room width \(w\), depth \(d\) and a fixed source height \(z_{\mathrm{src}} = 2\text{ m}\):
+(i) \textbf{centre source} at \((w/2,\;d/2,\;z_{\mathrm{src}})\);
+(ii) \textbf{lower-left source} at \((2m,\;2m,\;z_{\mathrm{src}})\);
+(iii) \textbf{upper-right source} at \((w-m,\;d-2m,\;z_{\mathrm{src}})\);
+and (iv) \textbf{top-middle source} at \((w/2,\;d-2m,\;z_{\mathrm{src}})\), where $m=0.5$m is the wall margin.
+
+
+\begin{figure*}[b]
+    \centering
+    \begin{subfigure}[t]{0.31\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figs/fig_edc_inset_comparison_aes_room.png}
+        \caption{\textit{Room A}}
+        \label{fig:room_a}
+    \end{subfigure}
+    \hspace{0.01\textwidth}
+    \begin{subfigure}[t]{0.31\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figs/fig_edc_inset_comparison_waspaa_room.png}
+        \caption{\textit{Room W}}
+        \label{fig:room_w}
+    \end{subfigure}
+    \hspace{0.01\textwidth}
+    \begin{subfigure}[t]{0.31\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figs/fig_edc_inset_comparison_journal_room.png}
+        \caption{\textit{Room J}}
+        \label{fig:room_j}
+    \end{subfigure}
+    \caption{ Energy decay curves for SW-SDN configurations compared to ISM, SDN, and HO-SDN.}
+    \label{fig:energy_decay_curves}
+\end{figure*}
+
+\begin{figure*}[b]
+    \centering
+    \begin{subfigure}[t]{0.31\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figs/fig_ned_comparison_aes_room.png}
+        \caption{\textit{Room A}}
+        \label{fig:room_a}
+    \end{subfigure}
+    \hspace{0.01\textwidth}
+    \begin{subfigure}[t]{0.31\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figs/fig_ned_comparison_waspaa_room.png}
+        \caption{\textit{Room W}}
+        \label{fig:room_w}
+    \end{subfigure}
+    \hspace{0.01\textwidth}
+    \begin{subfigure}[t]{0.31\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figs/fig_ned_comparison_journal_room.png}
+        \caption{\textit{Room J}}
+        \label{fig:room_j}
+    \end{subfigure}
+    \caption{Normalize echo density for SW-SDN configurations compared to ISM, SDN, and HO-SDN.}
+    \label{fig:NED}
+\end{figure*}
+
+% In conclusion, modifying the source injection via the coefficient c in SW-SDN provides a direct mechanism to control the early reflection behaviour, addressing the limitations identified in Section 2. It influences both the initial directionality of energy propagation after the first scattering event (achieving target dominance only for c \ge (K+2)/3) and the total amount of energy injected into the recursive system at this critical first step. This combined effect allows SW-SDN to shape the energy decay characteristics differently from the standard SDN, offering potential improvements in the realism of early reflections.
+
+\begin{table*}[!tb]
+    \centering
+    \caption{50\,ms EDC–RMSE (dB), total signal energy, and RT\textsubscript{60} for a single source–receiver pair in each room.  
+             All RMSE values are relative to the reference \textit{ISM (rimpy-neg10cm)}.  
+             Durations are 1s (Room A), 1.8s (Room W), and 1s (Room J).}
+    \label{tab:single-pair-results}
+    \renewcommand{\arraystretch}{1.15}
+    \begin{tabular}{lccc|ccc|ccc}
+        \toprule
+        \textbf{Single-Pair Results} &
+        \multicolumn{3}{c|}{\textbf{Room A}} &
+        \multicolumn{3}{c|}{\textbf{Room W}} &
+        \multicolumn{3}{c}{\textbf{Room J}} \\
+        & \multicolumn{3}{c|}{\scriptsize Src 4.5,3.5,2 → Mic 2,2,1.5} &
+          \multicolumn{3}{c|}{\scriptsize Src 3.6,5.3,1.3 → Mic 1.2,1.8,2.4} &
+          \multicolumn{3}{c}{\scriptsize Src 2,3,2 → Mic 1,1,1.5} \\
+        \textbf{Method} & RMSE & Energy & RT60 & RMSE & Energy & RT60 & RMSE & Energy & RT60 \\
+        \midrule
+        \textbf{Ref: ISM (rimpy-neg10cm)} & -- & \textbf{7.66} & \textbf{0.91} & -- & \textbf{45.30} & \textbf{1.61} & -- & \textbf{35.11} & \textbf{1.00} \\
+        \midrule
+        HO-SDN ($N=3$)      & 1.86 &  5.71 & 0.91 & 1.34 & 13.16 & 1.63 & 1.42 & 21.92 & 0.99 \\
+        HO-SDN ($N=2$)      & 2.54 &  4.64 & 0.93 & 1.13 & 10.84 & 1.63 & 1.57 & 11.18 & 1.00 \\
+        SDN Original ($c=1$)& 2.37 &  3.15 & 0.93 & 0.95 &  7.38 & 1.62 & 0.85 & 10.27 & 0.99 \\
+        \midrule
+        SW-SDN ($c=-3$)     & \textbf{0.20} &  6.98 & 0.90 & 0.17 & 18.51 & 1.61 & 0.20 & 18.24 & 1.01 \\
+        SW-SDN ($c=-2$)     & 0.55 &  5.33 & 0.91 & 0.30 & 17.83 & 1.61 & \textbf{0.16} & 19.73 & 1.01 \\
+        SW-SDN ($c=-1$)     & 1.24 &  4.14 & 0.92 & 0.52 & 12.16 & 1.62 & 0.35 & 17.33 & 1.01 \\
+        SW-SDN ($c=0$)      & 2.01 &  3.42 & 0.93 & 0.80 &  8.67 & 1.62 & 0.67 & 12.23 & 1.00 \\
+        SW-SDN ($c=2$)      & 1.94 &  3.35 & 0.93 & 0.75 &  8.28 & 1.62 & 0.60 & 11.45 & 1.00 \\
+        SW-SDN ($c=3$)      & 1.13 &  4.01 & 0.92 & 0.43 & 11.37 & 1.62 & 0.25 & 15.77 & 1.00 \\
+        SW-SDN ($c=4$)      & 0.45 &  5.13 & 0.91 & 0.18 & 16.65 & 1.61 & \textbf{0.21} & 23.23 & 1.01 \\
+        SW-SDN ($c=5$)      & \textbf{0.29} &  6.71 & 0.90 & \textbf{0.06} & 24.12 & 1.61 & 0.34 & 33.83 & 1.01 \\
+        SW-SDN ($c=6$)      & 0.55 &  8.75 & 0.90 & 0.08 & 33.78 & 1.61 & 0.42 & 36.70 & 1.01 \\
+        SW-SDN ($c=7$)      & 0.77 & 11.26 & 0.89 & 0.13 & 32.88 & 1.61 & 0.48 & 31.83 & 1.01 \\
+        \bottomrule
+    \end{tabular}
+\end{table*}
+
+
+For each source we then place a $4\times4$ receiver grid at $z=1.5$m. The grid is a uniform lattice
+\[
+x_i = m + \frac{i}{3}\bigl(\tfrac{w}{2} - m\bigr), \quad
+y_j = m + \frac{j}{3}\bigl(\tfrac{d}{2} - m\bigr),
+\quad i,j = 0,1,2,3 ,
+\]
+so that \(x \in [m,\;w/2-m]\) and \(y \in [m,\;d/2-m]\) (See~\ref{fig:rmse_mosaic_RIMPY} for source and receiver positions of Room A).
+When the source lies on one of the room’s symmetry planes, the resulting RIRs are mirror-symmetric. Hence, restricting the receivers to a single (arbitrary) quadrant avoids redundant IRs while still providing comprehensive spatial coverage.
+
+\begin{table*}[tbh]
+    \centering
+    \caption{Mean 50ms EDC-RMSE (dB) comparison of Room A. and Room W. Each room uses its own source and uniform receiver grid calculated according to **.  Values in parentheses denote SW-SDN results using random–target selection. \textbf{Reference}: ISM (rimpy-neg10).}
+    \label{tab:merged-results-waspaa}
+    \renewcommand{\arraystretch}{1.15}
+    % Reduce font size and padding to fit columns
+    \scriptsize
+    \setlength{\tabcolsep}{2.5pt}
+    
+    \begin{tabular}{l ccccc | ccccc}
+        \toprule
+        & \multicolumn{5}{c|}{\textbf{Room A (Uniform Receivers)}} & \multicolumn{5}{c}{\textbf{Room Waspaa}} \\
+        \cmidrule(lr){2-6} \cmidrule(l){7-11}
+        \textbf{Method} & Cent. & L-Left & T-Mid & U-Right & \textbf{Avg.} & Cent. & L-Left & T-Mid & U-Right & \textbf{Avg.} \\
+        \midrule
+        
+        SDN Orig. ($c=1$)
+            & 2.33\,() & 0.45\,() & 1.21\,() & \textbf{0.62}\,() & 1.15 
+            & & & & & \\
+        \midrule
+        
+        SW-SDN ($c=-3$)
+            & 0.49\,() & 1.08\,() & 0.65\,() & 1.30\,() & 0.88\,() 
+            & & & & & \\
+            
+        SW-SDN ($c=-2$)
+            & 0.85\,() & 0.90\,() & 0.59\,() & 1.18\,() & 0.88\,() 
+            & & & & & \\
+            
+        SW-SDN ($c=2$)
+            & 1.83\,() & \textbf{0.40\,()} & 0.86\,() & 0.70\,() & 0.95\,() 
+            & & & & & \\
+            
+        SW-SDN ($c=3$)
+            & 1.05\,() & 0.56\,() & 0.42\,() & 0.90\,() & 0.73\,() 
+            & & & & & \\
+            
+        SW-SDN ($c=4$)
+            & 0.44\,() & 0.86\,() & \textbf{0.39\,()} & 1.10\,() & \textbf{0.70\,()} 
+            & & & & & \\
+            
+        SW-SDN ($c=5$)
+            & \textbf{0.26\,()} & 1.07\,() & 0.60\,() & 1.24\,() & 0.79\,() 
+            & & & & & \\
+            
+        SW-SDN ($c=6$)
+            & 0.47\,() & 1.21\,() & 0.76\,() & 1.33\,() & 0.94\,() 
+            & & & & & \\
+            
+        SW-SDN ($c=7$)
+            & 0.65\,() & 1.30\,() & 0.87\,() & 1.39\,() & 1.05\,() 
+            & & & & & \\
+        \midrule
+        
+        HO-SDN ($N=2$)
+            & 1.24 & 1.16 & 0.97 & 1.10 & 1.12 
+            & & & & & \\
+            
+        HO-SDN ($N=3$)
+            & 0.97 & 0.95 & 0.97 & 0.88 & 0.94 
+            & & & & & \\
+        \bottomrule
+    \end{tabular}
+\end{table*}
+
+
+\begin{comment}
+
+
+\end{comment}
+
+\subsection{Energy Decay Curve (EDC)}
+
+The \textbf{energy decay curve} is an important, first-tier descriptor of how acoustic energy diminishes over time. It provides a compact, perceptually meaningful view of a room impulse response’s temporal energy distribution. 
+Following the classical Schroeder backward-integration procedure~\cite{Schroeder1962}, the squared impulse-response samples are integrated from the end of the response toward the onset, normalised, and expressed in decibels. The resulting monotonic curve makes it straightforward to extract objective metrics such as clarity, EDT, $T_{30}$, $T_{60}$, directly from its slope and to visualise subtle differences in early- and late-decay slopes that are not obvious in raw waveforms.
+Equally important for the present work, the initial milliseconds of the EDC reveal the early reflection energy plateau and the subsequent decay with great clarity.
+Notably, the intrinsic early energy deficit of the SDN was first reported in \cite{SDNwaspaa} precisely through an anomalous “knee” in its EDC. Since our goal is to restore that missing early energy while preserving the late-field behaviour, the EDC constitutes the most critical metric in the evaluation that follows; we therefore begin by comparing the EDCs of the proposed SW-SDN, the original SDN \cite{SDNaes}, the low-complexity HO-SDN\cite{scerbo2022ho_sdn}, and an ISM reference. \textcolor{purple}{For SW-SDN results, specular target selection explained in \ref{sec:source_weighting_strategy} is employed as the main method whereas random target results are also given for the multi-pair case (Table~\ref{tab:multi-pair-results}.}
+
+Among available ISM implementations, we employ \texttt{rimpy}, which implements the randomized-image technique proposed by De Sena \textit{et al.} for rectangular rooms~\cite{enzo_rism}, with image source positions jittered within a 10cm range. A negative reflection coefficient is used, ensuring the DC component in RIR remains zero. This configuration is denoted as \textbf{ISM (rimpy-neg10cm)} in all subsequent figures and tables. 
+
+
+%Among the available image-source–method (ISM) implementations we employ two open-source Python variants.  \textbf{ISM (PRA)} denotes the reference routine in the \textit{Pyroomacoustics} toolbox, whereas \textbf{ISM (randomised)} is computed with \texttt{rimpy}, which implements the randomised-image technique proposed by De Sena \textit{et al.} for rectangular rooms~\cite{enzo_rism}. For consistency we disabled optional propagation effects in both tools: in Pyroomacoustics we ran the ISM without ray-tracing extensions or air-absorption filtering, while in rimpy a negative reflection coefficient is used, ensuring the overall DC component remains zero. These method names are used consistently in all subsequent figures and tables. we did not apply source position randomization.
+
+Figure~\ref{fig:energy_decay_curves} and \ref{fig:NED} displays the first 70ms of the EDCs and first 0.2 seconds of the normalized echo density (NED) for every method, respectively. Vertical red lines mark the ending time of the first, second, and third order paths. Because each room has different early-reflection timing and overall decay rate, the time axes are scaled individually for visual clarity.
+Quantitative comparisons rely on (i) the auxiliary metrics in Table~\ref{tab:c_properties} and (ii) the EDC root-mean-square error (RMSE) with respect to ISM (randomised), reported in Tables~\ref{tab:single-pair-results} and~\ref{tab:multi-pair-results}. EDC-RMSE serves as our primary measure of early-energy deficit and accuracy.
+
+For \textbf{single-pair} simulations, the source and microphone coordinates listed in Table~\ref{tab:single-pair-results}. 
+For Room A, the original SDN shows a 50ms EDC-RMSE of 2.37dB whereas the best result is obtained with $c=5$ and its complementary $c=-3$ (0.29dB and 0.20dB, respectively). In Room W the baseline error drops to about 0.95dB, while both $c=5$ reduce it substantially to 0.06dB. 
+Room J exhibits a similar pattern: the original SDN gives 0.85dB, whereas $c=4$ and its complementary $c=-2$ achieves 0.21dB and 0.16dB, respectively.
+
+Note that complementary c-values are the pairs whose sum equals 2 (see 5 and -3, 4 and -2 traces in \ref{fig:energy_decay_curves}), and generates similar energy decay. Because each pair produces injection vectors with identical $l_2$-norms, they deliver the same instantaneous acoustic power into the network before wall-absorption or distance losses take effect. This symmetry is evident in Table \ref{tab:c_properties}: the next-to-last row lists the matching $l_2$-norms, and the final row shows the corresponding gain factor $\Gamma(c)$ from \eqref{eq:gain_factor}, which expressed injected power relative to the baseline SDN. The $\ell_2$ norm is monotonically increasing (i.e raise the overall injection energy) as $c$ departs from the uniform value $c=1$ in either direction. Hence the baseline $c=1$ represents the minimum injected power, and larger $|c-1|$  values systematically boost it. While $\Gamma(c)$ captures only the input energy, the total signal energy observed in an impulse response is shaped by all the system parameters, including the wall and distance attenuations, hence there is no direct or one-to-one numerical correspondence between injected and final signal energy. Contrary to their similar EDC, the complementary $c$ pairs produce different NED behaviours, which will be explained in the next subsection.
+
+In the EDC plots one observes that the \textbf{HO-SDN} curves exhibit an equally sharp, but slightly delayed energy drop compared with the original SDN.
+This behaviour is expected and observed due to the same phenomenon discussed in~Sec.\ref{sec:energy_drop_problem}. 
+Because the energy-decay curve is a non-causal metric-the value
+at any time instant depends on the integrated energy of later
+samples—an isolated large pulse that is followed by much smaller pulses
+always produces a sudden step in the EDC. HO-SDN with $N=3$ therefore shows its characteristic drop a slightly later than HO-SDN with $N=2$: 
+the third order reflections still have correct (and thus higher) energy, so the point at which subsequent, under-excited reflections take over is shifted in time. This observation is an important caution when interpreting EDC curves:
+a premature drop does not imply that the early pulses themselves
+are erroneous; rather, it reveals that pulses occurring after
+the correctly modelled orders have been rendered with insufficient
+energy. Since the first $N$ image orders in HO-SDN are exact (their
+path lengths match those of the ISM), any discrepancy in the early HO-SDN EDC arises
+solely from later reflections whose amplitudes are still underestimated.
+ 
+For the \textbf{multi-pair} evaluations we average the 0–50 ms EDC-RMSE over the 16 microphone positions listed in Table~\ref{tab:multi-pair-results}, for Room A and W.  
+Figure~\ref{fig:rmse_mosaic_RIMPY} complements the table with contour maps that plot the point-wise RMSE for four different source positions, for Room A.
+Note that each subfigure uses a differently scaled colour bar so that small patterns remain visible even when the absolute error ranges differ across source locations.
+
+In~Fig.\ref{fig:rmse_mosaic_RIMPY}a with the source centred, SW-SDN delivers an almost uniform improvement:
+the mean RMSE drops from \(2.82\;\text{dB}\) (baseline) to a minimum of \(0.33\;\text{dB}\) at \(c=5\). 
+The error is substantially decreased from 5.5dB to 0.91dB at \(c=5\),  when the receiver is closest to the source.  
+
+With the source at the top–middle position \(c=3\) is optimal (\(0.32\) dB). 
+Lower-left and upper-right sources achieves the least error both with $c=2$, 
+dropping from \(0.51\;\text{dB}\) to \(0.32\;\text{dB}\) for the lower-left; keeping the baseline error ~0.67dB for the upper-right sources.
+
+Although the rightmost column in \ref{tab:multi-pair-results} reveals that SW-SDN with $c=3$ achievs the best
+EDC rmse error on average across all simulated source and receivers (total 64 combinations), 
+the shifts of the “best” \(c\) per different source positions follow geometry. 
+Whenever a source–mic pair shares two or more identical first order path lengths, 
+the single nonzero pressure arrival described in \ref{sec:energy_drop_problem} no longer guides the early amplitude decay, 
+which results in less energy deficit than standard cases. 
+In this scenarios, original SDN needs smaller extra injection as it already handles the amplitude pattern closer to the ISM, 
+whereas greater sw-sdn energy injections (such as $c=5,6$, i.e more energy gain factor) can overshoot. 
+The local node pressure scales roughly with the number of coincident early arrivals, hence excessive injection is counter-productive in such corner cases.
+
+In summary, the optimum injection factor depends on the spatial
+constellation of source and microphones, i.e.\ on the precise
+early-reflection path lengths. Therefore the next section explores a room-specific optimisation that selects a dedicated set of \(c\) values per environment. 
+While the EDC analysis confirms that an appropriately chosen $c$ can restore the missing early energy without disturbing the late-reverberant slope; 
+the next subsection examines how this temporal redistribution affects echo density. 
+
+%Because the scattering nodes are fixed at first-order image positions, several nodes cluster near the same wall intersection.  
+%The best-target rule therefore selects the same dominant port at multiple nodes, for instance \(\text{N}_{\text{W}}\) in the lower-left configuration, so SW-SDN injects an exaggerated amount of energy into a single early-reflection path.  
+%The mean RMSE consequently rises to \(1.70\;\text{dB}\) (\(c=4\)) and \(2.26\;\text{dB}\) (\(c=5\)) compared with \(0.55\;\text{dB}\) for the baseline.  
+%In the lower-left case the problem is aggravated by the very short source–receiver distance and the best specular target no longer mimics real-world specularity.
+%This duplication artefact is mitigated with the randomised best-target strategy explained in \ref{sec:source_weighting_strategy} that selects a unique and different best target direction to inject the energy. Preliminary tests show that the randomised rule removes the corner-source penalty without sacrificing the centre-source improvement.  
+
+%uncomplete // Explain ISM path difference>sdn.
+% outdated comments
+%In an RT-estimator that fits a straight line to the last $-5$ dB $\ldots$ $-35$ dB of the EDC this extra temporal density flattens the fitted line and RT60 is over-estimated.
+%The effect is small for early orders---where the two models share almost the same paths---but becomes visible after $8$--$10$ reflections when a large fraction of IM paths have been discarded as non-valid yet the SDN keeps recirculating them.
+
+
+
+\begin{figure*}[b]
+    \centering
+    %-------------------------------- 1st row –– Center source
+    \begin{subfigure}[b]{\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figs/fig_spatial_edc_err_aes_FULLGRID_center_source_ref_RIMPY-neg10.png}
+        \caption{Center source}
+    \end{subfigure}
+
+    %-------------------------------- 2nd row –– 
+    \begin{subfigure}[b]{\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figs/fig_spatial_edc_err_aes_FULLGRID_top_middle_source_ref_RIMPY-neg10.png}
+        \caption{Top-middle source}
+    \end{subfigure}
+
+    %-------------------------------- 3rd row –– Upper-right source
+    \begin{subfigure}[b]{\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figs/fig_spatial_edc_err_aes_FULLGRID_upper_right_source_ref_RIMPY-neg10.png}
+        \caption{Upper-right source}
+    \end{subfigure}
+
+    %-------------------------------- 4th row –– 
+    \begin{subfigure}[b]{\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figs/fig_spatial_edc_err_aes_FULLGRID_lower_left_source_ref_RIMPY-neg10.png}
+        \caption{Lower-left source}
+    \end{subfigure}
+
+    \caption{Spatial EDC RMSE contour maps for four source positions (rows), sixteen uniformly placed receivers and four SDN configurations $c=1,2,3,5$ (columns).  
+    Per-receiver 50 ms EDC RMSE [dB] error according to the reference method ISM (rimpy-rand10cm) shown in their corresponding location with the overall mean error in the lower-right corner.}
+    \label{fig:rmse_mosaic_RIMPY}
+\end{figure*}
+
+\subsection{Normalized Echo Density (NED)}
+Normalised Echo Density quantifies how quickly an impulse response evolves from isolated pulses into a perceptually diffuse texture.  
+Following Abel and Huang’s definition, we compute the short-time kurtosis of the response and scale it so that \(\text{NED}=0\) for a single sample and \(\text{NED}=1\) for a sequence whose statistics match white Gaussian noise. 
+In measured rooms the NED curve stays near zero during the direct sound, then rises steadily as early reflections accumulate, typically passing the perceptual “diffuse” threshold (\(\text{NED}\!\approx\!0.95\)) after the first 80–120 ms.  
+A \emph{timely} NED build-up is therefore desirable: it preserves clarity in the early window while ensuring that the late tail is sufficiently dense.
+
+In the image source models each reflection order contains only the
+geometrically valid rays; many directions are simply absent because the ray would exit the enclosure.    
+An SDN, by contrast, uses a fully connected \(N\)-node graph, and each scattering step launches energy along all \(N-1\) branches—including directions that would be blocked by the room geometry.  
+
+Since \emph{invalid} branches add a dense cloud of
+extra pulses into the RIR, we hypothesise that these "virtual" pulses raise the noise floor of the normalised echo density
+(NED) and making its curve climb sooner than in ISM for every
+source–receiver pair we tested.  
+Related evidence appears in \cite{scerbo2022ho_sdn}: although the authors do not explicitly prune
+geometrically invalid paths, their reduced-connectivity SDN, formed by connecting only spatially adjacent links, slows the NED rise and brings it
+closer to the ISM baseline, supporting our conjecture. For example, 
+in Room A the complete SDN spawns $6*(N-1)^{order}=$ 6, 30, and 150 paths for the first, second, and third reflection orders, respectively. Of these; only 6, 20, and 44 are geometrically valid; the remaining 116 paths are invalid (i.e does not correspond to a physically valid path travel in the room) and therefore removed in image-source based methods. 
+
+The behaviour of \emph{negative}~\(c\) weightings further supports the hypothesis (Figure~\ref{fig:NED}.  
+Negative-$c$ injection produces a greater number of early reflections with amplitudes close to zero, particularly in the non-dominant branches, 
+compared to positive-$c$s or standard SDN configurations (see Section~\ref{sec:source_weighting_analysis}).  
+As a result, the NED rises more gradually, since the accumulated energy from these weaker early pulses takes longer to cross the perceptual noise floor. 
+Positive \(c\) values do the opposite, concentrating energy more uniformly and accelerating the rise.  
+
+
+\section{Optimisation of c Values}
+
+Section \ref{sec:results} showed that the early EDC RMSE depends strongly on room geometry and on the specific source–receiver pair. 
+The underlying reason is that the reference ISM responses exhibit very different early energy builds, 
+governed by the exact path lengths of the first few image sources. 
+Consequently, not every pair suffers the same energy deficit, and no single SW-SDN (or SDN) setting can be “best” for all cases. Put differently, 
+the baseline SDN contains a hidden, scenario-dependent 
+energy shortfall that emerges to a different degree for different geometrical configurations.
+
+To explore how much the error can be reduced beyond the 
+hand-picked integer coefficients of 
+Sec.~\ref{sec:results}, we optimise the SW-SDN weighting coefficient $c$ in four ways (and the SW-HO-SDN in two):
+
+$c_\text{single}$ — an individual optimum $c$ for each source position; the same value is applied to all six walls.
+
+$c_\text{global}$ — one global $c$ shared by every wall 
+that minimises the average RMSE over all sources and receivers.
+
+$c_\text{wall-single}$ — wall-specific vector 
+$\mathbf{c}_\text{wall}=[c_1,\dots,c_6]$; the six 
+coefficients are optimised jointly per each source position.
+
+$c_\text{wall-glob}$ — single wall-specific vector 
+$\mathbf{c}_\text{wall}$ per room; that minimises the average RMSE over all sources and receivers.
+
+For HO-SDN the situation is more complex: after the exact first-order block there are
+$N,(N-1)^K$ injection paths instead of the original six (e.g.\ 30 for $K=2$, 150 for $K=3$; see Sec.~\ref{sec:HO-SW-SDN}).
+A full $30$- or $150$-dimensional search is impractical, so we consider two simplified variants:
+
+SW-HO-SDN $c_\text{global}$ — a single $c$ applied to \emph{all} injection paths (30 or 150 identical weights).
+
+SW-HO-SDN $c_\text{random-global}$ — the same global mean 
+energy but distributed across the many paths by drawing 30 (or 150) individual $c$’s uniformly in the same bound $[1,7]$. 
+
+%For every optimisation we call \texttt{scipy.optimize.minimize\_scalar} in \texttt{bounded} mode. Global variant uses a \textbf{golden-section/Brent} line-search confined to the interval $[\,1,7\,]$.
+%This 1-D method is deterministic, needs no gradient, and converges in $\mathcal{O}(\log\!\epsilon)$ evaluations, as each evaluation renders $\sim\!64$ SDN RIRs.  
+%The single-source optimiser is identical, except that it runs once per source.  
+
+For \textbf{single} and \textbf{global} optimisations we call \texttt{scipy.optimize.minimize\_scalar} in
+\texttt{bounded} mode, which performs a deterministic
+golden-section/Brent line-search over the interval $[1,7,]$ and stops
+when the bracket length has been reduced below the requested tolerance
+$x_{\mathrm{atol}}=10^{-3}$. This 1-D method is deterministic, needs no gradient, and no initial guesses.
+The only difference of \emph{single-source} optimiser is 
+that it is run separately for every source position, so each objective call processes
+only the 16 receivers attached to that source.
+
+%A golden search shrinks the interval geometrically, so the number of
+%function evaluations grows as
+%$\mathcal{O}!\bigl(\log_{,\varphi}!\bigl((7-1)/x_{\mathrm{atol}}\bigr)\bigr)$,
+%where $\varphi!=!(1+\sqrt5)/2$.
+%\textbf{Global} optimization finds a 6-element vector $\mathbf{c} \in \mathbb{R}^6$. It uses \texttt{scipy.optimize.minimize} with the L-BFGS-B (Limited-memory Broyden–Fletcher–Goldfarb–Shanno with Bounds) algorithm. L-BFGS-B is a quasi-Newton method for multi-dimensional, bound-constrained problems. It approximates the inverse Hessian matrix using gradient information to find a search direction, starting from an initial guess $\mathbf{x_0}$. The \texttt{eps} parameter specifies the step size for the finite-difference gradient approximation.
+
+Each evaluation renders $4\times16=64$ SDN RIRs (four sources, sixteen
+receivers), computes their EDCs, and returns the mean RMSE.
+
+The upper limit of the bound \(c<7\) follows directly from Constraint 2 in~\eqref{constraint3}\,(dominant–branch preservation), while the lower limit is anchored at the baseline \(c=1\). 
+As discussed in Sec.~\ref{sec:results}, values \(c<1\) (and especially negative~\(c\)) delay the NED build-up by suppressing the non-dominant branches
+(see \(p_{\text{non-dom}}\) in Table~\ref{tab:c_properties}); 
+hence they are excluded from the optimisation space. 
+% For c_vec case, L-BFGS-
+
+The resulting optima and their RMSE values are listed in Table~\ref{tab:c_optim}.  
+Relative to the hand-picked integer coefficients of Table~\ref{tab:multi-pair-results},  
+the global search settles closer to the previously identified sweet spot \(c_{\text{global}} = 2.998\), achieving the same mean error of 
+\(0.84\;\text{dB}\) as \(c\!=\!3\).
+Granting a different coefficient (\(c_{\text{single}}\)) according to different source positions further reduces the 50ms EDC-RMSE to \(0.35\;\text{dB}\).
+
+% because the HO-SDN drop occurs later, when amplitudes are already lower; less extra boost is sufficient
+
+
+
+\begin{table*}[tbh]
+    \centering
+    \caption{Optimization results and corresponding 50ms EDC-RMSE (dB) across 16 \textbf{uniformly distributed} receiver positions for \textbf{Room A} and \textbf{Room Cube6} (New).
+             \textbf{Reference Method}: ISM (rimpy-neg10).}
+    \label{tab:unified-fullgrid-results}
+    \renewcommand{\arraystretch}{1.25}
+    \setlength{\tabcolsep}{2pt}
+    %\tiny % Reduced font size to fit the merged table
+    
+    \begin{tabular}{l | cc cc cc cc c | cc cc cc cc c}
+        \toprule
+        & \multicolumn{9}{c|}{\textbf{Room A (Fullgrid)}} 
+        & \multicolumn{9}{c}{\textbf{Cube6 Room (Fullgrid)}} \\
+        \cmidrule(lr){2-10} \cmidrule(l){11-19}
+        \textbf{Source}
+        & \multicolumn{2}{c}{Centre} & \multicolumn{2}{c}{Lower-Left} & \multicolumn{2}{c}{Top-Middle} & \multicolumn{2}{c}{Upper-Right} & \textbf{Avg.} 
+        & \multicolumn{2}{c}{Centre} & \multicolumn{2}{c}{Lower-Left} & \multicolumn{2}{c}{Top-Middle} & \multicolumn{2}{c}{Upper-Right} & \textbf{Avg.} \\
+        
+        \textbf{RMSE} & $c$ & RMSE & $c$ & RMSE & $c$ & RMSE & $c$ & RMSE & \textbf{RMSE} 
+                        & $c$ & RMSE & $c$ & RMSE & $c$ & RMSE & $c$ & RMSE & \textbf{RMSE} \\
+        \midrule
+        
+        % --- ORIGINAL ---
+        $c_{\text{original}}$
+        & 1 & 2.33 & 1 & 0.45 & 1 & 1.21 & 1 & 0.62 & 1.15
+        & 1 & 1.63 & 1 & 0.55 & 1 & 1.07 & 1 & 0.60 & 0.96 \\[3pt]
+        \midrule
+
+        % --- SINGLE SCALAR ---
+        $c_{\text{single}}$
+        & 4.78 & \textbf{0.24} & 0.09 & 0.39 & 3.52 & 0.33 & 0.98 & 0.62 & 0.40
+        & 4.03 & 0.31 & 2.23 & 0.41 & 3.28 & 0.24 & 1.33 & 0.58 & 0.39 \\[3pt]
+        \midrule
+
+        % --- GLOBAL SCALAR ---
+        $c_{\text{global}}$
+        & 3.66 & 0.61 & 3.66 & 0.77 & 3.66 & 0.34 & 3.66 & 1.04 & 0.69
+        & 3.22 & 0.49 & 3.22 & 0.61 & 3.22 & 0.24 & 3.22 & 1.01 & 0.59 \\[3pt]
+        \midrule
+
+        % --- WALL SINGLE (VECTORS) ---
+        $c_{\text{wall-s}}$
+        % ROOM A BLOCK
+        & \multicolumn{1}{c}{$\begin{bmatrix} 5.57\\4.43\\7.00\\3.16\\1.00\\1.93 \end{bmatrix}$} & \textbf{0.21}
+        & \multicolumn{1}{c}{$\begin{bmatrix} 1.00\\1.23\\4.95\\1.00\\1.00\\1.00 \end{bmatrix}$} & \textbf{0.31}
+        & \multicolumn{1}{c}{$\begin{bmatrix} 1.00\\4.82\\4.95\\6.28\\1.00\\1.00 \end{bmatrix}$} & \textbf{0.27}
+        & \multicolumn{1}{c}{$\begin{bmatrix} 1.06\\1.00\\1.00\\1.00\\1.00\\1.00 \end{bmatrix}$} & 0.62 & \textbf{0.35}
+        % CUBE6 BLOCK
+        & \multicolumn{1}{c}{$\begin{bmatrix} 7.00\\1.47\\5.18\\1.00\\1.00\\5.11 \end{bmatrix}$} & 0.17
+        & \multicolumn{1}{c}{$\begin{bmatrix} 2.81\\1.00\\1.00\\1.00\\3.14\\1.00 \end{bmatrix}$} & 0.38
+        & \multicolumn{1}{c}{$\begin{bmatrix} 2.84\\1.29\\6.82\\1.00\\1.00\\2.77 \end{bmatrix}$} & \textbf{0.19}
+        & \multicolumn{1}{c}{$\begin{bmatrix} 1.43\\1.34\\1.00\\1.00\\1.00\\1.35 \end{bmatrix}$} & 0.58 & 0.38$^\dagger$ \\[20pt] 
+        \midrule
+
+        % --- WALL GLOBAL (SHARED VECTOR) ---
+        $c_{\text{wall-g}}$
+        & $\mathbf{c}_{wg1}$ & 0.44 & $\mathbf{c}_{wg1}$ & 0.47 & $\mathbf{c}_{wg1}$ & 0.29 & $\mathbf{c}_{wg1}$ & 0.78 & 0.50
+        & $\mathbf{c}_{wg2}$ & \textbf{0.25} & $\mathbf{c}_{wg2}$ & 0.45 & $\mathbf{c}_{wg2}$ & 0.22 & $\mathbf{c}_{wg2}$ & 0.73 & 0.41 \\
+        \midrule
+           $c_{\text{predMCv1}}$
+        & 5.84 & 0.44
+            & 3.44 & 0.70
+              & 4.43 & 0.48
+              & 2.56 & 0.81
+               & \textbf{0.61}  
+        & $c_{\text{predMCv1}}$ & & & & & & & & \\[2pt]
+
+        $c_{\text{pred13srcpoly}}$
+        & 5.80 & 0.43 & 1.86 & 0.41 & 3.05 & 0.41 & 1.31 & 0.63 &  \textbf{0.47}  
+        &  &  &  &  &  &  &  &  & \\[2pt]
+
+        % --- PredMC v2 (New Line) ---
+        $c_{\text{predDIAGlin}}$
+        & 5.1 & 0.27 & 1.86 & 0.41 & 3.20 & 0.37 & 1.00 & 0.62 &  \textbf{0.42}  
+        &  &  &  &  &  &  &  &  & \\[2pt]
+
+                % --- PredMC v2 (New Line) ---
+        $c_{\text{predDIAGpoly}}$
+        & 5.22 & 0.30 & 1.92 & 0.41 & 3.10 & 0.40 & 1.09 & 0.62 &  \textbf{0.43}  
+        &  &  &  &  &  &  &  &  & \\[2pt]
+        
+        \bottomrule
+        \multicolumn{19}{l}{\footnotesize  * $\mathbf{c}_{wg1}$ (Room A) $= [1.00, 1.03, 5.80, 1.00, 6.24, 7.00]^\top$} \\
+        \multicolumn{19}{l}{\footnotesize  * $\mathbf{c}_{wg2}$ (Cube6) $= [1.33, 1.14, 7.00, 1.00, 1.41, 6.85]^\top$} \\
+    \end{tabular}
+\end{table*}
+
+\section{Conclusion}
+\label{sec:conclusion}
+\textbf{(old)}
+
+Source-Weighted Scattering Delay Networks (SW-SDN) replace the uniform source-injection vector of the original SDN with a single-parameter, 
+direction-dependent weighting. This simple modification restores the specular launch of second-order reflections,
+reduces the early energy deficit by up to 5dB, ($c=7$ in \ref{fig:rmse_mosaic_RIMPY}a), 
+and leaves the late reverb decay and computational footprint essentially unchanged. 
+The experiments show that the optimal weighting coefficient $c$ depends on the source–receiver geometry and room parameters, 
+but that a small discrete set of values ($c\in{[-3,7]}$ in our tests) already covers the minimum and maximum limits that satisfies the physical constraints described in \ref{sec:proposed_approach}.  
+For centrally located pairs SW-SDN outperforms the baseline across the entire receiver grid, 
+while corner configurations require less injection (hence, smaller $|c|$ values) or, the randomised target selection introduced in Section~\ref{sec:source_weighting_strategy}.
+
+\bibliography{references}
+
+\clearpage
+\section{Appendix}
+
+\subsection{EDC–Spectral Analysis}
+\label{sec:spectral_edc_analysis}
+
+\begin{figure}[tbh]
+  \centering
+  \includegraphics[width=\linewidth]{figs/spectral_comparison.png}
+  \caption{Spectral Comparison of the RIRs of ISM-rimpy vs SDN and ISM-rimpy vs SW-SDN c=5 with 1/3-octave smoothed magnitude spectra, up to 20 kHz.}
+  \label{fig:spectral_comparison}
+\end{figure}
+
+\begin{table}[t]
+    \centering
+    \caption{50\,ms EDC–RMSE (dB) after low-pass filtering (2kHz, 4kHz) for the center source-mic pair in Room A.
+             (\textbf{Reference}: ISM\,rimpy-neg10).}
+    \label{tab:lp-edc-rmse}
+    \renewcommand{\arraystretch}{1.1}
+    \begin{tabular}{lccccc}
+        \toprule
+        \multirow{2}{*}{\textbf{Method}} &
+        \multirow{2}{*}{Orig.} &
+        \multicolumn{2}{c}{LP 2\,kHz} &
+        \multicolumn{2}{c}{LP 4\,kHz} \\
+        & & RMSE & $\!\Delta$ & RMSE & $\!\Delta$ \\
+        \midrule
+        SDN Original ($c=1$) & 2.42 & 1.85 & $-0.56$ & 2.12 & $-0.30$ \\
+        SW-SDN ($c=2$)     & 1.99 & 1.52 & $-0.47$ & 1.76 & $-0.23$ \\
+        SW-SDN ($c=3$)     & 1.19 & 0.90 & $-0.28$ & 1.08 & $-0.11$ \\
+        SW-SDN ($c=4$)     & 0.49 & 0.35 & $-0.14$ & 0.46 & $-0.03$ \\
+        SW-SDN ($c=5$)     & 0.21 & 0.21 & $+0.01$ & 0.17 & $-0.04$ \\
+        SW-SDN ($c=6$)     & 0.45 & 0.46 & $+0.01$ & 0.40 & $-0.06$ \\
+        SW-SDN ($c=7$)     & 0.67 & 0.66 & $-0.01$ & 0.60 & $-0.07$ \\
+        SW-SDN ($c=0$)     & 2.05 & 1.61 & $-0.44$ & 1.83 & $-0.22$ \\
+        SW-SDN ($c=-1$)    & 1.28 & 1.04 & $-0.25$ & 1.19 & $-0.10$ \\
+        SW-SDN ($c=-2$)    & 0.59 & 0.47 & $-0.12$ & 0.58 & $-0.02$ \\
+        SW-SDN ($c=-3$)    & 0.16 & 0.12 & $-0.04$ & 0.15 & $-0.00$ \\
+        HO-SDN (N=2)       & 2.45 & 1.22 & $-1.23$ & 1.74 & $-0.70$ \\
+        HO-SDN (N=3)       & 1.65 & 0.35 & $-1.30$ & 1.00 & $-0.65$ \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+Table~\ref{tab:lp-edc-rmse} shows how the 50ms EDC–RMSE changes
+when both the reference (ISM–rimpy-10cm) and
+each test RIR are low-pass–filtered at 4 kHz and 2 kHz.  
+Table~\ref{tab:lsd_bands} complements this with
+log-spectral-distance (LSD) between each SDN variant and the ISM reference, including
+“self–LP“ rows that quantify how much high-frequency energy each SDN
+contains. Both tables use the same single source-mic pair for Room A defined in \ref{tab:single-pair-results}. 
+SW-SDN with c=5 is the choosen variant for comparion, as it gives the best EDC RMSE result for this configuration.
+Full band spectral comparions of SDN and SW-SDN (c=5) is provided in Fig.\ref{fig:spectral_comparison}, 
+with SW-SDN indicating a closer spectral match to the reference for all bands. 
+
+Removing everything above 4kHz increases the LSD for both
+networks (\,+1.05\,dB for SDN\(_{\text{orig}}\), +0.80\,dB for
+SW–SDN\(_{c=5}\)\,), i.e.\ the two models were already similar
+in the top octave and most of their disagreement resides below
+4kHz.  That is why low–passing changes the full–band LSD only marginally.
+
+Filtering the RIRs below 4kHz shaves
+$\approx\!0.6$\,dB off the 2.4\,dB 50ms error of the original SDN
+(Table~\ref{tab:lp-edc-rmse}, row~1), i.e.\ roughly one quarter of its
+early-energy deficit is carried by high frequencies.  For
+HO-SDN(\(N\!=\!3\)) the reduction is much larger
+(\(-1.3\)\,dB,\,79\%), confirming that its error is dominated by the HF content.  By contrast,
+SW-SDN(\(c\!=\!5\)) hardly moves: its RMSE changes by less than
+0.05{dB} after either low-pass because it already matches the HF
+part of the reference and its residual mismatch lies in the
+low/mid-band.
+
+Although SDN RIRs contain plenty of high-frequency energy
+(Row~“2kH-LPz copy” in Table~\ref{tab:lsd_bands}: self-distances rise by 25–31\,dB when the top octave is removed from one signal only), 
+that HF content is similar in both models and
+therefore cancels out in a pairwise comparison. \textbf{Consequently},
+the broadband LSD is governed mainly by the \(\le\)\,4\,kHz
+range (see~Tab.\ref{tab:lsd_bands} 1st row: total SDN-ISM mismatch drops by only 1–1.5 dB)
+, the 50ms EDC error is reduced by only 0.5–0.6\,dB when
+the top octave of RIR is removed, and SW-SDN lowers the
+error mainly by restoring the missing low– and mid–band
+energy, even though it boosts the whole spectrum. 
+SW-SDN\,$(c\!=\!5)$ injects more energy overall, hence the drop from full band to 2kHz (30dB) appears larger than for the baseline SDN (24dB).
+
+Hence the two statements are consistent:  
+(i) the SDN energy deficit is broadband, but (ii) its
+largest impact lies below 4{kHz}.
+
+\begin{table}[h]
+  \centering
+  \footnotesize
+  \caption{Log-spectral distance (dB) to ISM reference (rimpy-neg10cm).}
+  \label{tab:lsd_bands}
+  \renewcommand{\arraystretch}{1.15}
+  \begin{tabular}{l@{\hskip 4pt}c@{\hskip 5pt}c@{\hskip 5pt}c@{\hskip 5pt}c}
+    \toprule
+    \textbf{RIR Pair: LSD Values (dB)} & \textbf{Full} & \textbf{LP$<$4k} & \textbf{LP$<$2k} & \textbf{Self–LP\,2k} \\
+    \midrule
+    SDN vs. ISM & 11.11 & 12.16 & 12.69 & -- \\
+    SW-SDN ($c{=}5$) vs. ISM & 8.36 & 9.16 & 9.74 & -- \\
+    SDN vs. its LP-2k copy & -- & -- & -- & 24.51 \\
+    SW-SDN ($c{=}5$) vs. its LP-2k copy & -- & -- & -- & 30.67 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+
+\end{document}

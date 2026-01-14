@@ -326,6 +326,28 @@ def generate_source_positions(room_params, name = None):
 
     return sources
 
+def merge_source_lists(*source_lists):
+    """Merge multiple source position lists, removing duplicates while preserving order.
+
+    Args:
+        *source_lists: Multiple lists of source positions (x, y, z) or (x, y, z, name)
+
+    Returns:
+        List of unique source positions
+    """
+    seen = set()
+    merged_sources = []
+
+    for source_list in source_lists:
+        for src in source_list:
+            key = (round(src[0], 6), round(src[1], 6), round(src[2], 6))
+            if key not in seen:
+                seen.add(key)
+                merged_sources.append(src)
+
+    return merged_sources
+
+
 def generate_fixed_source_grid(
     room_params,
     padding,

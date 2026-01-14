@@ -50,7 +50,22 @@ _project_root = os.path.dirname(_script_dir)  # Go up one level from research/ t
 
 # === DATA SOURCE CONFIGURATION ===
 # Option 1: Legacy mode
-config = DataConfig(mode="legacy", legacy_files=["cube6_FULLGRID_center_source.npz"])
+config = DataConfig(mode="legacy", legacy_files=[
+
+    "journal_FULLGRID_center_source.npz",
+    "journal_FULLGRID_top_middle_source.npz",
+    "journal_FULLGRID_upper_right_source.npz",
+    "journal_FULLGRID_lower_left_source.npz",
+
+    # "cube6_FULLGRID_center_source.npz",
+    # "cube6_FULLGRID_top_middle_source.npz",
+    # "cube6_FULLGRID_lower_left_source.npz",
+
+    # "aes_FULLGRID_center_source.npz",
+    # "aes_FULLGRID_top_middle_source.npz",
+    # "aes_FULLGRID_upper_right_source.npz",
+    # "aes_FULLGRID_lower_left_source.npz",
+])
 
 # Option 2: Experiment mode (uncomment to use)
 # config = DataConfig(mode="experiment", experiment_name="aes_fullgrid_perpair_srcgrid3x5_corner2.0_per_pair")
@@ -195,7 +210,7 @@ if __name__ == "__main__":
     obj = partial(
         compute_total_rmse,
         datasets=datasets,
-        err_duration_ms=ERROR_DURATION_MS,
+        err_duration_ms=err_duration_ms,
         base_cfg=base_cfg,
     )
 
@@ -217,7 +232,7 @@ if __name__ == "__main__":
         source_name = config.extract_source_name_for_display(FILES_TO_PROCESS[i])
         source_names.append(source_name)
         
-        mean_rmse, individual_rmses = compute_dataset_rmse(optimal_c, dataset, ERROR_DURATION_MS, base_cfg, return_individual=True)
+        mean_rmse, individual_rmses = compute_dataset_rmse(optimal_c, dataset, err_duration_ms, base_cfg, return_individual=True)
         all_results[source_name] = {
             'optimal_c': optimal_c,
             'mean_rmse': mean_rmse,

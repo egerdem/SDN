@@ -21,7 +21,7 @@ from spatial_analysis import (
     print_source_grid,
     generate_receiver_grid_old,
     generate_source_positions, generate_full_receiver_grid, generate_fixed_source_grid,
-    generate_fixed_source_grid_simple
+    generate_fixed_source_grid_simple, merge_source_lists
 )
 import geometry
 from sdn_path_calculator import SDNCalculator
@@ -37,6 +37,7 @@ if __name__ == "__main__":
     # Feature Flags
     PATH_CALC = False  # Enable/disable path calculation analysis
     HSRC_Contour = True  # Enable H_src contour plot visualization
+    PLOT_SOURCE_LOCATIONS = True  # Plot source positions on H_src contour map
 
     GRID_SELECTION = "full" # "full" or "quarter"
 
@@ -62,14 +63,25 @@ if __name__ == "__main__":
         )
         print(f"Running in MULTI-POSITION (QUARTER-GRID) mode for room '{active_room['display_name']}'")
 
-
-    # Generate source positions (v3 includes corner source)
+# Generate source positions (v3 includes corner source)
     # source_positions = generate_source_positions(active_room, name="v3")
-    source_positions = generate_fixed_source_grid(active_room, padding=0.5, n_x=3, n_y=3, z_mode="fixed_1p5",
-                                                  include_corners=True, corner_offset=1)
+    #source_positions_9src = generate_fixed_source_grid(active_room, padding=0.5, n_x=3, n_y=3, z_mode="fixed_1p5",
+    #include_corners=True, corner_offset=1)
 
-    # source_positions = generate_fixed_source_grid_simple(active_room, padding=2, n_x=2, n_y=2, z_mode="fixed_1p5") #deneydeki
-
+    #source_positions_4src = generate_fixed_source_grid_simple(active_room, padding=2, n_x=2, n_y=2, z_mode="fixed_1p5") #deneydeki
+    #source_positions = merge_source_lists(source_positions_9src, source_positions_4src)
+    
+    # Generate source positions - using diagonal grid for H_src analysis
+    source_positions = generate_fixed_source_grid(
+        active_room,
+        padding=0.5,
+        n_x=15,
+        n_y=15,
+        z_mode="fixed_1p5",
+        include_corners=True,
+        corner_offset=0.5,
+        diagonals=True
+    )
 
     # Print and visualize grid for each source position
     print(f"\n{'='*80}")
@@ -447,25 +459,31 @@ if __name__ == "__main__":
         contour_lines = ax.tricontour(triang, h_src_list, levels=10, colors='black', alpha=0.3, linewidths=0.5)
         ax.clabel(contour_lines, inline=True, fontsize=8, fmt='%.2f')
         
-        # Colorbar
-        cbar = plt.colorbar(contour_filled, ax=ax, label='H_src / L_char (Normalized Harmonic Mean)')
+        # Colorbar (with shrink to prevent overflow)
+        cbar = plt.colorbar(contour_filled, ax=ax, label='H_src / L_char (Normalized Harmonic Mean)', 
+                           shrink=0.8, fraction=0.046, pad=0.04)
         
         # Draw room boundaries
         ax.plot([0, width, width, 0, 0], [0, 0, depth, depth, 0], 'k-', linewidth=2, label='Room Boundaries')
         
-        # Plot the actual source positions used in the experiment (if any)
-        # if len(contour_source_positions) > 0:
-        #     src_x = [s[0] for s in contour_source_positions]
-        #     src_y = [s[1] for s in contour_source_positions]
-        #     ax.scatter(src_x, src_y, c='blue', s=100, marker='x', linewidths=3,
-        #               label='Experiment Sources', zorder=5)
+        # Plot the actual source positions used in the experiment (if flag is enabled)
+        if PLOT_SOURCE_LOCATIONS and len(source_positions) > 0:
+            src_x = [s[0] for s in source_positions]
+            src_y = [s[1] for s in source_positions]
+            ax.scatter(src_x, src_y, c='blue', s=100, marker='o', linewidths=2.5,
+                      label='Source Positions (Diagonal Grid)', zorder=5)
+            
+            # Add coordinate labels for each source
+            for sx, sy, sz in source_positions:
+                ax.text(sx + 0.53, sy + 0.03, f'({sx:.1f},{sy:.1f},{sz:.1f})', 
+                       fontsize=8, ha='center', va='top', color='black')
         
         # Labels and title
         ax.set_xlabel('X Position (m)', fontsize=12)
         ax.set_ylabel('Y Position (m)', fontsize=12)
-        ax.set_title(f'Normalized H_src Contour Map - {room_name}\n(Lower values = closer to walls = harder scenario)', 
-                    fontsize=14, fontweight='bold')
-        ax.legend(loc='upper right')
+        # ax.set_title(f'Normalized H_src Contour Map - Room {room_name[0]}',
+        #             fontsize=14, fontweight='bold') # Lower values = closer to walls = harder scenario
+        ax.legend(loc='upper center', bbox_to_anchor=(0.5, 0.95), ncol=2, fontsize=10)
         ax.grid(True, alpha=0.2)
         ax.set_aspect('equal')
         

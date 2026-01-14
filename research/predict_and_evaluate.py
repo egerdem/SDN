@@ -44,11 +44,15 @@ EXPERIMENT_CONFIGS = {
 
 GRID_FILES = {
     'fullgrid': [
-        "aes_FULLGRID_center_source.npz",
-        "aes_FULLGRID_top_middle_source.npz",
-        "aes_FULLGRID_upper_right_source.npz",
-        "aes_FULLGRID_lower_left_source.npz",
+        # "aes_FULLGRID_center_source.npz",
+        # "aes_FULLGRID_top_middle_source.npz",
+        # "aes_FULLGRID_upper_right_source.npz",
+        # "aes_FULLGRID_lower_left_source.npz",
         # "aes_FULLGRID_corner_sourcev3.npz",
+        "journal_FULLGRID_center_source.npz",
+        "journal_FULLGRID_top_middle_source.npz",
+        "journal_FULLGRID_upper_right_source.npz",
+        "journal_FULLGRID_lower_left_source.npz",
     ],
     'quarter': [
         "aes_quarter_center_source.npz",
@@ -81,8 +85,8 @@ def main():
     parser.add_argument(
         '--experiment',
         type=str,
-        # default='8src_diagonal',
-        default='13src_grid',
+        default='8src_diagonal',
+        # default='13src_grid',
         choices=list(EXPERIMENT_CONFIGS.keys()),
         help='Experiment to use for model parameters (fit equation)'
     )
@@ -96,7 +100,7 @@ def main():
     parser.add_argument(
         '--model',
         type=str,
-        default='polynomial',
+        default='linear',
         choices=['linear', 'polynomial', 'power'],
         help='Model type for prediction',
     )

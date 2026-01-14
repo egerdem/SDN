@@ -192,3 +192,5 @@ The ratio approaches N when all amplitudes are equal (a_i = a for all i).
 
 **Neither is "wrong" - they answer slightly different questions!**
 
+
+
