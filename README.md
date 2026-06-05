@@ -1,3 +1,6 @@
+## 📝 Research Focus
+
+Investigating why SDN exhibits energy drop after first-order reflections despite good perceptual performance. Comparing path lengths, energy distribution, and echo density between SDN and ISM methods, different injection and scattering variants
 
 ## 📁 Project Structure (NOT READY YET - contact me)
 
@@ -74,8 +77,4 @@ room_parameters = room_aes  # or room_waspaa, room_journal
 - RUN_SDN_Test5 = True           # SDN with sw injection c=5
 - PLOT_ISM_rimPy_neg = True      # ISM rimpy with negative reflection coef (reference)
 - RUN_MY_HO_SDN_n2_swc5 = True   # SW-HO-SDN order 2 with sw injection c=5
-
-## 📝 Research Focus
-
-Investigating why SDN exhibits energy drop after first-order reflections despite good perceptual performance. Comparing path lengths, energy distribution, and echo density between SDN and ISM methods, different injection and scattering variants
 
