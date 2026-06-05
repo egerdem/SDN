@@ -39,6 +39,24 @@ EXPERIMENT_CONFIGS = {
     '8src_diagonal': {
         'experiment_name': 'aes_fullgrid_8src_diagonal',
         'description': '8 diagonal sources, 16 receivers'
+    },
+
+    '7src_3Ddiagonal': {
+        'experiment_name': 'aes_fullgrid_7src_3Ddiagonal',
+        'description': '7 3d diagonal sources, 16 receivers'
+    },
+
+    '10x60_seed42_0cornerplacement_big': {
+        'experiment_name': '10x60_seed42_0cornerplacement_big',
+        'description': '10 rooms × 60 pairs, seed 42, 0% corner placement'
+    },
+    '10x60_seed42_25cornerplacement_big': {
+        'experiment_name': '10x60_seed42_25cornerplacement_big',
+        'description': '10 rooms × 60 pairs, seed 42, 25% corner placement'
+    },
+    'legacy_4x20_50cornerplacement_noseed': {
+        'experiment_name': 'legacy_4x20_50cornerplacement_noseed',
+        'description': '4 rooms × 20 pairs, 50% corner placement, no seed'
     }
 }
 
@@ -85,8 +103,14 @@ def main():
     parser.add_argument(
         '--experiment',
         type=str,
-        default='8src_diagonal',
+        # default='8src_diagonal',
         # default='13src_grid',
+        # default='4x20_random_pair',
+        # default='legacy_4x20_50cornerplacement_noseed',
+        # default='10x60_seed42_25cornerplacement_big',
+        # default='10x60_seed42_0cornerplacement_big',
+        # default='10x60_seed42_0cornerplacement_big_V2',
+        default='7src_3Ddiagonal',
         choices=list(EXPERIMENT_CONFIGS.keys()),
         help='Experiment to use for model parameters (fit equation)'
     )

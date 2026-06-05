@@ -235,7 +235,7 @@ def calculate_pra_rir(room_parameters, duration, Fs, use_rand_ism=False, max_ran
     
     return rir, label
 
-def calculate_rimpy_rir(room_parameters, duration, Fs, reflection_sign, tw_fractional_delay_length=0, randDist=0.0):
+def calculate_rimpy_rir(room_parameters, duration, Fs, reflection_sign, tw_fractional_delay_length=0, randDist=0.0, rand_seed=None):
     """
     Calculate RIR using rimPy ISM.
     
@@ -246,12 +246,19 @@ def calculate_rimpy_rir(room_parameters, duration, Fs, reflection_sign, tw_fract
         duration (float): Duration of RIR in seconds
         Fs (int): Sampling frequency
         reflection_sign (int): 1 for positive reflection coefficients, -1 for negative
+        randDist (float): Random displacement in meters (0.0 for standard ISM, 0.1 for ±10cm)
+        rand_seed (int): Random seed for reproducibility (only used if randDist > 0)
         
     Returns:
         tuple: (normalized RIR, room object)
     """
     # SDNPy path is already added at module level, but ensure it's available
     from rimPypack import rimPy as rimpy
+    
+    # Set random seed for reproducibility if using randomization
+    if randDist > 0 and rand_seed is not None:
+        np.random.seed(rand_seed)
+        print(f"  [rimPy] Using random seed {rand_seed} for reproducible rand10")
 
     # Room dimensions for rimPy
     room_dim = np.array([room_parameters['width'], room_parameters['height'], room_parameters['depth']])
@@ -317,6 +324,8 @@ def calculate_sdn_rir(room_parameters, test_name, room, duration, Fs, config):
     Returns:
         tuple: (normalized RIR, room object)
     """
+    print(f"📊 STANDARD SDN METHOD: {test_name}")
+    
     # Create room object
     # print("Running", test_name, "with:")
     if 'absorption' in config:
@@ -342,9 +351,9 @@ def calculate_sdn_rir(room_parameters, test_name, room, duration, Fs, config):
     if is_default:
         label = 'SDN-Original'
     else:
-        label = f'SDN-{test_name}'
-        
-    if 'info' in config:
+        label = test_name
+
+    if 'info' in config and config['info']:  # Only add info if not empty
         label += f': {config["info"]}'
     
     return sdn, rir, label, is_default
@@ -354,114 +363,253 @@ def calculate_sdn_rir_fast(room_parameters, test_name, room, duration, Fs, confi
     Calculate RIR using FAST SDN (Analytic Reconstruction).
     Uses caching to store Basis Functions (R(0) and R(1)-R(0)).
     
-    Handles both scalar 'source_weighting' and vector 'node_weighting_vector'.
+    Handles both source-side and mic-side fast computation:
+    - Source side: 'source_weighting' (scalar) or 'node_weighting_vector' (6-element vector)
+      Controlled by config['use_fast_method'] = True (legacy)
+    - Mic side: 'mic_weighting' (scalar) or 'collection_vector' (5-element vector)
+      Controlled by config['use_fast_mic_method'] = True (new)
     
     Args:
         Same as calculate_sdn_rir
+        config: Can include 'use_fast_method' or 'use_fast_mic_method' flags
     """
     global _BASIS_CACHE
     
     flags = config.get('flags', {})
     cache_label = config.get('cache_label')
     
-    # Determine mode: Scalar or Vector
-    is_vector_mode = 'node_weighting_vector' in flags
+    # Check which fast mode to use (backward compatible with existing configs)
+    use_fast_method = config.get('use_fast_method', False)  # Source-side (legacy)
+    use_fast_mic_method = config.get('use_fast_mic_method', False)  # Mic-side (new)
     
-    if is_vector_mode:
-        mode_key = "vector"
-        requested_c = flags.get('node_weighting_vector')
-        # Ensure it's a list/array of 6 floats
-        if not isinstance(requested_c, (list, np.ndarray)) or len(requested_c) != 6:
-             assert False, f"Fast SDN Vector mode requires list of 6 coefficients. Got {requested_c}. Fallback to scalar 1.0"
-             
-    else:
-        mode_key = "scalar"
-        requested_c = flags.get('source_weighting')
-
-    # Construct Cache Key (Geometry + Absorption + Duration + Mode)
-    cache_key = (
-        room_parameters['width'], room_parameters['depth'], room_parameters['height'],
-        round(room.source.srcPos.x, 3), round(room.source.srcPos.y, 3), round(room.source.srcPos.z, 3),
-        round(room.micPos.x, 3), round(room.micPos.y, 3), round(room.micPos.z, 3),
-        Fs, duration, room_parameters.get('absorption'), mode_key
-    )
+    # Sanity check: can't use both fast modes simultaneously
+    if use_fast_method and use_fast_mic_method:
+        raise ValueError("Cannot use both use_fast_method and use_fast_mic_method simultaneously")
     
-    # --- VECTOR MODE (Optimisation Wall C) ---
-    if is_vector_mode:
-        if cache_key in _BASIS_CACHE:
-            # print("  [FastSDN-Vector] Using Cached Basis Functions")
-            rir_base, rir_slopes = _BASIS_CACHE[cache_key]
+    # Determine which side we're optimizing
+    if use_fast_mic_method:
+        # MIC-SIDE FAST MODE
+        is_vector_mode = 'mic_weighting_vector' in flags
+        
+        if is_vector_mode:
+            mode_key = "mic_vector"
+            requested_c = flags.get('mic_weighting_vector')
+            # Ensure it's a list/array of 6 floats (one per wall, generates [c, cn, cn, cn, cn] pattern)
+            if not isinstance(requested_c, (list, np.ndarray)) or len(requested_c) != 6:
+                assert False, f"Fast SDN Mic Vector mode requires list of 6 coefficients (mic_weighting_vector). Got {requested_c}."
         else:
-            print("  [FastSDN-Vector] Cache Miss - Pre-computing 7 Basis Functions...")
-            
-            # 1. Baseline (All c=0)
-            cfg_base = deepcopy(config)
-            
-            cfg_base['flags']['node_weighting_vector'] = [0.0] * 6
-            
-            _, rir_base, _, _ = calculate_sdn_rir(room_parameters, test_name, room, duration, Fs, cfg_base)
-            
-            rir_slopes = []
-            num_walls = 6
-            
-            # 2. Wall Slopes (One c=1, others c=0)
-            for i in range(num_walls):
-                # Activate wall i
-                c_vec = [0.0] * num_walls
-                c_vec[i] = 1.0
-                
-                cfg_i = deepcopy(config)
-                cfg_i['flags']['node_weighting_vector'] = c_vec
-                cfg_i['label'] = f"Basis_{i}"
-                
-                _, rir_i, _, _ = calculate_sdn_rir(room_parameters, f"Basis{i}", room, duration, Fs, cfg_i)
-                
-                # Slope for wall i = R(e_i) - R(0)
-                slope_i = rir_i - rir_base
-                rir_slopes.append(slope_i)
-            
-            rir_slopes = np.array(rir_slopes)
-            _BASIS_CACHE[cache_key] = (rir_base, rir_slopes)
-            _save_basis_cache_entry(cache_key, (rir_base, rir_slopes), cache_label)
-            
-        # Reconstruction: R(c) = R(0) + sum(c_i * Slope_i)
-        # Use tensordot for weighted sum of arrays
-        weighted_slopes = np.tensordot(requested_c, rir_slopes, axes=([0], [0]))
-        rir = rir_base + weighted_slopes
-        label = f'SDN-FAST-Vec-{test_name}'
-        if 'info' in config:
-            label += f': {config["info"]}'
-
-    # --- SCALAR MODE (Uniform C) ---
+            mode_key = "mic_scalar"
+            requested_c = flags.get('mic_weighting', 1.0)
+        
+        # Cache key for mic-side mode
+        # CRITICAL: Must include source_weighting! Different c values need different basis functions.
+        source_weighting = flags.get('source_weighting', 1.0)
+        cache_key = (
+            room_parameters['width'], room_parameters['depth'], room_parameters['height'],
+            round(room.source.srcPos.x, 3), round(room.source.srcPos.y, 3), round(room.source.srcPos.z, 3),
+            round(room.micPos.x, 3), round(room.micPos.y, 3), round(room.micPos.z, 3),
+            Fs, duration, room_parameters.get('absorption'), mode_key,
+            True,  # specular_mic_pickup must be True for mic-side
+            round(source_weighting, 4),  # CRITICAL: Include source_weighting for mic-side!
+        )
+        
     else:
-        if cache_key in _BASIS_CACHE:
-            # print("  [FastSDN-Scalar] Using Cached Basis Functions")
-            rir_base, rir_shape = _BASIS_CACHE[cache_key]
+        # SOURCE-SIDE FAST MODE (original behavior)
+        is_vector_mode = 'node_weighting_vector' in flags
+        
+        if is_vector_mode:
+            mode_key = "vector"
+            requested_c = flags.get('node_weighting_vector')
+            # Ensure it's a list/array of 6 floats
+            if not isinstance(requested_c, (list, np.ndarray)) or len(requested_c) != 6:
+                 assert False, f"Fast SDN Vector mode requires list of 6 coefficients. Got {requested_c}. Fallback to scalar 1.0"
+                 
         else:
-            print("  [FastSDN-Scalar] Cache Miss - Pre-computing 2 Basis Functions...")
-            
-            # Basis 1: c=0
-            cfg_0 = deepcopy(config)
-            cfg_0['flags']['source_weighting'] = 0.0
-            cfg_0['label'] = "Basis_0"
-            
-            # Basis 2: c=1
-            cfg_1 = deepcopy(config)
-            cfg_1['flags']['source_weighting'] = 1.0
-            cfg_1['label'] = "Basis_1"
-            
-            _, rir_0, _, _ = calculate_sdn_rir(room_parameters, "Basis0", room, duration, Fs, cfg_0)
-            _, rir_1, _, _ = calculate_sdn_rir(room_parameters, "Basis1", room, duration, Fs, cfg_1)
-            
-            rir_shape = rir_1 - rir_0
-            
-            _BASIS_CACHE[cache_key] = (rir_0, rir_shape)
-            _save_basis_cache_entry(cache_key, (rir_0, rir_shape), cache_label)
-            rir_base = rir_0
-            
-        # Reconstruction: R(c) = R(0) + c * (R(1) - R(0))
-        rir = rir_base + (requested_c * rir_shape)
-        label = f"SDN-FAST-{test_name}: c={requested_c}"
+            mode_key = "scalar"
+            requested_c = flags.get('source_weighting')
+
+        # Get mic weighting flags for cache key (if not present, use defaults)
+        specular_mic_pickup = flags.get('specular_mic_pickup', False)
+        mic_weighting = flags.get('mic_weighting', 1.0) if specular_mic_pickup else None
+
+        # Construct Cache Key for SOURCE-SIDE mode (Geometry + Absorption + Duration + Mode + Mic flags)
+        # NOTE: Do NOT include source_weighting here - we're varying it! 
+        # Basis functions are computed with c=0 and c=1, then reconstructed for any c.
+        # BUT do include mic_weighting if present (fixed aspect of geometry).
+        cache_key = (
+            room_parameters['width'], room_parameters['depth'], room_parameters['height'],
+            round(room.source.srcPos.x, 3), round(room.source.srcPos.y, 3), round(room.source.srcPos.z, 3),
+            round(room.micPos.x, 3), round(room.micPos.y, 3), round(room.micPos.z, 3),
+            Fs, duration, room_parameters.get('absorption'), mode_key,
+            specular_mic_pickup,  # Add mic pickup flag to cache key
+            round(mic_weighting, 4) if mic_weighting is not None else None,  # Add mic weighting to cache key
+        )
+    
+    # ========================================================================
+    # MIC-SIDE FAST MODE
+    # ========================================================================
+    if use_fast_mic_method:
+        print(f"🚀 MIC-SIDE FAST METHOD ACTIVE: {test_name}")
+        
+        # --- MIC VECTOR MODE (mic_weighting_vector: 6-element per-wall pattern) ---
+        if is_vector_mode:
+            if cache_key in _BASIS_CACHE:
+                print("  ✓ [FastSDN-MicVec] Using Cached Basis Functions")
+                rir_base, rir_slopes = _BASIS_CACHE[cache_key]
+            else:
+                print("  ⚙️  [FastSDN-MicVec] Cache Miss - Pre-computing 7 Basis Functions...")
+                
+                # 1. Baseline (mic_weighting_vector = [0,0,0,0,0,0])
+                cfg_base = deepcopy(config)
+                cfg_base['flags']['mic_weighting_vector'] = [0.0] * 6
+                cfg_base['label'] = "MicBasis_0"
+                
+                _, rir_base, _, _ = calculate_sdn_rir(room_parameters, "MicBasis0", room, duration, Fs, cfg_base)
+                
+                rir_slopes = []
+                num_walls = 6  # mic_weighting_vector has 6 elements (one per wall)
+                
+                # 2. Wall Slopes (One wall c=1, others c=0)
+                for i in range(num_walls):
+                    # Activate wall i
+                    c_vec = [0.0] * num_walls
+                    c_vec[i] = 1.0
+                    
+                    cfg_i = deepcopy(config)
+                    cfg_i['flags']['mic_weighting_vector'] = c_vec
+                    cfg_i['label'] = f"MicBasis_{i+1}"
+                    
+                    _, rir_i, _, _ = calculate_sdn_rir(room_parameters, f"MicBasis{i+1}", room, duration, Fs, cfg_i)
+                    
+                    # Slope for wall i = R(e_i) - R(0)
+                    slope_i = rir_i - rir_base
+                    rir_slopes.append(slope_i)
+                
+                rir_slopes = np.array(rir_slopes)
+                _BASIS_CACHE[cache_key] = (rir_base, rir_slopes)
+                _save_basis_cache_entry(cache_key, (rir_base, rir_slopes), cache_label)
+                
+            # Reconstruction: R(mic_vec) = R(0) + sum(mic_vec_i * Slope_i)
+            weighted_slopes = np.tensordot(requested_c, rir_slopes, axes=([0], [0]))
+            rir = rir_base + weighted_slopes
+            label = f'SDN-FAST-MicVec-{test_name}'
+            if 'info' in config:
+                label += f': {config["info"]}'
+        
+        # --- MIC SCALAR MODE (mic_weighting) ---
+        else:
+            if cache_key in _BASIS_CACHE:
+                print("  ✓ [FastSDN-MicScalar] Using Cached Basis Functions")
+                rir_base, rir_shape = _BASIS_CACHE[cache_key]
+            else:
+                print("  ⚙️  [FastSDN-MicScalar] Cache Miss - Pre-computing 2 Basis Functions...")
+                
+                # Basis 1: mic_weighting=0
+                cfg_0 = deepcopy(config)
+                cfg_0['flags']['mic_weighting'] = 0.0
+                cfg_0['label'] = "MicBasis_0"
+                
+                # Basis 2: mic_weighting=1
+                cfg_1 = deepcopy(config)
+                cfg_1['flags']['mic_weighting'] = 1.0
+                cfg_1['label'] = "MicBasis_1"
+                
+                _, rir_0, _, _ = calculate_sdn_rir(room_parameters, "MicBasis0", room, duration, Fs, cfg_0)
+                _, rir_1, _, _ = calculate_sdn_rir(room_parameters, "MicBasis1", room, duration, Fs, cfg_1)
+                
+                rir_shape = rir_1 - rir_0
+                
+                _BASIS_CACHE[cache_key] = (rir_0, rir_shape)
+                _save_basis_cache_entry(cache_key, (rir_0, rir_shape), cache_label)
+                rir_base = rir_0
+                
+            # Reconstruction: R(mic_w) = R(0) + mic_w * (R(1) - R(0))
+            rir = rir_base + (requested_c * rir_shape)
+            label = f"SDN-FAST-Mic-{test_name}: mic_w={requested_c}"
+    
+    # ========================================================================
+    # SOURCE-SIDE FAST MODE (original behavior)
+    # ========================================================================
+    else:
+        if use_fast_method:
+            print(f"🚀 SOURCE-SIDE FAST METHOD ACTIVE: {test_name}")
+        
+        # --- VECTOR MODE (Optimisation Wall C) ---
+        if is_vector_mode:
+            if cache_key in _BASIS_CACHE:
+                print("  ✓ [FastSDN-Vector] Using Cached Basis Functions")
+                rir_base, rir_slopes = _BASIS_CACHE[cache_key]
+            else:
+                print("  ⚙️  [FastSDN-Vector] Cache Miss - Pre-computing 7 Basis Functions...")
+                
+                # 1. Baseline (All c=0)
+                cfg_base = deepcopy(config)
+                
+                cfg_base['flags']['node_weighting_vector'] = [0.0] * 6
+                
+                _, rir_base, _, _ = calculate_sdn_rir(room_parameters, test_name, room, duration, Fs, cfg_base)
+                
+                rir_slopes = []
+                num_walls = 6
+                
+                # 2. Wall Slopes (One c=1, others c=0)
+                for i in range(num_walls):
+                    # Activate wall i
+                    c_vec = [0.0] * num_walls
+                    c_vec[i] = 1.0
+                    
+                    cfg_i = deepcopy(config)
+                    cfg_i['flags']['node_weighting_vector'] = c_vec
+                    cfg_i['label'] = f"Basis_{i}"
+                    
+                    _, rir_i, _, _ = calculate_sdn_rir(room_parameters, f"Basis{i}", room, duration, Fs, cfg_i)
+                    
+                    # Slope for wall i = R(e_i) - R(0)
+                    slope_i = rir_i - rir_base
+                    rir_slopes.append(slope_i)
+                
+                rir_slopes = np.array(rir_slopes)
+                _BASIS_CACHE[cache_key] = (rir_base, rir_slopes)
+                _save_basis_cache_entry(cache_key, (rir_base, rir_slopes), cache_label)
+                
+            # Reconstruction: R(c) = R(0) + sum(c_i * Slope_i)
+            # Use tensordot for weighted sum of arrays
+            weighted_slopes = np.tensordot(requested_c, rir_slopes, axes=([0], [0]))
+            rir = rir_base + weighted_slopes
+            label = f'SDN-FAST-Vec-{test_name}'
+            if 'info' in config:
+                label += f': {config["info"]}'
+
+        # --- SCALAR MODE (Uniform C) ---
+        else:
+            if cache_key in _BASIS_CACHE:
+                print("  ✓ [FastSDN-Scalar] Using Cached Basis Functions")
+                rir_base, rir_shape = _BASIS_CACHE[cache_key]
+            else:
+                print("  ⚙️  [FastSDN-Scalar] Cache Miss - Pre-computing 2 Basis Functions...")
+                
+                # Basis 1: c=0
+                cfg_0 = deepcopy(config)
+                cfg_0['flags']['source_weighting'] = 0.0
+                cfg_0['label'] = "Basis_0"
+                
+                # Basis 2: c=1
+                cfg_1 = deepcopy(config)
+                cfg_1['flags']['source_weighting'] = 1.0
+                cfg_1['label'] = "Basis_1"
+                
+                _, rir_0, _, _ = calculate_sdn_rir(room_parameters, "Basis0", room, duration, Fs, cfg_0)
+                _, rir_1, _, _ = calculate_sdn_rir(room_parameters, "Basis1", room, duration, Fs, cfg_1)
+                
+                rir_shape = rir_1 - rir_0
+                
+                _BASIS_CACHE[cache_key] = (rir_0, rir_shape)
+                _save_basis_cache_entry(cache_key, (rir_0, rir_shape), cache_label)
+                rir_base = rir_0
+                
+            # Reconstruction: R(c) = R(0) + c * (R(1) - R(0))
+            rir = rir_base + (requested_c * rir_shape)
+            label = f"SDN-FAST-{test_name}: c={requested_c}"
     
     return None, rir, label, False
 

@@ -16,16 +16,16 @@ PLOT_CONFIG = {
         'edc': {
             'main_xlim_focused': (0.005, 0.07),
             'main_ylim_focused': (-8, 0.2),
-            'main_xlim_full': (0, 1.1),
+            'main_xlim_full': (0, 1.),
             'main_ylim_full': (-62, 5),
-            'inset_rect': [0.07, 0.07, 0.4, 0.3],
+            'inset_rect': [0.07, 0.07, 0.3, 0.3],
             'inset_xlim': (0.012, 0.03),
             'inset_ylim': (-5, 0.4)
         },
         'ned': {
-            'main_xlim': (0, 0.2),
+            'main_xlim': (0, 0.15),
             'main_ylim': (0, 1.3),
-            'inset_rect': [0.05, 0.51, 0.2, 0.45],  # x, y, width, height
+            'inset_rect': [0.07, 0.5, 0.2, 0.45],  # x, y, width, height
             'inset_xlim': (0.025, 0.052),
             'inset_ylim': (0.0, 0.6)
         }
@@ -75,15 +75,15 @@ DISPLAY_NAME_MAP = {
     'ISM-pra-rand10' : {'name': 'ISM (PRA-10)', 'color': 'tab:blue'},
     'ISM-pra-rand10-airabsorb': {'name': 'ISM (PRA-10-airabsorb)'},
     'RIMPY-neg': 'ISM (rimpy-neg)',
-    'RIMPY-neg10' : {'name':'ISM (neg10)', 'color': 'tab:blue'},
-    'ISM (rimpy-neg10)' : {'name': 'ISM (rimpy-neg10)', 'color': 'tab:blue'},
+    'RIMPY-neg10' : {'name':'ISM (rimpy-neg10)', 'color': 'black', 'linestyle': '--'},
+    'ISM (rimpy-neg10)' : {'name': 'ISM (rimpy-neg10)', 'color': 'black', 'linestyle': '--'},
     'ISM (rimpy-neg)' : {'name': 'ISM (rimpy-neg)', 'color': 'tab:blue'},
     'ISM (rimpy-pos)' : {'name': 'ISM (rimpy-pos)', 'color': 'tab:blue'},
-    'HO-SDN-N2' : {'name': 'HO-SDN-N2'},
-    'HO-SDN-N3' : {'name': 'HO-SDN-N3'},
-    'SDN-Test1': {'name': 'SDN Original (c=1)', 'color': 'red'},
+    'SDN-Test1': {'name': 'SDN Original (c=1)'},
+    # 'SDN-Test1': {'name': 'SDN Original (c=1)', 'color': 'orange'},
     'SDN-Test1n': {'name':'SDN Original, no loss', 'color': 'red'},
-    'SDN-Test_3': 'SW-SDN (c=-3)',
+    # 'SDN-Test_3': {'name': 'SW-SDN (c=-3)', 'color': 'yellow'},
+    'SDN-Test_3': {'name': 'SW-SDN (c=-3)'},
     'SDN-Test_2': 'SW-SDN (c=-2)',
     'SDN-Test_1': 'SW-SDN (c=-1)',
     'SDN-Test_0': 'SW-SDN (c=0)',
@@ -91,7 +91,8 @@ DISPLAY_NAME_MAP = {
     'SDN-Test2.998': 'SW-SDN (c=2.998)',
     'SDN-Test3': 'SW-SDN (c=3)',
     'SDN-Test4': 'SW-SDN (c=4)',
-    'SDN-Test5': 'SW-SDN (c=5)',
+    'SDN-Test5': {'name': 'SW-SDN (c=5)'},
+    # 'SDN-Test5': {'name': 'SW-SDN (c=5)', 'color': 'red'},
     'SDN-Test6': 'SW-SDN (c=6)',
     'SDN-Test7': 'SW-SDN (c=7)',
     'SDN-Test_3r': 'SW-SDN-R (c=-3)',
@@ -104,6 +105,10 @@ DISPLAY_NAME_MAP = {
     'SDN-Test5r': 'SW-SDN-R (c=5)',
     'SDN-Test6r': 'SW-SDN-R (c=6)',
     'SDN-Test7r': 'SW-SDN-R (c=7)',
+    'HO-SDN-N2' : {'name': 'HO-SDN (N=2)'},
+    'HO-SDN-N3' : {'name': 'HO-SDN (N=3)'},
+    'HO-SDN N=2': {'name': 'HO-SDN (N=2)'},  # label format from rir_calculators
+    'HO-SDN N=3': {'name': 'HO-SDN (N=3)'},
     }
 
 def get_display_name(method_key: str, method_configs: dict, name_map: dict) -> str:
@@ -130,11 +135,16 @@ def get_color(method_key: str, name_map: dict) -> str | None:
         return entry.get('color')
     return None
 
-def get_linestyle(method_key: str) -> str:
+def get_linestyle(method_key: str, name_map: dict = None) -> str:
     """
     Assign a specific linestyle based on the method type for the plot.
     This provides a single place to control line styles.
     """
+    if name_map:
+        entry = name_map.get(method_key)
+        if isinstance(entry, dict) and 'linestyle' in entry:
+            return entry['linestyle']
+
     if method_key.startswith('HO-SDN'):
         return ':'  # Dotted line for all HO-SDN methods
     elif method_key == 'ISM':

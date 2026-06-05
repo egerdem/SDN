@@ -67,6 +67,31 @@ def get_wall_distances(x, y, z, width, depth, height):
 # =====================================================================
 
 EXPERIMENT_MODELS = {
+
+    'legacy_4x20_50cornerplacement_noseed': {
+        'description': '4 rooms × 20 pairs, 50% corner placement, no seed',
+        'n_samples': 80,
+        'outliers_removed': 5,
+        'linear': {
+            'intercept': -1.5655534214459408,
+            'coefficient': 13.275925025172917,
+            'r2_score': 0.8341541321049044,
+            'mae': 0.3428781097794205
+        },
+        'polynomial': {
+            'intercept': -1.7760451118411789,
+            'coef_h': 14.662826598032463,
+            'coef_h2': -2.1546539978453896,
+            'r2_score': 0.834294913596452,
+            'mae': 0.3421755082874279
+        },
+        'power': {
+            'a': 18.86308469005158,
+            'b': 1.7576917414447608,
+            'r2_score': 0.8197259143840665,
+            'mae': 0.3643821043971566
+        }
+    },
     '4x20_random_pair': {
         'description': 'Original 80-run Monte Carlo (4 rooms × 20 random pairs)',
         'n_samples': 80,
@@ -129,7 +154,108 @@ EXPERIMENT_MODELS = {
             'b': 2.1781107498952963,
             'r2_score': 0.8280868057099284
         }
-    }
+    },
+
+    '7src_3Ddiagonal': {
+        'description': '7 3d diagonal sources, 16 receivers per source',
+        'n_samples': 112,
+        'outliers_removed': 0,
+        'linear': {
+            "intercept": -2.442631440043548,
+          "coefficient": 15.428518797386236,
+          "r2_score": 0.9263844070598752,
+        },
+        'polynomial': {
+            "intercept": -3.750727981758488,
+          "coef_h": 23.150529130321065,
+          "coef_h2": -10.746409793849088,
+          "r2_score": 0.9282889772029899,
+
+        },
+        'power': {
+            "a": 24.038611774404707,
+          "b": 2.0746416348056913,
+          "r2_score": 0.9018663394368239,
+        }
+    },
+
+# "equation": "C = -1.6112 + 13.1135 * H_src_norm",
+    '10x60_seed42_0cornerplacement_big_V2': {
+            "best_model": "polynomial",
+            'description': '10 rooms × 60 pairs, seed 42, 0% corner placement V2',
+            'n_samples': 60,
+            'outliers_removed': 0,
+        'linear': {
+          'intercept': -1.6111543006495945,
+          'coefficient': 13.113469257616064,
+          'r2_score': 0.7474157747828505,
+          'mae': 0.3949889610191548
+                },
+        'polynomial': { #"equation": "C = -0.4156 + 5.8684*H + 10.6026*H",
+            "intercept": -0.41560507142630865,
+              'coef_h': 5.868393271650666,
+              'coef_h2': 10.602633731048837,
+              'r2_score': 0.7498233506778578,
+              'mae': 0.39653550083289274
+                    },
+                    #"equation": "C = 17.3260 * H_src_norm^1.7099",
+        'power': {
+            "a": 17.32604613345441,
+              "b": 1.7099033525805343,
+              "r2_score": 0.7451984988112004,
+              "mae": 0.3989348628559244
+}
+    },
+
+    '10x60_seed42_0cornerplacement_big': {
+        'description': '10 rooms × 60 pairs, seed 42, 0% corner placement',
+        'n_samples': 60,
+        'outliers_removed': 1,
+        'linear': {
+            'intercept': -2.6115105461479016,
+            'coefficient': 15.670504557631078,
+            'r2_score': 0.7780394474347803,
+            'mae': 0.37224865014482206
+        },
+        'polynomial': {
+            'intercept': -4.239872122013528,
+            'coef_h': 24.69161497996228,
+            'coef_h2': -12.189496246730721,
+            'r2_score': 0.7802255060944882,
+            'mae': 0.3615219795488345
+        },
+        'power': {
+            'a': 24.19808075847763,
+            'b': 2.08738339591621,
+            'r2_score': 0.750433632649027,
+            'mae': 0.4141591973994427
+        }
+    },
+    '10x60_seed42_25cornerplacement_big': {
+        'description': '10 rooms × 60 pairs, seed 42, 25% corner placement',
+        'n_samples': 60,
+        'outliers_removed': 3,
+        'linear': {
+            'intercept': -1.3612952208783828,
+            'coefficient': 12.845789135505381,
+            'r2_score': 0.7526838698129632,
+            'mae': 0.4659723387066763
+        },
+        'polynomial': {
+            'intercept': -0.7395606722424968,
+            'coef_h': 8.691428266938297,
+            'coef_h2': 6.479539436121281,
+            'r2_score': 0.754091681446555,
+            'mae': 0.4632982108534563
+        },
+        'power': {
+            'a': 15.384679373052057,
+            'b': 1.5642570223282717,
+            'r2_score': 0.748201033780676,
+            'mae': 0.47782192508652377
+        }
+    },
+    
 }
 
 

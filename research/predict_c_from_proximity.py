@@ -1,8 +1,39 @@
 """
 Predict Optimal C from Wall Proximity (H_src_norm)
 
-This script analyzes the Monte Carlo results to establish a predictive relationship
-between normalized source wall proximity and the optimal C parameter for SDN.
+This script analyzes Monte Carlo results to fit predictive models relating 
+source wall proximity (h_src_norm) to the optimal C parameter for SDN.
+
+What it does:
+-------------
+1. Loads results.json from a Monte Carlo experiment
+2. Identifies and removes outliers using principled criteria:
+   - C ≥ 6.9 (optimizer hit upper bound)
+   - AND RMSE(C=1) < RMSE(C*) (baseline performs better)
+   If rmse_c1 not in results.json,
+3. Fits three models to h_src_norm vs optimal_c:
+   - Linear: C = a + b*H
+   - Polynomial: C = a + b*H + c*H²
+   - Power: C = a * H^b
+4. Generates plots comparing all three models
+5. Saves fitted parameters to experiment folder
+
+Note on Outlier Detection:
+--------------------------
+For principled outlier rejection, your results.json should include 'rmse_c1'
+(RMSE at baseline C=1). If missing, the script will use a fallback threshold.
+To add rmse_c1, modify monte_carlo_proximity.py to compute RMSE at C=1.
+
+Outputs (saved to same folder as results.json):
+-----------------------------------------------
+- c_prediction_model_params.json (fitted model parameters)
+- c_prediction_analysis.png (visualization of fits)
+
+Usage:
+------
+1. Update RESULTS_FILE to point to your Monte Carlo experiment
+2. Run: python research/predict_c_from_proximity.py
+3. Check the output plots and fitted parameters
 """
 
 import os
@@ -24,21 +55,43 @@ if project_root not in sys.path: sys.path.append(project_root)
 # =====================================================================
 # CONFIGURATION FLAGS
 # =====================================================================
-SAVE_JSON = False           # Save c_prediction_model_params.json
-PLOT_FIRST_FIGURE = False   # Plot the first figure (d_sm_norm vs optimal_c)
-SAVE_FIGURE = True         # Save the plotted figure to PNG
+SAVE_JSON = True            # Save c_prediction_model_params.json to experiment folder
+PLOT_FIRST_FIGURE = True    # Plot both: d_sm_norm and H_src_norm vs optimal_c
+SAVE_FIGURE = True          # Save the plotted figure to experiment folder
 
 
 # =====================================================================
 # 1. LOAD DATA
 # =====================================================================
 
-RESULTS_FILE = os.path.join(project_root, "results", "monte_carlo_proximity_results.json")
-RESULTS_FILE = os.path.join(project_root, "results", "paper_data/experiments/aes_fullgrid_perpair_srcgrid3x5_corner2.0_per_pair/results.json")
-RESULTS_FILE = os.path.join(project_root, "results", "paper_data/experiments/aes_fullgrid_8src_diagonal/results.json")
+# =====================================================================
+# MONTE CARLO EXPERIMENT SELECTION
+# =====================================================================
+# Choose which Monte Carlo experiment to analyze:
 
+# Option 1: Legacy 4x20 experiment (50% corner bias, no seed specified)
+# RESULTS_FILE = os.path.join(project_root, "results", "monte_carlo_experiments",
+#                             "legacy_4x20_50cornerplacement_noseed", "results.json")
 
-# RESULTS_FILE = os.path.join(project_root, "results", "experiments", "aes_fullgrid_perpair_srcgrid3x5_corner2.0_per_pair/results.json")
+#RESULTS_FILE = os.path.join(project_root, "results", "monte_carlo_experiments",
+#                            "10x60_seed42_0cornerplacement_big_V2", "results.json")
+
+RESULTS_FILE = os.path.join(project_root, "results", "paper_data",
+                            "aes_fullgrid_7src_3Ddiagonal", "results.json")
+
+# RESULTS_FILE = os.path.join(project_root, "results", "monte_carlo_experiments",
+#                             "10x60_seed42_25cornerplacement_big", "results.json")
+
+# Option 2: Default experiment (current, with seed=42)
+# RESULTS_FILE = os.path.join(project_root, "results", "monte_carlo_experiments", 
+#                             "default", "results.json")
+
+# Option 3: Legacy flat file (old structure)
+# RESULTS_FILE = os.path.join(project_root, "results", "monte_carlo_proximity_results.json")
+
+# Option 4: AES fullgrid experiments
+# RESULTS_FILE = os.path.join(project_root, "results", "paper_data/experiments",
+#                             "aes_fullgrid_8src_diagonal", "results.json")
 
 
 with open(RESULTS_FILE, 'r') as f:
@@ -57,28 +110,116 @@ rmses = np.array([r['min_rmse'] for r in results])
 
 # Define outliers as cases where:
 # 1. C is at or near upper bound (≥ 6.9)
-# 2. RMSE is high (> 0.4)
+# 2. Baseline C=1 performs BETTER than the "optimal" C
+#
+# This is the principled outlier criterion: if optimizer hits bound
+# but C=1 achieves lower RMSE, the optimization clearly failed.
 
 C_UPPER_THRESHOLD = 6.9
-RMSE_THRESHOLD = 0.4
 
-outlier_mask = (opt_cs >= C_UPPER_THRESHOLD) & (rmses > RMSE_THRESHOLD)
+# Check if results contain rmse_c1 (baseline RMSE)
+has_rmse_c1 = 'rmse_c1' in results[0]
+
+if has_rmse_c1:
+    # Use principled comparison: C=1 performs better
+    rmse_c1_vals = np.array([r['rmse_c1'] for r in results])
+    outlier_mask = (opt_cs >= C_UPPER_THRESHOLD) & (rmse_c1_vals < rmses)
+else:
+    # Fallback:
+    print("⚠️  WARNING: rmse_c1 not found in results.json")
+
+
 inlier_mask = ~outlier_mask
 
 print(f"\n--- OUTLIER ANALYSIS ---")
 print(f"Total runs: {len(results)}")
-print(f"Outliers (C≥{C_UPPER_THRESHOLD} & RMSE>{RMSE_THRESHOLD}): {np.sum(outlier_mask)}")
+if has_rmse_c1:
+    print(f"Outliers (C≥{C_UPPER_THRESHOLD} & RMSE(C=1)<RMSE(C*)): {np.sum(outlier_mask)}")
+    print(f"  Logic: Optimizer hit bound BUT baseline C=1 performs better")
+else:
+    print(f"Outliers (C≥{C_UPPER_THRESHOLD} only): {np.sum(outlier_mask)}")
+    print(f"  Logic: Only C threshold (no baseline comparison available)")
 print(f"Inliers: {np.sum(inlier_mask)}")
 
 print(f"\nOutlier Details:")
 for i, r in enumerate(results):
     if outlier_mask[i]:
-        print(f"  Run {r['run_id']}: H_src_norm={r['h_src_norm']:.3f}, "
-              f"C_opt={r['optimal_c']:.2f}, RMSE={r['min_rmse']:.3f}")
+        if has_rmse_c1:
+            print(f"  Run {r['run_id']}: H_src_norm={r['h_src_norm']:.3f}, "
+                  f"C_opt={r['optimal_c']:.2f}, RMSE(C*)={r['min_rmse']:.3f}, "
+                  f"RMSE(C=1)={r['rmse_c1']:.3f}")
+        else:
+            print(f"  Run {r['run_id']}: H_src_norm={r['h_src_norm']:.3f}, "
+                  f"C_opt={r['optimal_c']:.2f}, RMSE={r['min_rmse']:.3f}")
 
-print(f"\n--- OUTLIERs removed ---")
-print("1. C_opt hit the upper bound (7.0), suggesting optimizer couldn't find optimum")
-print("2. RMSE is significantly higher (>0.4) than typical good fits (<0.3)")
+print(f"\n--- OUTLIER REMOVAL CRITERIA ---")
+print("1. C_opt hit the upper bound (~7.0) → optimizer couldn't find minimum")
+if has_rmse_c1:
+    print("2. Baseline C=1 achieves LOWER RMSE than C* → optimization clearly failed")
+else:
+    print("2. RMSE is high (>0.4) → arbitrary threshold (less principled)")
+
+# =====================================================================
+# 2.5. APPLY OUTLIER CORRECTION TO JSON
+# =====================================================================
+
+print(f"\n--- APPLYING OUTLIER CORRECTION ---")
+print("Replacing optimal_c with 1.0 for identified outliers...")
+
+correction_count = 0
+for i, r in enumerate(results):
+    if outlier_mask[i]:
+        # Store original value (if not already stored)
+        if 'optimal_c_original' not in r:
+            r['optimal_c_original'] = r['optimal_c']
+            r['min_rmse_original'] = r['min_rmse']
+        
+        # Replace with C=1 values
+        r['optimal_c'] = 1.0
+        if has_rmse_c1:
+            r['min_rmse'] = r['rmse_c1']  # Use baseline RMSE
+        r['outlier_corrected'] = True
+        correction_count += 1
+        
+        print(f"  Run {r['run_id']}: C={r['optimal_c_original']:.2f} → C=1.0, "
+              f"RMSE={r['min_rmse_original']:.3f} → {r['min_rmse']:.3f}")
+
+# Mark non-outliers explicitly
+for i, r in enumerate(results):
+    if not outlier_mask[i] and 'outlier_corrected' not in r:
+        r['outlier_corrected'] = False
+
+# Save modified JSON back to file
+print(f"\nSaving corrected results back to: {RESULTS_FILE}")
+import shutil
+from datetime import datetime
+
+# Create backup
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+backup_path = RESULTS_FILE.replace(".json", f"_backup_{timestamp}.json")
+shutil.copy2(RESULTS_FILE, backup_path)
+print(f"  ✅ Created backup: {os.path.basename(backup_path)}")
+
+# Save corrected data
+with open(RESULTS_FILE, 'w') as f:
+    json.dump(results, f, indent=2)
+print(f"  ✅ Saved {len(results)} entries with {correction_count} outliers corrected")
+
+# Update opt_cs array with corrected values
+opt_cs = np.array([r['optimal_c'] for r in results])
+rmses = np.array([r['min_rmse'] for r in results])
+
+# Recalculate inlier mask AFTER correction - now includes corrected outliers at c=1
+if has_rmse_c1:
+    rmse_c1_vals = np.array([r['rmse_c1'] for r in results])
+    outlier_mask_new = (opt_cs >= C_UPPER_THRESHOLD) & (rmse_c1_vals < rmses)
+else:
+    outlier_mask_new = (opt_cs >= C_UPPER_THRESHOLD)
+
+inlier_mask = ~outlier_mask_new
+
+print(f"\n--- MODEL FITTING ---")
+print(f"Fitting on {np.sum(inlier_mask)} data points (includes {correction_count} corrected values at c=1)")
 
 
 # =====================================================================
@@ -166,11 +307,19 @@ if PLOT_FIRST_FIGURE:
     if has_d_sm:
         d_sm_norms = np.array([r.get('d_sm_norm', np.nan) for r in results])
         
+        # Get original C values for outliers (before correction)
+        opt_cs_original = np.array([r.get('optimal_c_original', r['optimal_c']) for r in results])
+        
         sc1 = ax1.scatter(d_sm_norms[inlier_mask], opt_cs[inlier_mask], 
                           c=rmses[inlier_mask], cmap='viridis', alpha=0.6, s=60, label='Inliers')
         if np.sum(outlier_mask) > 0:
+            # Plot original outlier positions with red X
+            ax1.scatter(d_sm_norms[outlier_mask], opt_cs_original[outlier_mask], 
+                       c='red', marker='x', s=100, linewidths=3, label='Outliers (original)', zorder=5)
+            # Plot corrected positions at c=1 with green circles
             ax1.scatter(d_sm_norms[outlier_mask], opt_cs[outlier_mask], 
-                       c='red', marker='x', s=100, linewidths=3, label='Outliers')
+                       c='lime', marker='o', s=80, edgecolors='darkgreen', linewidths=2, 
+                       label='Corrected (c=1)', zorder=5, alpha=0.8)
         
         # Fit line to d_sm_norm vs c
         d_inlier = d_sm_norms[inlier_mask]
@@ -196,10 +345,18 @@ if PLOT_FIRST_FIGURE:
         plt.colorbar(sc1, ax=ax1, label='Min RMSE')
     else:
         # Fallback if d_sm_norm not available: show H_src with outliers
+        opt_cs_original = np.array([r.get('optimal_c_original', r['optimal_c']) for r in results])
+        
         sc1 = ax1.scatter(h_src_norms[inlier_mask], opt_cs[inlier_mask], 
                           c=rmses[inlier_mask], cmap='viridis', alpha=0.6, s=60, label='Inliers')
-        ax1.scatter(h_src_norms[outlier_mask], opt_cs[outlier_mask], 
-                   c='red', marker='x', s=100, linewidths=3, label='Outliers (C≥6.9, RMSE>0.4)')
+        if np.sum(outlier_mask) > 0:
+            # Plot original outlier positions
+            ax1.scatter(h_src_norms[outlier_mask], opt_cs_original[outlier_mask], 
+                       c='red', marker='x', s=100, linewidths=3, label='Outliers (original)', zorder=5)
+            # Plot corrected positions at c=1
+            ax1.scatter(h_src_norms[outlier_mask], opt_cs[outlier_mask], 
+                       c='lime', marker='o', s=80, edgecolors='darkgreen', linewidths=2, 
+                       label='Corrected (c=1)', zorder=5, alpha=0.8)
         ax1.set_xlabel('Normalized H_src (H_src / V^(1/3)) [Lower=Corner]', fontsize=11)
         ax1.set_ylabel('Optimal C', fontsize=11)
         ax1.set_title('Source Proximity vs Optimal C (Outliers Marked)', fontsize=12, fontweight='bold')
@@ -229,13 +386,13 @@ ax2.plot(h_range, c_pred_linear, 'r-', linewidth=2.5,
 # Polynomial
 h_range_poly = poly_features.transform(h_range)
 c_pred_poly = model_poly.predict(h_range_poly)
-ax2.plot(h_range, c_pred_poly, 'g--', linewidth=2.5, 
-        label=f'Poly: c = {model_poly.intercept_:.2f} + {model_poly.coef_[0]:.2f}·H + {model_poly.coef_[1]:.2f}·H² (R²={r2_poly:.3f})')
+# ax2.plot(h_range, c_pred_poly, 'g--', linewidth=2.5,
+#         label=f'Poly: c = {model_poly.intercept_:.2f} + {model_poly.coef_[0]:.2f}·H + {model_poly.coef_[1]:.2f}·H² (R²={r2_poly:.3f})')
 
 # Power
 c_pred_power = a_power * h_range.flatten()**b_power
-ax2.plot(h_range, c_pred_power, 'b:', linewidth=2.5, 
-        label=f'Power: c = {a_power:.2f}·H^{b_power:.2f} (R²={r2_power:.3f})')
+# ax2.plot(h_range, c_pred_power, 'b:', linewidth=2.5, 
+#         label=f'Power: c = {a_power:.2f}·H^{b_power:.2f} (R²={r2_power:.3f})')
 
 ax2.legend(fontsize=9, loc='best')
 
@@ -262,7 +419,8 @@ print("="*70)
 all_models_params = {
     'outlier_criteria': {
         'c_threshold': C_UPPER_THRESHOLD,
-        'rmse_threshold': RMSE_THRESHOLD,
+        'logic': 'C≥6.9 & RMSE(C=1)<RMSE(C*)' if has_rmse_c1 else 'C≥6.9 only',
+        'uses_baseline_comparison': has_rmse_c1,
         'n_outliers': int(np.sum(outlier_mask)),
         'n_inliers': int(np.sum(inlier_mask))
     },
@@ -319,7 +477,7 @@ print("="*70)
 # Test on a few inlier cases
 test_indices = np.random.choice(np.where(inlier_mask)[0], size=min(5, np.sum(inlier_mask)), replace=False)
 
-print(f"\n{'Run':<6} {'H_src_norm':<12} {'Actual C':<10} {'Predicted C':<13} {'Error':<8} {'RMSE':<8}")
+print(f"\n{'Run':<16} {'H_src_norm':<12} {'Actual C':<10} {'Predicted C':<13} {'Error':<8} {'RMSE':<8}")
 print("-" * 70)
 
 for idx in test_indices:
@@ -341,7 +499,8 @@ for idx in test_indices:
     pred_c = np.clip(pred_c, 1.0, 7.0)
     error = abs(actual_c - pred_c)
     
-    print(f"{r['run_id']:<6} {h_norm:<12.4f} {actual_c:<10.3f} {pred_c:<13.3f} {error:<8.3f} {r['min_rmse']:<8.4f}")
+    run_identifier = str(r.get('run_id', r.get('run_key', 'N/A')))
+    print(f"{run_identifier:<16} {h_norm:<12.4f} {actual_c:<10.3f} {pred_c:<13.3f} {error:<8.3f} {r['min_rmse']:<8.4f}")
 
 print("\n" + "="*70)
 print("ANALYSIS COMPLETE")

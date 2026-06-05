@@ -892,7 +892,7 @@ if __name__ == "__main__":
                                                 # project_names=["journal_absorptioncoeffs", "waspaa_MULTI"],
                                                 # project_names=["aes_SINGLE", "journal_SINGLE", "waspaa_SINGLE"],
                                                 # project_names=["waspaa_SINGLE"],
-                                                # skip_metrics=False,
+                                                skip_metrics=True,
                                                 # project_source_filters={"waspaa_MULTI": ["Center_Source"]}
                                                 )
 

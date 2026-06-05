@@ -23,10 +23,10 @@ room_aes = {
     'absorption': 0.2,
 }
 
-room_aes_rx00 = {
+room_aes_rx00_srcLowerLeft = {
     'display_name': 'AES Room',
     'width': 9, 'depth': 7, 'height': 4,
-    'source x': 7, 'source y': 6, 'source z': 2,
+    'source x': 1, 'source y': 1, 'source z': 2,
     'mic x': 0.5, 'mic y': 0.5, 'mic z': 1.5,
     'absorption': 0.2,
 }
@@ -57,7 +57,7 @@ room_cube6 = {
 
 # Default Active Room
 active_room = room_aes
-# active_room = room_aes_rx00
+# active_room = room_aes_rx00_srcLowerLeft
 # active_room = room_journal
 # active_room = room_cube6
 
@@ -85,7 +85,7 @@ PLOT_ISM_with_pra_rand10_airabsorb = False
 PLOT_ISM_rimPy_pos = False
 PLOT_ISM_rimPy_pos_rand10 = False
 PLOT_ISM_rimPy_neg = False
-PLOT_ISM_rimPy_neg_rand10 = False
+PLOT_ISM_rimPy_neg_rand10 = True
 
 # tests
 wall1, wall2, wall3, wall4, wall5, wall6 = False, False, False, False, False, False
@@ -94,7 +94,7 @@ t1,t2,t3,t4,t5 = False, False, False, False, False
 fast1, fast2 = False, False
 testx = False
 
-TR = False  # Set to True to enable all SDN tests by default
+TR = True  # Set to True to enable all SDN tests by default
 # SDN Tests
 
 
@@ -103,7 +103,7 @@ RUN_SDN_Test1_spec = False
 RUN_SDN_Test_2 = TR
 RUN_SDN_Test_3 = TR
 RUN_SDN_Test0 = False
-RUN_SDN_Test1 = False     # c=1 original
+RUN_SDN_Test1 = TR     # c=1 original
 RUN_SDN_Test2 = TR
 RUN_SDN_Test3 = TR
 RUN_SDN_Test4 = TR
@@ -115,10 +115,13 @@ RUN_SDN_Test2_998 = False # Test2.998
 RUN_SDN_Test4_71 = False # Test2.998
 
 RUN_SDN_Test_micX = False
+RUN_SDN_Test1_mic = False
 RUN_SDN_Test2_mic = False
 RUN_SDN_Test3_mic = False
 RUN_SDN_Test4_mic = False
 RUN_SDN_Test5_mic = False
+
+RUN_SDN_Test1_micFAST = False
 
 SDN_SW_v2_kk000 = False
 SDN_SW_v2_kkk00 = False
@@ -149,9 +152,17 @@ RUN_SDN_Test5_FAST = False
 RUN_SDN_Test6_FAST = False
 RUN_SDN_Test7_FAST = False
 
+# Mic-side Fast Tests (validation)
+RUN_SDN_c221_m233_standard = False  # Standard method with source_weighting=2.21, mic_weighting=2.33
+RUN_SDN_mic_365_standard = False  # Standard method with mic_weighting=3.65
+RUN_SDN_mic_365_fast = False      # Fast method with mic_weighting=3.65
+RUN_SDN_mic_vec_standard = False  # Standard method with mic_weighting_vector (random 6-element)
+RUN_SDN_mic_vec_fast = False      # Fast method with mic_weighting_vector (random 6-element)
+
 # SDN Tests without attenuation
 RUN_SDN_Test1_noatt =   False
 RUN_SDN_Test2_noatt =   False
+RUN_SDN_Test5_noatt = False
 
 # HO-SDN Tests (Reference Leny)
 RUN_HO_N1 = False
@@ -233,7 +244,7 @@ ism_methods = {
         'info': 'Negative Reflection + 10cm Randomness',
         'function': calculate_rimpy_rir,
         'calculator': 'rimpy',
-        'params': {'reflection_sign': -1, 'tw_fractional_delay_length': 0, 'randDist': 0.1}
+        'params': {'reflection_sign': -1, 'tw_fractional_delay_length': 0, 'randDist': 0.1, 'rand_seed': 42}  # Added seed for reproducibility
     }
 }
 
@@ -262,6 +273,17 @@ sdn_tests = {
                     },
                     'label': "SDN Test X"
                 },
+
+    'SDN-Test1_mic': {
+                        'enabled': RUN_SDN_Test1_mic,
+                        'info': "m1",
+                        'calculator': 'sdn',
+                        'flags': {
+                        'specular_mic_pickup': True,
+                         'mic_weighting': 1.0,
+                        },
+                        'label': "SDN Test 1 mic pickup original?"
+                    },
 
     'SDN-Test2_mic': {
                     'enabled': RUN_SDN_Test2_mic,
@@ -322,6 +344,87 @@ sdn_tests = {
     },
 
 
+
+    'SDN-c221_m233_standard': {
+        'enabled': RUN_SDN_c221_m233_standard,
+        'info': "c=2.21, m=2.33 (Lower Left optimized)",
+        'calculator': 'sdn',
+        'flags': {
+            'specular_source_injection': True,
+            'source_weighting': 2.21,
+            'specular_mic_pickup': True,
+            'mic_weighting': 2.33,
+        },
+        'label': "SDN c=2.21 m=2.33"  # Fixed label (was incorrectly "SDN mic=3.65")
+    },
+
+
+    # Mic-side Fast Method Validation Configs
+    'SDN-mic_365_standard': {
+        'enabled': RUN_SDN_mic_365_standard,
+        'info': "Original SDN + mic_weighting=3.65 (standard method)",
+        'calculator': 'sdn',
+        'flags': {
+            # Original source SDN (no specular injection, equivalent to c=1)
+            # or can use: 'specular_source_injection': True, 'source_weighting': 1
+            'specular_mic_pickup': True,
+            'mic_weighting': 3.65,
+        },
+        'label': "SDN mic=3.65"
+    },
+
+
+    'SDN-mic-fast-m1': {
+        'enabled': RUN_SDN_Test1_micFAST, 'use_fast_mic_method': True,
+        'info': "m1 fast",
+        'calculator': 'sdn',
+        'flags': {
+            'specular_mic_pickup': True,
+            'mic_weighting': 1.0,
+        },
+        'label': "SDN"
+    },
+
+
+    'SDN-mic_365_fast': {
+        'enabled': RUN_SDN_mic_365_fast,
+        'use_fast_mic_method': True,  # Enable mic-side fast method
+        'info': "Original SDN + mic_weighting=3.65 (FAST method)",
+        'calculator': 'sdn',
+        'flags': {
+            # Same as above - original source SDN
+            'specular_mic_pickup': True,
+            'mic_weighting': 3.65,
+        },
+        'label': "SDN mic=3.65 FAST"
+    },
+
+    'SDN-mic_vec_standard': {
+        'enabled': RUN_SDN_mic_vec_standard,
+        'info': "Original SDN + mic_weighting_vector=[3.2,2.8,4.1,1.5,2.9,3.7] (standard method)",
+        'calculator': 'sdn',
+        'flags': {
+            # Original source SDN (no specular injection)
+            'specular_mic_pickup': True,
+            'mic_weighting_vector': [3.2, 2.8, 4.1, 1.5, 2.9, 3.7],  # Random 6-element vector
+        },
+        'label': "SDN mic_vec"
+    },
+
+    'SDN-mic_vec_fast': {
+        'enabled': RUN_SDN_mic_vec_fast,
+        'use_fast_mic_method': True,  # Enable mic-side fast method
+        'info': "Original SDN + mic_weighting_vector=[3.2,2.8,4.1,1.5,2.9,3.7] (FAST method)",
+        'calculator': 'sdn',
+        'flags': {
+            # Same as above - original source SDN
+            'specular_mic_pickup': True,
+            'mic_weighting_vector': [3.2, 2.8, 4.1, 1.5, 2.9, 3.7],  # Same random 6-element vector
+        },
+        'label': "SDN mic_vec FAST"
+    },
+
+
     'SDN-SW_v2_kk000': {
         'enabled': SDN_SW_v2_kk000,
         'info': "[2.5, 2.5, 0,0,0]",
@@ -345,15 +448,16 @@ sdn_tests = {
         },
 
     'SDN-fast1': {
-        'enabled': fast1, 'use_fast_method': True,
-        'info': "fast [4.35,6.05,2.85,4.02,1.68,2.17]",
+        'enabled': RUN_SDN_Test1_FAST, 'use_fast_method': True,
+        'info': "c1 fast",
         'calculator': 'sdn',
         'flags': {
             'specular_source_injection': True,
-            'node_weighting_vector':[4.35,6.05,2.85,4.02,1.68,2.17]
+            'source_weighting': 1.0,
         }, 
         'label': "SDN"
     },
+
     'SDN-fast2': {
         'enabled': fast2, 'use_fast_method': True,
         'info': "optimized c-vector",
@@ -461,6 +565,22 @@ sdn_tests = {
         },
         'label': "SDN"
     },
+
+    'Original, no loss': {
+            'enabled': RUN_SDN_Test1_noatt,
+            'info': "",
+            'calculator': 'sdn',
+            'flags': {
+                'specular_source_injection': True,
+                'source_weighting': 1,
+                'ignore_wall_absorption': True,
+                'ignore_src_node_atten': True,
+                'ignore_node_mic_atten': True,
+            },
+            'label': "SDN"
+        },
+
+
     'SDN-Test2': {
         'enabled': RUN_SDN_Test2,
         'info': "c2",
@@ -501,6 +621,21 @@ sdn_tests = {
         },
         'label': "SDN Test 5"
     },
+
+    'SW-SDN (c=5) (no abs)': {
+                'enabled': RUN_SDN_Test5_noatt,
+                'info': "c5 noabs",
+                'calculator': 'sdn',
+                'flags': {
+                    'specular_source_injection': True,
+                    'source_weighting': 5,
+                    'ignore_wall_absorption': True,
+                    'ignore_src_node_atten': True,
+                    'ignore_node_mic_atten': True,
+                },
+                'label': ""
+            },
+
     'SDN-Test6': {
         'enabled': RUN_SDN_Test6,
         'info': "c6",

@@ -22,6 +22,7 @@ __pycache__/
 *.pdf
 
 # Ignore the latex folder
+docs/
 latex/
 copy_of_treble_tsdk/
 tsdk-onboarding-notebook/

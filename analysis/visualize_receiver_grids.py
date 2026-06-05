@@ -80,7 +80,7 @@ if __name__ == "__main__":
         z_mode="fixed_1p5",
         include_corners=True,
         corner_offset=0.5,
-        diagonals=True
+        diagonals="3d"
     )
 
     # Print and visualize grid for each source position

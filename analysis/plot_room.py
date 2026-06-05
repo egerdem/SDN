@@ -10,7 +10,8 @@ from typing import List
 import pyroomacoustics as pra
 import textwrap
 
-from .plotting_utils import DISPLAY_NAME_MAP, get_display_name, get_color
+from matplotlib.ticker import FormatStrFormatter
+from .plotting_utils import DISPLAY_NAME_MAP, PLOT_CONFIG, get_display_name, get_color, get_linestyle, plot_reflection_vertical_lines
 
 def plot_room(room, ax=None):
     """Plot room geometry with source, mic, and walls."""
@@ -244,12 +245,17 @@ def create_interactive_rir_plot(rirs_dict, Fs, put_rect=True):
     Args:
         rirs_dict: Dictionary containing RIRs with their labels as keys
         Fs: Sampling frequency
-        put_rect: If True, adds a rectangle to highlight early reflections.
+        put_rect: If True, adds a rectangle to highlight early reflections and creates a static plot without checkboxes.
     """
     from matplotlib.widgets import CheckButtons
 
     # Create the main figure and axis for RIR plot
-    fig, (ax, ax_check) = plt.subplots(1, 2, gridspec_kw={'width_ratios': [10, 1]}, figsize=(13, 6))
+    if put_rect:
+        # Static plot without checkboxes
+        fig, ax = plt.subplots(1, 1, figsize=(12, 6))
+    else:
+        # Interactive plot with checkboxes
+        fig, (ax, ax_check) = plt.subplots(1, 2, gridspec_kw={'width_ratios': [10, 1]}, figsize=(13, 6))
 
     # Initialize lines dictionary and visibility states
     lines = {}
@@ -289,71 +295,88 @@ def create_interactive_rir_plot(rirs_dict, Fs, put_rect=True):
     ax.set_ylabel('Amplitude')
     ax.grid(True)
     
+    
     if put_rect:
+        ax.set_xlim(left=0)  # Remove negative x-axis to save space
+        ax.set_xlim(right=time_axis[-1])  # Set right limit to data end
         import matplotlib.patches as patches
         ymin, ymax = ax.get_ylim()
-        ax.add_patch(
-            patches.Rectangle(
-                (0.017, 0.1), # x axis start, ymin start
-                0.03, # 50 ms for early reflections
-                0.2,
-                facecolor="yellow",
-                alpha=0.3,
-                linewidth=0,
-            ))
 
         ax.add_patch(
         patches.Rectangle(
-            (0.0025, 0.88),  # x axis start, ymin
-            0.038,  # 50 ms for early reflections
-            0.15,
-            facecolor="lime",
-            alpha=0.3,
+            (0.0045, 0.95),  # x axis start, ymin
+            0.032,  # 50 ms for early reflections
+            0.08,
+            # facecolor="lime",
+            facecolor="gold",
+            alpha=0.5, #0.3
             linewidth=1,
         )
         )
+
+        ax.add_patch(
+            patches.Rectangle(
+                (0.021, 0.15),  # x axis start, ymin start
+                0.032,  # 50 ms for early reflections
+                0.1,
+                facecolor="coral", #teal, tomato
+                alpha=0.4,
+                linewidth=0,
+            ))
+        
+        # Add legend for static plot
+        ax.legend()
+        
+        # Save figure
+        import os
+        filename = f'rir_noabs_v1.png'
+        save_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)))
+        os.makedirs(save_dir, exist_ok=True)
+        save_path = os.path.join(save_dir, filename)
+        fig.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Figure saved to: {save_path}")
     
-    # Set up check buttons for toggling visibility
-    labels = list(programmatic_to_display.values())
-    actives = [True] * len(labels)
+    else:
+        # Set up check buttons for toggling visibility (only when put_rect=False)
+        labels = list(programmatic_to_display.values())
+        actives = [True] * len(labels)
 
-    # Remove the outer box and title from the checkbox area
-    ax_check.set_xticks([])  # Hide x-ticks
-    ax_check.set_yticks([])  # Hide y-ticks
-    for spine in ax_check.spines.values():  # Remove spines (outer box)
-        spine.set_visible(False)
+        # Remove the outer box and title from the checkbox area
+        ax_check.set_xticks([])  # Hide x-ticks
+        ax_check.set_yticks([])  # Hide y-ticks
+        for spine in ax_check.spines.values():  # Remove spines (outer box)
+            spine.set_visible(False)
 
-    # Position the checkboxes in a good spot
-    ax_check.set_position([0.8, 0.4, 0.1, 0.2])  # [left, bottom, width, height]
-    check = CheckButtons(
-        ax=ax_check,
-        labels=labels,
-        actives=actives
-    )
+        # Position the checkboxes in a good spot
+        ax_check.set_position([0.8, 0.4, 0.1, 0.2])  # [left, bottom, width, height]
+        check = CheckButtons(
+            ax=ax_check,
+            labels=labels,
+            actives=actives
+        )
 
-    def update_visibility(display_label):
-        # Toggle visibility of the corresponding line
-        prog_label = display_to_programmatic[display_label]
-        line = lines[prog_label]
-        line.set_visible(not line.get_visible())
-        fig.canvas.draw_idle()  # Redraw the figure
+        def update_visibility(display_label):
+            # Toggle visibility of the corresponding line
+            prog_label = display_to_programmatic[display_label]
+            line = lines[prog_label]
+            line.set_visible(not line.get_visible())
+            fig.canvas.draw_idle()  # Redraw the figure
 
-        # Update legend
+            # Update legend
+            handles = [line for line in lines.values() if line.get_visible()]
+            labels = [line.get_label() for line in lines.values() if line.get_visible()]
+            ax.legend(handles, labels)
+
+        # Connect the callback
+        check.on_clicked(update_visibility)
+
+        # Add initial legend
         handles = [line for line in lines.values() if line.get_visible()]
         labels = [line.get_label() for line in lines.values() if line.get_visible()]
         ax.legend(handles, labels)
 
-
-    # Connect the callback
-    check.on_clicked(update_visibility)
-
-    # Add initial legend
-    handles = [line for line in lines.values() if line.get_visible()]
-    labels = [line.get_label() for line in lines.values() if line.get_visible()]
-    ax.legend(handles, labels)
-
-    # Keep a reference to prevent garbage collection
-    fig.check = check
+        # Keep a reference to prevent garbage collection
+        fig.check = check
 
     # plt.show(block=True)  # Make sure to block to keep the window interactive
     plt.show(block=False)  # Non-blocking
@@ -375,18 +398,27 @@ def create_interactive_edc_plot(rirs_dict, Fs):
     lines = {}
     visibility = {}
 
+    programmatic_to_display = {
+        label: get_display_name(label.split(':')[0].strip(), {}, DISPLAY_NAME_MAP) 
+        for label in rirs_dict.keys()
+    }
+    display_to_programmatic = {v: k for k, v in programmatic_to_display.items()}
+
     # Calculate and plot all EDCs initially
     for label, rir in rirs_dict.items():
         # Calculate EDC without plotting
-        edc = an.compute_edc(rir, Fs, label=label, plot=False)
+        edc, _, _ = an.compute_edc(rir, Fs, label=label, plot=False)
         
         # Create time array in seconds
         time = np.arange(len(rir)) / Fs
         
-        # Determine color based on whether it's a default RIR
-        color = None
+        display_label = programmatic_to_display[label]
+        method_key = label.split(':')[0].strip()
+        color = get_color(method_key, DISPLAY_NAME_MAP)
+        linestyle = get_linestyle(method_key, DISPLAY_NAME_MAP)
+
         # Plot EDC
-        line, = ax.plot(time, edc, label=label, alpha=1, color=color)
+        line, = ax.plot(time, edc, label=display_label, alpha=1, color=color, linestyle=linestyle)
         lines[label] = line
         visibility[label] = True
 
@@ -399,7 +431,7 @@ def create_interactive_edc_plot(rirs_dict, Fs):
     ax.set_ylim(-65, 5)  # Set y-axis limits similar to the original EDC plot
 
     # Create CheckButtons
-    labels = list(rirs_dict.keys())
+    labels = list(programmatic_to_display.values())
     actives = [True] * len(labels)
 
     # Remove the outer box and title from the checkbox area
@@ -416,9 +448,10 @@ def create_interactive_edc_plot(rirs_dict, Fs):
         actives=actives
     )
 
-    def update_visibility(label):
+    def update_visibility(display_label):
         # Toggle visibility of the corresponding line
-        line = lines[label]
+        prog_label = display_to_programmatic[display_label]
+        line = lines[prog_label]
         line.set_visible(not line.get_visible())
         fig.canvas.draw_idle()  # Redraw the figure
 
@@ -434,6 +467,186 @@ def create_interactive_edc_plot(rirs_dict, Fs):
     fig.check = check
 
     plt.show(block=False)  # Non-blocking
+
+def plot_edc_publication(rirs_dict, Fs, room_name='AES Room',
+                         focus_on_early=True, excluded_labels=None,
+                         output_path=None, reflection_times=None):
+    """Publication-quality EDC plot with inset, matching the paper_figures.py design.
+
+    Accepts raw RIRs (no pre-computed npz needed). Uses PLOT_CONFIG for axis limits.
+    """
+    from . import analysis as an
+
+    if excluded_labels is None:
+        excluded_labels = []
+
+    plot_config = PLOT_CONFIG.get(room_name, {}).get('edc', {})
+
+    plt.style.use('seaborn-v0_8-paper')
+    fig, ax = plt.subplots(figsize=(7, 6))
+
+    # Build ordered list following DISPLAY_NAME_MAP key order
+    ordered_keys = [k for k in DISPLAY_NAME_MAP.keys()
+                    if any(k == l.split(':')[0].strip() for l in rirs_dict.keys())
+                    and k not in excluded_labels]
+
+    # Map display-name-map key -> actual rirs_dict key
+    key_map = {}
+    for rirs_label in rirs_dict.keys():
+        base = rirs_label.split(':')[0].strip()
+        if base not in key_map:
+            key_map[base] = rirs_label
+
+    plotted_keys = [k for k in ordered_keys if k in key_map]
+
+    edc_cache = {}
+    for dk in plotted_keys:
+        rir = rirs_dict[key_map[dk]]
+        edc, _, _ = an.compute_edc(rir, Fs, label=dk, plot=False)
+        edc_cache[dk] = edc
+        time_axis = np.arange(len(edc)) / Fs
+        label = get_display_name(dk, {}, DISPLAY_NAME_MAP)
+        ax.plot(time_axis, edc, label=label,
+                linestyle=get_linestyle(dk, DISPLAY_NAME_MAP),
+                color=get_color(dk, DISPLAY_NAME_MAP))
+
+    if reflection_times:
+        plot_reflection_vertical_lines(ax, reflection_times)
+
+    ax.set_xlabel("Time (s)", fontsize=10)
+    ax.set_ylabel("Energy (dB)", fontsize=10)
+    ax.tick_params(axis='both', which='major', labelsize=10)
+    ax.grid(True, linestyle='--', alpha=0.6, linewidth=0.5)
+    ax.xaxis.set_major_formatter(FormatStrFormatter('%.2f'))
+
+    if focus_on_early:
+        ax.set_xlim(plot_config.get('main_xlim_focused'))
+        ax.set_ylim(plot_config.get('main_ylim_focused'))
+        axins_xlim = plot_config.get('main_xlim_full')
+        axins_ylim = plot_config.get('main_ylim_full')
+    else:
+        ax.set_xlim(plot_config.get('main_xlim_full'))
+        ax.set_ylim(plot_config.get('main_ylim_full'))
+        axins_xlim = plot_config.get('inset_xlim')
+        axins_ylim = plot_config.get('inset_ylim')
+
+    inset_rect = plot_config.get('inset_rect')
+    if inset_rect and axins_xlim and axins_ylim:
+        axins = ax.inset_axes(inset_rect)
+        for dk in plotted_keys:
+            edc = edc_cache[dk]
+            time_axis = np.arange(len(edc)) / Fs
+            axins.plot(time_axis, edc,
+                       linestyle=get_linestyle(dk, DISPLAY_NAME_MAP),
+                       color=get_color(dk, DISPLAY_NAME_MAP),
+                       linewidth=1)
+        axins.set_xlim(axins_xlim)
+        axins.set_ylim(axins_ylim)
+        axins.grid(True, linestyle='--', alpha=0.6, linewidth=0.5)
+        axins.tick_params(axis='x', labelsize=8)
+        axins.tick_params(axis='y', labelsize=8)
+        if focus_on_early:
+            axins.yaxis.set_major_locator(plt.MultipleLocator(20))
+            axins.xaxis.set_major_formatter(FormatStrFormatter('%.1f'))
+        else:
+            axins.yaxis.set_major_locator(plt.MultipleLocator(2))
+            axins.xaxis.set_major_formatter(FormatStrFormatter('%.3f'))
+            ax.indicate_inset_zoom(axins, edgecolor="black")
+
+    ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.12),
+              fancybox=True, shadow=True, ncol=4, fontsize=8.5)
+    fig.tight_layout(rect=[0, 0.01, 1, 1])
+
+    if output_path:
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        print(f"Figure saved to: {output_path}")
+
+    plt.show(block=False)
+
+
+def plot_ned_publication(rirs_dict, Fs, room_name='AES Room',
+                         show_inset=True, excluded_labels=None,
+                         output_path=None, reflection_times=None):
+    """Publication-quality NED plot matching the paper_figures_ned.py design.
+
+    Accepts raw RIRs. Uses PLOT_CONFIG for axis limits and DISPLAY_NAME_MAP for
+    consistent colors/linestyles across EDC and NED figures.
+    Set show_inset=False to skip the zoomed inset panel.
+    """
+    from . import EchoDensity as ned_module
+
+    if excluded_labels is None:
+        excluded_labels = []
+
+    plot_config = PLOT_CONFIG.get(room_name, {}).get('ned', {})
+
+    plt.style.use('seaborn-v0_8-paper')
+    fig, ax = plt.subplots(figsize=(7, 6))
+
+    # Follow DISPLAY_NAME_MAP key order, same as EDC plot
+    ordered_keys = [k for k in DISPLAY_NAME_MAP.keys()
+                    if any(k == l.split(':')[0].strip() for l in rirs_dict.keys())
+                    and k not in excluded_labels]
+
+    key_map = {}
+    for rirs_label in rirs_dict.keys():
+        base = rirs_label.split(':')[0].strip()
+        if base not in key_map:
+            key_map[base] = rirs_label
+
+    plotted_keys = [k for k in ordered_keys if k in key_map]
+
+    ned_cache = {}
+    for dk in plotted_keys:
+        rir = rirs_dict[key_map[dk]]
+        ned_profile = ned_module.echoDensityProfile(rir, fs=Fs)
+        ned_cache[dk] = ned_profile
+        time_axis = np.arange(len(ned_profile)) / Fs
+        label = get_display_name(dk, {}, DISPLAY_NAME_MAP)
+        ax.plot(time_axis, ned_profile, label=label,
+                linestyle=get_linestyle(dk, DISPLAY_NAME_MAP),
+                color=get_color(dk, DISPLAY_NAME_MAP),
+                linewidth=1.5)
+
+    ax.set_xlabel('Time (s)', fontsize=10)
+    ax.set_ylabel('Normalized Echo Density', fontsize=10)
+    ax.grid(True, which='both', linestyle='--', alpha=0.6, linewidth=0.5)
+    ax.tick_params(axis='both', which='major', labelsize=10)
+
+    if plot_config.get('main_xlim'):
+        ax.set_xlim(plot_config['main_xlim'])
+    if plot_config.get('main_ylim'):
+        ax.set_ylim(plot_config['main_ylim'])
+
+    if reflection_times:
+        plot_reflection_vertical_lines(ax, reflection_times)
+
+    if show_inset and plot_config.get('inset_rect'):
+        axins = ax.inset_axes(plot_config['inset_rect'])
+        for dk in plotted_keys:
+            ned_profile = ned_cache[dk]
+            time_axis = np.arange(len(ned_profile)) / Fs
+            axins.plot(time_axis, ned_profile,
+                       linestyle=get_linestyle(dk, DISPLAY_NAME_MAP),
+                       color=get_color(dk, DISPLAY_NAME_MAP),
+                       linewidth=1.5)
+        if plot_config.get('inset_xlim'):
+            axins.set_xlim(plot_config['inset_xlim'])
+        if plot_config.get('inset_ylim'):
+            axins.set_ylim(plot_config['inset_ylim'])
+        axins.grid(True, linestyle='--', alpha=0.6, linewidth=0.5)
+        ax.indicate_inset_zoom(axins, edgecolor="black")
+
+    ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.12),
+              fancybox=True, shadow=True, ncol=4, fontsize=8.5)
+    fig.tight_layout(rect=[0, 0.01, 1, 1])
+
+    if output_path:
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        print(f"Figure saved to: {output_path}")
+
+    plt.show(block=False)
+
 
 def create_unified_interactive_plot(rirs_dict, Fs, room_parameters=None, reflection_times=None):
     """Create a unified interactive plot with RIR and EDC side by side, and NED below, sharing synchronized checkboxes.

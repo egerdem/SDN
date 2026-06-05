@@ -102,7 +102,7 @@ C_BOUNDS = DEFAULT_C_BOUNDS
 # NOTE: c_opt_pair column in CSV is filled when RUN_PAIRWISE_C_OPT=True.
 #       If you already have optimal_c values from monte_carlo_proximity.py results.json,
 #       use the populate_csv_from_json.py script to fill this column instead.
-RUN_PAIRWISE_C_OPT = False
+RUN_PAIRWISE_C_OPT = True
 
 # Outlier rejection (only used if RUN_PAIRWISE_C_OPT=True)
 OUTLIER_REJECTION = True
@@ -456,5 +456,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
 

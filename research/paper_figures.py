@@ -1,3 +1,5 @@
+import matplotlib
+matplotlib.use('Qt5Agg')  # fixes broken save button on macOS macosx backend
 import numpy as np
 import matplotlib.pyplot as plt
 import os
@@ -127,11 +129,9 @@ def plot_edc_with_inset(data: dict, receiver_index: int, output_path: str,
         if not focus_on_early:
             ax.indicate_inset_zoom(axins, edgecolor="black")
 
-    # --- Legend and Layout (adopted from paper_figures_ned.py) ---
-    box = ax.get_position()
-    ax.set_position([box.x0, box.y0 + box.height * 0.1, box.width, box.height * 0.9])
-    ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.1),
-              fancybox=True, shadow=True, ncol=4, fontsize=8.5) # fontsize of legend
+    # --- Legend and Layout ---
+    ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.12),
+              fancybox=True, shadow=True, ncol=4, fontsize=8.5)
     fig.tight_layout(rect=[0, 0.05, 1, 1])
 
     # --- Save Figure ---
@@ -142,8 +142,9 @@ def plot_edc_with_inset(data: dict, receiver_index: int, output_path: str,
 
 if __name__ == "__main__":
     # --- FIGURE GENERATION SETUP ---
-    PROCESS_ALL_FILES = True
+    PROCESS_ALL_FILES = False
     # specific_files_to_process = ["aes_room_spatial_edc_data.npz"]
+    specific_files_to_process = ["aes_FULLGRID_center_source.npz"]
 
     data_dir = "../results/paper_data"
     output_dir = "../results/paper_figures"
@@ -186,8 +187,9 @@ if __name__ == "__main__":
         print(f"Generating plot for room: '{room_name}'")
         
         # --- PLOT CONFIGURATION ---
+        # methods_to_exclude = ['HO-SDN-N2', 'HO-SDN-N3']
         methods_to_exclude = []
-        
+
         # Get the specific plot settings for this room from our central config
         room_plot_config = PLOT_CONFIG.get(room_name, {}).get('edc', {})
         
@@ -196,7 +198,7 @@ if __name__ == "__main__":
 
         plot_edc_with_inset(
             data=simulation_data, 
-            receiver_index=0, 
+            receiver_index=6,
             output_path=output_path,
             excluded_methods=methods_to_exclude,
             focus_on_early=True, # You can still toggle this mode

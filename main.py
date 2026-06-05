@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import geometry
 import matplotlib.pyplot as plt
@@ -14,6 +15,8 @@ from rir_calculators import calculate_pra_rir, calculate_rimpy_rir, calculate_sd
 from rir_calculators import calculate_ho_sdn_rir, rir_normalisation
 
 import experiment_configs as exp_config
+import matplotlib
+matplotlib.use('Qt5Agg')
 
 # --- Method Configurations ---
 # Import from experiment_configs
@@ -27,11 +30,12 @@ RUN_SDN_Test1b = False
 RUN_SDN_Test1c = False
 PLOT_TREBLE = False
 
-PICKLE_LOAD_RIRS = False  # Load RIRs from pickle file
+PICKLE_LOAD_RIRS = True  # Load RIRs from pickle file
 # file_name = "rirs_c_cSN_cSPMAT_rimneg_ho3ho2.pkl"
 # file_name = "rirs_c_cSN_cSPMAT_rimneg_ho3ho2.pkl"
 # file_name = "rirs_c_cSN.pkl"
-file_name = "pra_n2swc3_n2swc5_n3_swc3_hoN2_hoN3_c5_c1.pkl"  #
+# file_name = "pra_n2swc3_n2swc5_n3_swc3_hoN2_hoN3_c5_c1.pkl"  #
+file_name = "main_sdn_allsws"
 
 """ Visualization flags """
 PLOT_ROOM = False  # 3D Room Visualisation
@@ -39,17 +43,19 @@ PLOT_ISM_PATHS = False  # Visualize example ISM paths
 ISM_SDN_PATH_DIFF_TABLE = False  # Run path analysis (ISM vs SDN comparison, invalid paths, visualization)
 PLOT_REFLECTION_LINES = True  # Plot vertical lines at reflection arrival times
 SAVE_audio = False
+SAVE_FIGURES = True   # Save EDC and NED figures as PDF
 
 """ Analysis flags """
-PLOT_EDC = False
-PLOT_NED = False  # Plot Normalized Echo Density
+PLOT_EDC = True
+PLOT_NED = True   # Plot Normalized Echo Density
+NED_SHOW_INSET = True  # Show zoomed inset panel on NED plot
 PLOT_lsd = False  # Plot LSD
 PLOT_FREQ = False  # Frequency response plot
-UNIFIED_PLOTS = True  # Flag to switch between unified and separated plots
+UNIFIED_PLOTS = False  # Flag to switch between unified and separated plots
 normalize_to_first_impulse = True  # Set this to True if you want to normalize to first impulse
 
-Print_RIR_comparison_metrics = True
-interactive_rirs = True  # Set to True to enable interactive RIR comparison
+Print_RIR_comparison_metrics = False
+interactive_rirs = False  # Set to True to enable interactive RIR comparison
 pulse_analysis = "upto_4"
 plot_smoothed_rirs = False
 
@@ -58,7 +64,7 @@ plot_smoothed_rirs = False
 room_parameters = exp_config.active_room
 
 # Parameters
-duration = 1  # seconds
+duration = exp_config.duration  # room-specific duration from experiment_configs
 duration_in_ms = 1000 * duration  # Convert to milliseconds
 
 Fs = 44100
@@ -104,8 +110,10 @@ def run_sdn_test(test_name, config):
             room.source.signal = impulse_dirac['signal']
             print(f"Using Dirac impulse for {test_name}")
 
-    if config.get('use_fast_method', False):
-        print(f"--- Running {test_name} with FAST method (Analytic Reconstruction) ---")
+    # Check for either source-side or mic-side fast method
+    if config.get('use_fast_method', False) or config.get('use_fast_mic_method', False):
+        fast_type = "SOURCE-SIDE" if config.get('use_fast_method', False) else "MIC-SIDE"
+        print(f"--- Running {test_name} with {fast_type} FAST method (Analytic Reconstruction) ---")
         sdn, rir, label, is_default = calculate_sdn_rir_fast(room_parameters, test_name, room, duration, Fs, config)
     else:
         sdn, rir, label, is_default = calculate_sdn_rir(room_parameters, test_name, room, duration, Fs, config)
@@ -326,10 +334,10 @@ if __name__ == '__main__':
             plt.show(block=False)
         else:
             import importlib
-            from analysis import plot_room as pp
+            # from analysis import plot_room as pp
 
-            importlib.reload(pp)
-            pp.create_interactive_rir_plot(rirs, Fs)
+            # importlib.reload(pp)
+            pp.create_interactive_rir_plot(rirs, Fs, put_rect=True)
             plt.show(block=False)
 
     # Calculate RT60 values for all RIRs
@@ -346,29 +354,23 @@ if __name__ == '__main__':
         for label, rt60 in rt60_values.items():
             print(f"{label}: {rt60:.3f} s")
 
+    _fig_dir = os.path.join(os.path.dirname(__file__), 'results', 'main_figures')
+    os.makedirs(_fig_dir, exist_ok=True)
+    _room_tag = room_parameters['display_name'].lower().replace(' ', '_')
+
     if PLOT_EDC:
         if not UNIFIED_PLOTS:
-            pp.create_interactive_edc_plot(rirs, Fs)
+            _edc_path = os.path.join(_fig_dir, f'edc_{_room_tag}.pdf') if SAVE_FIGURES else None
+            pp.plot_edc_publication(rirs, Fs, room_name=room_parameters['display_name'],
+                                    reflection_times=reflection_times,
+                                    output_path=_edc_path)
 
     if PLOT_NED and not UNIFIED_PLOTS:
-        plt.figure(figsize=(12, 6))
-        print("old NED plot")
-        # Plot both normalized and raw echo densities
-        for label, rir in rirs.items():
-            # Normalized Echo Density
-            echo_density = ned.echoDensityProfile(rir, fs=Fs)
-            # Create time array in seconds
-            time_axis = np.arange(len(echo_density)) / Fs
-            plt.plot(time_axis, echo_density, label=label, alpha=0.7)
-
-        # Configure plots
-        plt.title('Normalized Echo Density')
-        plt.xlabel('Time (s)')
-        plt.ylabel('Normalized Echo Density')
-        plt.grid(True)
-        plt.legend()
-        plt.tight_layout()
-        plt.show(block=False)
+        _ned_path = os.path.join(_fig_dir, f'ned_{_room_tag}.pdf') if SAVE_FIGURES else None
+        pp.plot_ned_publication(rirs, Fs, room_name=room_parameters['display_name'],
+                                show_inset=NED_SHOW_INSET,
+                                reflection_times=reflection_times,
+                                output_path=_ned_path)
 
     if PLOT_lsd:
         # Get all unique pairs of RIR labels
@@ -480,23 +482,23 @@ if pulse_analysis == "all":
     # Pulse analysis moved to analysis.py for better organization
     pulse_results = an.analyze_rir_pulses(rirs, Fs, print_results=True)
 
-# import pickle
+import pickle
 # # # Save the RIRs to a file
 #
-# try:
-#     with open(file_name, 'rb') as f:
-#         existing_rirs = pickle.load(f)
-#     # If the file exists, write a message
-#     print("File already exists. Not overwriting. Please delete the file to save new data.")
+try:
+    with open(file_name, 'rb') as f:
+        existing_rirs = pickle.load(f)
+    # If the file exists, write a message
+    print("File already exists. Not overwriting. Please delete the file to save new data.")
 #
 # # dump the file otherwise
-# except FileNotFoundError:
-#     # If the file doesn't exist, write the new data
-#     print("File not found. Saving new data.")
-#     # Save the RIRs to the file
-#     with open(file_name, 'wb') as f:
-#         # Save the RIRs to the file
-#         pickle.dump(rirs, f)
+except FileNotFoundError:
+    # If the file doesn't exist, write the new data
+    print("File not found. Saving new data.")
+    # Save the RIRs to the file
+    with open(file_name, 'wb') as f:
+        # Save the RIRs to the file
+        pickle.dump(rirs, f)
 
 
 if SAVE_audio:

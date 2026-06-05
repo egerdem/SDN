@@ -1,3 +1,59 @@
+"""
+Monte Carlo Experiment Generator for SDN C Parameter Optimization
+
+What this script does:
+----------------------
+1. Generates random (or fixed) room configurations
+2. Places source(s) and receiver(s) in systematic grids
+3. Computes reference RIRs (RIMPY) and caches them
+4. Finds optimal C parameter for SDN that minimizes RMSE vs reference
+5. Computes geometric metrics (H_src_norm, d_sm_norm, etc.)
+
+Outputs:
+--------
+results/monte_carlo_experiments/<EXPERIMENT_ID>/
+  ├── results.json        # Optimization results (optimal_c, min_rmse, geometry)
+  ├── rimpy_cache/        # Cached RIMPY RIRs (expensive to recalculate)
+  │   └── rimpy_*.npy
+  ├── validation/         # (created later by validate_c_predictor.py)
+  └── config.json         # Experiment configuration snapshot
+
+results.json contains:
+----------------------
+For each (room, source, receiver) configuration:
+- room_dims, src_pos, rx_pos
+- optimal_c: Best C value found via optimization
+- min_rmse: RMSE at optimal_c
+- h_src_norm: Normalized harmonic mean wall distance (source proximity)
+- d_sm_norm: Normalized source-receiver distance
+- Other geometric metrics
+
+Usage:
+------
+# Default experiment (no seed)
+$ python research/monte_carlo_proximity.py
+
+# Reproducible experiment with seed
+$ export MC_EXPERIMENT_ID=seed_42
+$ python research/monte_carlo_proximity.py
+
+# Custom experiment name
+$ export MC_EXPERIMENT_ID=my_custom_experiment
+$ python research/monte_carlo_proximity.py
+
+Configuration:
+--------------
+Edit PRESET at top of file to choose experiment type:
+- "aes_diagonal_8src_fullgrid": Fixed AES room, diagonal grid sources
+- "aes_fullgrid_perpair": Fixed room, custom source grids
+- "mc_fullgrid_perpair": Random rooms, parametric source grid
+- "legacy_pair_single_mic": Legacy single-receiver pairs
+
+Next step:
+----------
+After running this script, use validate_c_predictor.py to evaluate
+how well your C predictor model performs on this dataset.
+"""
 
 import os
 import sys
@@ -17,7 +73,7 @@ import geometry
 from analysis import analysis as an
 from deprecated import wall_proximity
 from optimisation_singleC import find_optimal_c
-from rir_calculators import rir_normalisation, calculate_rimpy_rir
+from rir_calculators import rir_normalisation, calculate_rimpy_rir, enable_basis_disk_cache, calculate_sdn_rir_fast
 from analysis.spatial_analysis import (
     generate_fixed_source_grid,
     generate_fixed_source_grid_simple,
@@ -35,17 +91,16 @@ from analysis.spatial_analysis import (
 # - "aes_fullgrid_perpair": 1 fixed room via `experiment_configs.active_room`, fixed duration, per-(src,rx) c*
 # - "mc_fullgrid_perpair": Monte Carlo rooms, Sabine-adaptive duration, per-(src,rx) c*
 # - "legacy_pair_single_mic": legacy Monte Carlo pairs, fixed duration, single receiver
-PRESET = "aes_diagonal_8src_fullgrid"
-
+#PRESET = "legacy_pair_single_mic"
+PRESET = "aes_diagonal3D_8src_fullgrid"
 # Optional: put outputs into `results/experiments/<EXPERIMENT_NAME>/`
 # If None, a descriptive name is auto-generated from the preset + key params.
 EXPERIMENT_NAME: Optional[str] = None
-EXPERIMENT_NAME = "aes_diagonal_8src_fullgrid"
-# Outlier rejection: Apply post-processing to clean optimal_c values
-# NOTE: Outlier rejection is applied as a POST-PROCESSING step after the run completes.
-#       Run research/apply_outlier_rejection_to_json.py to apply it to results.json
-#       This ensures all downstream scripts (quick_plot_c_relationship.py, etc.) use cleaned data.
-# APPLY_OUTLIER_REJECTION = True  # Reserved for future in-line implementation
+
+# Outlier rejection is now applied INLINE during experiment generation
+# using the apply_outlier_rejection() function. Results are automatically
+# corrected and saved with 'outlier_corrected' flags.
+# See apply_outlier_rejection() function below for implementation.
 
 # Constants that are truly global (rarely changed)
 ERR_DURATION_MS = 50
@@ -94,7 +149,7 @@ def _preset_table() -> Dict[str, Dict[str, Any]]:
                     "z_mode": "fixed_1p5",
                     "include_corners": True,
                     "corner_offset": 0.5,
-                    "diagonals": True  # NEW parameter
+                    "diagonals": True  # 2D diagonal
                 }
             ],
             # These are needed for _recompute_total_runs() even when using SOURCE_GENERATION_SPECS
@@ -102,6 +157,35 @@ def _preset_table() -> Dict[str, Dict[str, Any]]:
             "SOURCE_GRID_N_Y": 15,
             "SOURCE_GRID_INCLUDE_CORNERS": True,
             "FULLGRID_FIXED_ROOM_FROM_EXPERIMENT_CONFIGS": True,
+            "USE_ADAPTIVE_DURATION": False,  # Use fixed duration from experiment_configs
+        },
+
+        "aes_diagonal3D_8src_fullgrid": {
+            "MODE": "fullgrid_sources",
+            "FULLGRID_OPTIMIZE_SCOPE": "per_pair",
+            "NUM_ROOMS": 1,
+            "RECEIVER_GRID_N_X": 4,
+            "RECEIVER_GRID_N_Y": 4,
+            "RECEIVER_GRID_MARGIN": 0.5,
+            # Single source generation spec with 3D diagonals
+            "SOURCE_GENERATION_SPECS": [
+                {
+                    "func": "generate_fixed_source_grid",
+                    "padding": 0.5,
+                    "n_x": 15,
+                    "n_y": 15,
+                    "z_mode": "fixed_1p5",
+                    "include_corners": True,
+                    "corner_offset": 0.5,
+                    "diagonals": "3d"  # 3D diagonal
+                }
+            ],
+            # These are needed for _recompute_total_runs() even when using SOURCE_GENERATION_SPECS
+            "SOURCE_GRID_N_X": 15,
+            "SOURCE_GRID_N_Y": 15,
+            "SOURCE_GRID_INCLUDE_CORNERS": True,
+            "FULLGRID_FIXED_ROOM_FROM_EXPERIMENT_CONFIGS": True,
+            "USE_ADAPTIVE_DURATION": False,  # Use fixed duration from experiment_configs
         },
 
         "aes_fullgrid_perpair": {
@@ -123,6 +207,7 @@ def _preset_table() -> Dict[str, Dict[str, Any]]:
             "SOURCE_GRID_CORNER_OFFSET": 2.0,
             # Fixed room + duration come from experiment_configs.active_room / experiment_configs.duration
             "FULLGRID_FIXED_ROOM_FROM_EXPERIMENT_CONFIGS": True,
+            "USE_ADAPTIVE_DURATION": False,  # Use fixed duration from experiment_configs
         },
         "mc_fullgrid_perpair": {
             "MODE": "fullgrid_sources",
@@ -144,18 +229,22 @@ def _preset_table() -> Dict[str, Dict[str, Any]]:
             "HEIGHT_RANGE": (2.6, 4.2),
             "FS": 44100,
             "ABSORPTION": 0.2,
+            "USE_ADAPTIVE_DURATION": True,  # Adapt to RT60 (Monte Carlo rooms)
         },
         "legacy_pair_single_mic": {
             "MODE": "pair_single_mic",
             "NUM_ROOMS": 10,
-            "PAIRS_PER_ROOM": 25,
+            "PAIRS_PER_ROOM": 6,
             "SOURCE_GENERATION_SPECS": None,
-            "WIDTH_RANGE": (3.0, 9.5),
-            "DEPTH_RANGE": (4.0, 7.5),
-            "HEIGHT_RANGE": (2.6, 4.2),
+            "WIDTH_RANGE": (3.0, 9.0),
+            "DEPTH_RANGE": (3.0, 8.0),
+            "HEIGHT_RANGE": (2.5, 7.0),
             "FS": 44100,
-            "DURATION": 1.0,
+            "USE_ADAPTIVE_DURATION": True,  # Adapt duration to RT60 (1.2*RT60, clipped 1.0-2.5s)
+            # "DURATION": 1.0,  # Base duration (used if USE_ADAPTIVE_DURATION=False)
             "ABSORPTION": 0.2,
+            "CORNER_BIAS_PROBABILITY": 0.0,  # 0 = uniform, 0.25 = 25% corner bias
+            # Note: np.random.seed(42) at startup makes rooms, positions, AND RIMPY reproducible
         },
     }
 
@@ -248,7 +337,36 @@ TOTAL_RUNS = _recompute_total_runs()
 # Minimal runtime validation removed - Python will raise NameError if variables are truly missing
 # This allows for more flexible preset configurations
 
-OUTPUT_FILE = os.path.join(project_root, "results", "monte_carlo_proximity_results.json")
+# =====================================================================
+# EXPERIMENT FOLDER ORGANIZATION
+# =====================================================================
+# All Monte Carlo outputs now go into organized experiment folders:
+#   results/monte_carlo_experiments/{EXPERIMENT_ID}/
+#     - results.json
+#     - rimpy_cache/
+#     - validation/
+#
+# EXPERIMENT_ID can be:
+#   - "default" (if no seed specified)
+#   - "seed_{N}" (if seed specified)
+#   - custom name via environment variable: MC_EXPERIMENT_ID
+
+import datetime
+
+def _get_experiment_id() -> str:
+    """Determine experiment ID for this Monte Carlo run."""
+    # Option 1: Custom ID via environment variable
+    custom_id = os.environ.get('MC_EXPERIMENT_ID')
+    if custom_id:
+        return custom_id
+    
+    # Option 2: Seed-based ID (if you set np.random.seed in your code)
+    # For now, we'll use "default" but you can modify this logic
+    return "default"
+
+EXPERIMENT_ID = _get_experiment_id()
+EXPERIMENT_ROOT = os.path.join(project_root, "results", "monte_carlo_experiments", EXPERIMENT_ID)
+OUTPUT_FILE = os.path.join(EXPERIMENT_ROOT, "results.json")
 
 
 def _atomic_json_dump(path: str, payload) -> None:
@@ -330,9 +448,9 @@ def choose_duration_for_room(w: float, d: float, h: float, alpha: float) -> floa
     We base it on a Sabine RT60 estimate but clamp to keep compute bounded.
     """
     rt60 = estimate_rt60_sabine(w, d, h, alpha)
-    # Heuristic: capture well past RT60 to stabilize EDC shape at early times.
+    # Heuristic: 1.2x RT60 provides sufficient decay capture
     # Keep within practical bounds for Monte Carlo.
-    dur = 0.3 + 1.5 * rt60
+    dur = 1.2 * rt60
     return float(np.clip(dur, 1.0, 2.5))
 
 
@@ -464,9 +582,9 @@ def generate_random_room():
     h = np.random.uniform(*HEIGHT_RANGE)
     return w, d, h
 
-def generate_random_position(w, d, h, padding, mode='uniform'):
-    if mode == 'corner_biased' and np.random.rand() < 0.5:
-        # 50% chance to force a position deep into a random corner
+def generate_random_position(w, d, h, padding, mode='uniform', corner_bias_prob=0.5):
+    if mode == 'corner_biased' and np.random.rand() < corner_bias_prob:
+        # corner_bias_prob chance to force a position deep into a random corner
         # Pick a random corner (0 or Max Dimension)
         x_corner = 0 if np.random.rand() < 0.5 else w
         y_corner = 0 if np.random.rand() < 0.5 else d
@@ -501,14 +619,26 @@ def run_monte_carlo():
 
     print(f"--- Starting Monte Carlo Experiment (N={TOTAL_RUNS}) ---")
     
-    # 0. Set Seed for Deterministic "Random" Rooms
+    # 0. Enable Basis Cache (shared with validate_c_predictor.py)
+    enable_basis_disk_cache()
+    print("✓ Basis function disk cache enabled (shared across scripts)")
+    
+    # 1. Set Seed for Deterministic "Random" Rooms, Positions, and RIMPY
+    # This single seed(42) makes ALL randomness reproducible:
+    # - Room dimensions (Monte Carlo)
+    # - Source/receiver positions
+    # - RIMPY image source perturbations (randDist=0.1)
     np.random.seed(42)
     
-    # Cache Directory
-    RIR_CACHE_DIR = os.path.join(project_root, "results", "monte_carlo_rirs")
+    # 2. Cache Directory (within experiment folder)
+    RIR_CACHE_DIR = os.path.join(EXPERIMENT_ROOT, "rimpy_cache")
     os.makedirs(RIR_CACHE_DIR, exist_ok=True)
     
-    # Load Existing Results (keyed by run_key for readability/stability)
+    print(f"Experiment folder: {EXPERIMENT_ROOT}")
+    print(f"RIR cache: {RIR_CACHE_DIR}")
+    print(f"Global RNG seed: 42 (affects rooms, positions, RIMPY)")
+    
+    # 3. Load Existing Results (keyed by run_key for readability/stability)
     existing_results_map = {}
     if os.path.exists(OUTPUT_FILE):
         try:
@@ -522,11 +652,12 @@ def run_monte_carlo():
             print(f"Error loading existing results: {e}")
 
     results = [] # Final list to save
+    runs_added_this_session = set()  # Track runs added in THIS session (not from file)
     
     start_time = time.time()
     
     for room_idx in range(NUM_ROOMS):
-        # 1. Generate Random Room
+        # 4. Generate Random Room
         w, d, h = generate_random_room()
         # Round dimensions for cleaner logs
         w, d, h = round(w, 2), round(d, 2), round(h, 2)
@@ -539,31 +670,48 @@ def run_monte_carlo():
             'air': {'temperature': 20, 'humidity': 50} 
         }
         
-        print(f"\n[Room {room_idx+1}/{NUM_ROOMS}] Dims: {w}x{d}x{h}")
+        # Adaptive duration based on RT60 (if enabled)
+        use_adaptive_duration = globals().get('USE_ADAPTIVE_DURATION', False)
+        if use_adaptive_duration:
+            rt60_est = estimate_rt60_sabine(w, d, h, ABSORPTION)
+            duration_s = choose_duration_for_room(w, d, h, ABSORPTION)
+            print(f"\n[Room {room_idx+1}/{NUM_ROOMS}] Dims: {w}x{d}x{h}, RT60~{rt60_est:.2f}s, duration={duration_s:.2f}s")
+        else:
+            rt60_est = None
+            duration_s = globals().get('DURATION', 1.0)  # Fallback to 1.0s if not specified
+            print(f"\n[Room {room_idx+1}/{NUM_ROOMS}] Dims: {w}x{d}x{h}, duration={duration_s:.2f}s (fixed)")
         
-        # 2. Generate Pairs
+        # 5. Generate Pairs
         for pair_idx in range(PAIRS_PER_ROOM):
             run_id = room_idx * PAIRS_PER_ROOM + pair_idx + 1  # legacy numeric id
             run_key = f"room{room_idx + 1}_pair{pair_idx + 1}"
             
             # --- RESUME LOGIC ---
             if run_key in existing_results_map:
-                print(f"  Run {run_key} ({run_id}/{TOTAL_RUNS}): SKIPPING (Result exists)")
                 existing = existing_results_map[run_key]
-                # Ensure any newly added derived fields exist before re-saving
-                _ensure_derived_metrics(existing)
-                results.append(existing)
                 
-                # Actually, since we set Seed=42 at start, if we skip, we MUST consume the RNG calls
-                # OR rely on the fact that we restart the script every time?
-                # If we restart script, Seed=42 ensures sequence.
-                # If we skip result, we still need to iterate RNG?
-                # YES. If we don't call generate_random_position, the Next Room's dimensions will be wrong (shifted).
-                _ = generate_random_position(w, d, h, PADDING, mode='corner_biased')
-                _ = generate_random_position(w, d, h, PADDING, mode='uniform')
+                # Only consume RNG if this was loaded from file (not just added this session)
+                if run_key not in runs_added_this_session:
+                    print(f"  Run {run_key} ({run_id}/{TOTAL_RUNS}): SKIPPING (loaded from file, consuming RNG)")
+                    # Ensure any newly added derived fields exist before re-saving
+                    _ensure_derived_metrics(existing)
+                    results.append(existing)
+                    
+                    # Consume RNG calls to maintain sync with previous run
+                    corner_bias = globals().get('CORNER_BIAS_PROBABILITY', 0.)
+                    src_mode = 'uniform' if corner_bias == 0.0 else 'corner_biased'
+                    _ = generate_random_position(w, d, h, PADDING, mode=src_mode, corner_bias_prob=corner_bias)
+                    _ = generate_random_position(w, d, h, PADDING, mode='uniform')
+                else:
+                    print(f"  Run {run_key} ({run_id}/{TOTAL_RUNS}): SKIPPING (just added, no RNG consumption)")
+                    results.append(existing)
+                
                 continue
             
-            src_pos = generate_random_position(w, d, h, PADDING, mode='corner_biased')
+            corner_bias = globals().get('CORNER_BIAS_PROBABILITY')
+            # Optimize: if no corner bias, use uniform mode directly (skips redundant RNG call)
+            src_mode = 'uniform' if corner_bias == 0.0 else 'corner_biased'
+            src_pos = generate_random_position(w, d, h, PADDING, mode=src_mode, corner_bias_prob=corner_bias)
             mic_pos = generate_random_position(w, d, h, PADDING, mode='uniform') # Generate random Z for mic too
             
             # Update params for rir_calculators
@@ -629,7 +777,7 @@ def run_monte_carlo():
             # --- Acoustic Simulation ---
             # 1. Setup Room
             sim_room = geometry.Room(w, d, h)
-            impulse = geometry.Source.generate_signal('dirac', int(FS * DURATION))
+            impulse = geometry.Source.generate_signal('dirac', int(FS * duration_s))
             sim_room.set_source(*src_pos, signal=impulse['signal'], Fs=FS)
             sim_room.set_microphone(*mic_pos)
             sim_room.wallAttenuation = [room_params['reflection']] * 6
@@ -643,7 +791,7 @@ def run_monte_carlo():
                 (w, d, h),
                 src_pos,
                 mic_pos,
-                DURATION,
+                duration_s,
                 FS,
                 reflection_sign=-1,
                 rand_dist=0.1,
@@ -679,8 +827,11 @@ def run_monte_carlo():
             if not loaded_valid_rir:
                 # Calculate
                 # NEW: RIMPY-neg10 (Matches main paper data)
+                # Note: RIMPY seed was set once at startup (line 595)
+                # Don't reset seed here - it would break position generation RNG!
+                
                 ref_rir, _ = calculate_rimpy_rir(
-                    room_params, DURATION, FS, 
+                    room_params, duration_s, FS, 
                     reflection_sign=-1, randDist=0.1
                 )
                 
@@ -708,8 +859,41 @@ def run_monte_carlo():
             # Widen bounds to allow finding true optimum even if < 1.0 or > 7.0
             opt_c, min_rmse, _ = find_optimal_c(
                 sim_room, room_params, [ref_edc], receiver_positions, 
-                DURATION, FS, ERR_DURATION_MS, source_name=f"R{room_idx}_P{pair_idx}",
-                bounds=(1, 7.0)
+                duration_s, FS, ERR_DURATION_MS, source_name=f"R{room_idx}_P{pair_idx}",
+                bounds=(0.99, 7.0)
+            )
+            
+            # 4. Compute baseline RMSE at C=1 (for principled outlier detection)
+            # FastSDN basis at C=1 is already cached during optimization, so this is fast!
+            sdn_config_c1 = {
+                'enabled': True,
+                'calculator': 'sdn',
+                'flags': {
+                    'specular_source_injection': True,
+                    'source_weighting': 1.0,
+                },
+                'cache_label': f'mc_baseline_c1_{run_key}',
+            }
+            _, rir_sdn_c1, _, _ = calculate_sdn_rir_fast(
+                room_params, "BaselineC1", sim_room, duration_s, FS, sdn_config_c1
+            )
+            rir_sdn_c1_norm = rir_normalisation(rir_sdn_c1, sim_room, FS, normalize_to_first_impulse=True)['single_rir']
+            edc_sdn_c1, _, _ = an.compute_edc(rir_sdn_c1_norm, FS, plot=False)
+            rmse_c1 = float(
+                an.compute_RMS(
+                    edc_sdn_c1, ref_edc,
+                    range=int(ERR_DURATION_MS),
+                    Fs=FS,
+                    skip_initial_zeros=True,
+                    normalize_by_active_length=True,
+                )
+            )
+            
+            # Apply outlier correction
+            opt_c_original = opt_c
+            min_rmse_original = min_rmse
+            opt_c, min_rmse, was_outlier_corrected = apply_outlier_rejection(
+                opt_c, min_rmse, rmse_c1
             )
             
             # Store Result
@@ -738,12 +922,36 @@ def run_monte_carlo():
                 # New candidates (match hypothesis: larger d_sm_norm -> lower C)
                 'h_minus_d_norm': float(h_src_norm - src_mic_dist_norm),
                 'h_over_d_norm': float(h_src_norm / (src_mic_dist_norm + 1e-6)),
+                'duration_s': float(duration_s),
                 'optimal_c': opt_c,
-                'min_rmse': min_rmse
+                'min_rmse': min_rmse,
+                'rmse_c1': rmse_c1,  # Baseline RMSE at C=1 (for principled outlier detection)
+                'outlier_corrected': was_outlier_corrected,
             }
-            results.append(result)
             
-            print(f"  Run {run_key} ({run_id}/{TOTAL_RUNS}): H_src_norm={h_src_norm:.2f}, NodeDist_norm={mean_node_dist_norm:.2f}, C_opt={opt_c:.2f}, RMSE={min_rmse:.4f}")
+            # Store original values if outlier was corrected
+            if was_outlier_corrected:
+                result['optimal_c_original'] = opt_c_original
+                result['min_rmse_original'] = min_rmse_original
+
+            # Add RT60 if adaptive duration is enabled
+            if rt60_est is not None:
+                result['rt60_est_sabine'] = float(rt60_est)
+            
+            results.append(result)
+            runs_added_this_session.add(run_key)  # Mark as added in this session
+            
+            print(f"  Run {run_key} ({run_id}/{TOTAL_RUNS}): H_src_norm={h_src_norm:.2f}, NodeDist_norm={mean_node_dist_norm:.2f}, "
+                  f"C_opt={opt_c:.2f}, RMSE(C*)={min_rmse:.4f}, RMSE(C=1)={rmse_c1:.4f}")
+            
+            # Incremental save: write results after each run for crash recovery
+            _ensure_derived_metrics(result)
+            def _sort_key(r):
+                if "room_idx" in r and "pair_idx" in r:
+                    return (int(r["room_idx"]), int(r["pair_idx"]))
+                return (999999, int(r.get("run_id", 999999)))
+            results_sorted = sorted(results, key=_sort_key)
+            _atomic_json_dump(OUTPUT_FILE, results_sorted)
 
     # Save Results (auto-upgrade: ensure *all* derived fields exist in the output JSON)
     for r in results:
@@ -935,15 +1143,22 @@ def run_monte_carlo_fullgrid_sources():
         generate_full_receiver_grid = importlib.import_module("spatial_analysis").generate_full_receiver_grid
 
     print(f"--- Starting Monte Carlo FULLGRID Sources Experiment ---")
+    
+    # Enable Basis Cache (shared with validate_c_predictor.py)
+    enable_basis_disk_cache()
+    print("✓ Basis function disk cache enabled (shared across scripts)")
+    
     # Still seed rooms (room dimensions) for determinism; sources are deterministic grids.
     np.random.seed(42)
 
-    # Resolve output dir (optionally per-experiment)
-    default_dir = os.path.join(project_root, "results", "monte_carlo_fullgrid_rirs")
-    experiment_dir = _resolve_experiment_dir(default_dir)
+    # Use the global EXPERIMENT_ROOT for consistency
+    experiment_dir = EXPERIMENT_ROOT
     RIR_CACHE_DIR = os.path.join(experiment_dir, "rimpy_cache")
     os.makedirs(RIR_CACHE_DIR, exist_ok=True)
     OUTPUT_FILE = os.path.join(experiment_dir, "results.json")
+    
+    print(f"Experiment folder: {experiment_dir}")
+    print(f"RIR cache: {RIR_CACHE_DIR}")
 
     _write_experiment_config(
         experiment_dir,
@@ -1224,6 +1439,42 @@ def run_monte_carlo_fullgrid_sources():
                     bounds=(1.0, 7.0),
                 )
 
+                # Compute baseline RMSE at C=1 (reuses cached basis)
+                sdn_config_c1 = {
+                    'enabled': True,
+                    'calculator': 'sdn',
+                    'flags': {
+                        'specular_source_injection': True,
+                        'source_weighting': 1.0,
+                    },
+                    'cache_label': f'mc_baseline_c1_{run_key}',
+                }
+                _, rir_sdn_c1, _, _ = calculate_sdn_rir_fast(
+                    room_params, "BaselineC1", sim_room, duration_s, Fs_eff, sdn_config_c1
+                )
+                rir_sdn_c1_norm = rir_normalisation(rir_sdn_c1, sim_room, Fs_eff, normalize_to_first_impulse=True)['single_rir']
+                edc_sdn_c1, _, _ = an.compute_edc(rir_sdn_c1_norm, Fs_eff, plot=False)
+                
+                # Compute RMSE against all receivers (mean)
+                rmses_c1 = []
+                for ref_edc in ref_edcs:
+                    rmse_i = an.compute_RMS(
+                        edc_sdn_c1, ref_edc,
+                        range=int(ERR_DURATION_MS),
+                        Fs=Fs_eff,
+                        skip_initial_zeros=True,
+                        normalize_by_active_length=True,
+                    )
+                    rmses_c1.append(rmse_i)
+                rmse_c1 = float(np.mean(rmses_c1))
+
+                # Apply outlier correction
+                opt_c_original = opt_c
+                min_rmse_original = min_rmse
+                opt_c, min_rmse, was_outlier_corrected = apply_outlier_rejection(
+                    opt_c, min_rmse, rmse_c1
+                )
+
                 # Distance summary across the grid (dimensionless)
                 d_mean = float(np.mean(d_sm_norms_arr))
                 d_min = float(np.min(d_sm_norms_arr))
@@ -1248,8 +1499,16 @@ def run_monte_carlo_fullgrid_sources():
                     "rt60_est_sabine": float(rt60_est),
                     "optimal_c": float(opt_c),
                     "min_rmse": float(min_rmse),
+                    "rmse_c1": rmse_c1,
                     "n_receivers": len(receiver_positions),
+                    "outlier_corrected": was_outlier_corrected,
                 }
+                
+                # Store original values if outlier was corrected
+                if was_outlier_corrected:
+                    result['optimal_c_original'] = opt_c_original
+                    result['min_rmse_original'] = min_rmse_original
+
                 results.append(result)
                 _persist_partial_results()
 
@@ -1277,6 +1536,38 @@ def run_monte_carlo_fullgrid_sources():
                         bounds=(1.0, 7.0),
                     )
 
+                    # Compute baseline RMSE at C=1 (reuses cached basis)
+                    sdn_config_c1 = {
+                        'enabled': True,
+                        'calculator': 'sdn',
+                        'flags': {
+                            'specular_source_injection': True,
+                            'source_weighting': 1.0,
+                        },
+                        'cache_label': f'mc_baseline_c1_{run_key}',
+                    }
+                    _, rir_sdn_c1, _, _ = calculate_sdn_rir_fast(
+                        room_params, "BaselineC1", sim_room, duration_s, Fs_eff, sdn_config_c1
+                    )
+                    rir_sdn_c1_norm = rir_normalisation(rir_sdn_c1, sim_room, Fs_eff, normalize_to_first_impulse=True)['single_rir']
+                    edc_sdn_c1, _, _ = an.compute_edc(rir_sdn_c1_norm, Fs_eff, plot=False)
+                    rmse_c1 = float(
+                        an.compute_RMS(
+                            edc_sdn_c1, ref_edcs[rx_i],
+                            range=int(ERR_DURATION_MS),
+                            Fs=Fs_eff,
+                            skip_initial_zeros=True,
+                            normalize_by_active_length=True,
+                        )
+                    )
+
+                    # Apply outlier correction
+                    opt_c_original = opt_c
+                    min_rmse_original = min_rmse
+                    opt_c, min_rmse, was_outlier_corrected = apply_outlier_rejection(
+                        opt_c, min_rmse, rmse_c1
+                    )
+
                     result = {
                         "run_key": run_key,
                         "mode": "fullgrid_sources",
@@ -1296,10 +1587,19 @@ def run_monte_carlo_fullgrid_sources():
                         "rt60_est_sabine": float(rt60_est),
                         "optimal_c": float(opt_c),
                         "min_rmse": float(min_rmse),
+                        "rmse_c1": rmse_c1,
                         "n_receivers": 1,
+                        "outlier_corrected": was_outlier_corrected,
                     }
+                    
+                    # Store original values if outlier was corrected
+                    if was_outlier_corrected:
+                        result['optimal_c_original'] = opt_c_original
+                        result['min_rmse_original'] = min_rmse_original
+                    
                     results.append(result)
                     _persist_partial_results()
+
 
                     print(
                         f"  {run_key}: H_src_norm={h_src_norm:.3f}, "

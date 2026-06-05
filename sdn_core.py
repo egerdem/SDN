@@ -25,7 +25,8 @@ class DelayNetwork:
                  source_injection_vector: List[float] = None,
                  specular_mic_pickup: bool = False,  # <--- NEW FLAG
                  mic_weighting: float = 1.0,
-                 collection_vector: List[float] = None,  # <--- NEW PARAMETER
+                 mic_weighting_vector: List[float] = None,  # <--- NEW: Mic-side equivalent of node_weighting_vector
+                 collection_vector: List[float] = None,  # <--- NEW PARAMETER (arbitrary 5-element vector)
                  use_identity_scattering: bool = False,
                  specular_scattering: bool = False,
                  specular_increase_coef: float = 0.0,
@@ -79,6 +80,7 @@ class DelayNetwork:
         self.source_injection_vector = source_injection_vector
         self.specular_mic_pickup = specular_mic_pickup  # <--- STORE FLAG
         self.mic_weighting = mic_weighting
+        self.mic_weighting_vector = mic_weighting_vector  # <--- STORE: Mic-side equivalent of node_weighting_vector
         self.collection_vector = collection_vector  # <--- STORE PARAMETER
         # Test flags
         self.use_identity_scattering = use_identity_scattering
@@ -109,6 +111,10 @@ class DelayNetwork:
         self.injection_index = 0
         self.total_injection_count = 6
         self.non_dominant_index = 1  # Track which index to use for non-dominant nodes
+        
+        # Mic-side counters (parallel to source-side)
+        self.collection_index = 0  # Track which wall we're collecting from
+        self.non_dominant_collection_index = 1  # Track which index to use for non-dominant nodes
 
         if self.specular_source_injection_random:
             self.random_target_map = ssm.random_wall_mapping(list(self.room.walls.keys()))
@@ -834,9 +840,13 @@ class DelayNetwork:
                 best_pickup_node = targets[0]
                 weighted_sum = 0.0
 
-                # Check if using collection_vector (5-element vector) or scalar mic_weighting
+                # THREE MODES (priority order):
+                # 1. collection_vector: arbitrary 5-element vector (NOT one-parameter family, NOT fast-compatible)
+                # 2. mic_weighting_vector: 6-element per-wall [c, cn, cn, cn, cn] pattern (one-parameter family, fast-compatible)
+                # 3. mic_weighting: scalar uniform [c, cn, cn, cn, cn] pattern (one-parameter family, fast-compatible)
+                
                 if self.collection_vector is not None:
-                    # Vector mode: Use collection_vector directly
+                    # ARBITRARY VECTOR MODE: Use collection_vector directly (NOT for fast method!)
                     # collection_vector[0] = weight for dominant node
                     # collection_vector[1-4] = weights for non-dominant nodes
                     collection_idx = 0  # Track position in collection_vector
@@ -856,11 +866,38 @@ class DelayNetwork:
                             else:
                                 weight = 0.0  # Safety fallback
                             weighted_sum += val * weight
+                
+                elif self.mic_weighting_vector is not None:
+                    # PER-WALL VECTOR MODE: mic_weighting_vector (6 elements, one per wall)
+                    # Generates [c, cn, cn, cn, cn] pattern for each wall independently
+                    # This is the mic-side equivalent of node_weighting_vector
+                    # FAST-COMPATIBLE (one-parameter family per wall)
+                    
+                    # Get the mic weighting coefficient for this wall
+                    c_mic = self.mic_weighting_vector[self.collection_index]
+                    
+                    # Calculate weights: dominant and non-dominant
+                    w_dom = c_mic * self.coef
+                    w_non = ((5.0 - c_mic) / 4.0) * self.coef
+                    
+                    for idx, other_id in enumerate(other_nodes):
+                        val = self.instant_outgoing_waves[idx]
+                        if other_id == best_pickup_node:
+                            weighted_sum += val * w_dom
+                        else:
+                            weighted_sum += val * w_non
+                    
+                    # Increment collection_index after processing all nodes
+                    self.collection_index += 1
+                    if self.collection_index >= len(self.mic_weighting_vector):
+                        self.collection_index = 0  # Reset for next iteration
+                
                 else:
-                    # Scalar mode: Calculate weights from mic_weighting (same as before)
+                    # SCALAR MODE: Calculate weights from mic_weighting (uniform across all walls)
                     # Scale weights to sum to N-1 (5), then multiply by coef (2/5)
                     # w_dom = c * (2/5)
                     # w_non = cn * (2/5)
+                    # FAST-COMPATIBLE (one-parameter family)
                     c_mic = self.mic_weighting
                     w_dom = c_mic * self.coef
                     w_non = ((5.0 - c_mic) / 4.0) * self.coef

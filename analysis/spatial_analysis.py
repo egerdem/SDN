@@ -450,7 +450,15 @@ def generate_fixed_source_grid(
 
             # Keep if on diagonal (x_idx == y_idx)
             if x_idx == y_idx and sx <= w/2 and sy <= d/2:
-                diag_sources.append((sx, sy, sz))
+                if diagonals == "3d":
+                    # Interpolate z from center (h/2) to upper corner (h - padding)
+                    # sx goes from w/2 (center) to 0.5 (corner)
+                    t = (w/2 - sx) / (w/2 - 0.5) if (w/2 - 0.5) > 0 else 0
+                    t = np.clip(t, 0, 1)
+                    new_sz = float((h/2) + t * (h - padding - (h/2)))
+                    diag_sources.append((sx, sy, new_sz))
+                else:
+                    diag_sources.append((sx, sy, sz))
 
         unique_sources = diag_sources[1:]
 
