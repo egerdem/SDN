@@ -423,15 +423,15 @@ if __name__ == "__main__":
     # Option 1: Legacy mode
     config = DataConfig(mode="legacy", legacy_files=[
 
-        "journal_FULLGRID_center_source.npz",
-        "journal_FULLGRID_top_middle_source.npz",
-        "journal_FULLGRID_upper_right_source.npz",
-        "journal_FULLGRID_lower_left_source.npz",
+        # "journal_FULLGRID_center_source.npz",
+        # "journal_FULLGRID_top_middle_source.npz",
+        # "journal_FULLGRID_upper_right_source.npz",
+        # "journal_FULLGRID_lower_left_source.npz",
 
-        # "aes_FULLGRID_center_source.npz",
-        # "aes_FULLGRID_top_middle_source.npz",
-        # "aes_FULLGRID_lower_left_source.npz",
-        # "aes_FULLGRID_upper_right_source.npz",
+        "aes_FULLGRID_center_source.npz",
+        "aes_FULLGRID_top_middle_source.npz",
+        "aes_FULLGRID_lower_left_source.npz",
+        "aes_FULLGRID_upper_right_source.npz",
 
         # "cube6_FULLGRID_center_source.npz",
         # "cube6_FULLGRID_top_middle_source.npz",
@@ -465,15 +465,15 @@ if __name__ == "__main__":
     # REFERENCE_METHOD = 'ISM-pra-rand10'
     # REFERENCE_METHOD = 'ISM'
     # Specify which methods to plot. Leave empty or set to None to plot all.
-    # METHODS_TO_PLOT = ['SDN-Test_3', 'SDN-Test_2', 'SDN-Test1', 'SDN-Test2', 'SDN-Test3', 'SDN-Test4','SDN-Test5',
-    #                    'SDN-Test6', 'SDN-Test7', 'HO-SDN-N2', 'HO-SDN-N3']
+    METHODS_TO_PLOT = ['SDN-Test_3', 'SDN-Test_2', 'SDN-Test1', 'SDN-Test2', 'SDN-Test3', 'SDN-Test4','SDN-Test5',
+                       'SDN-Test6', 'SDN-Test7', 'HO-SDN-N2', 'HO-SDN-N3']
     # METHODS_TO_PLOT = ['SDN-Test-3', 'SDN-Test-2', 'SDN-Test1', 'SDN-Test2', 'SDN-Test3', 'SDN-Test4','SDN-Test5',
     #                    'SDN-Test6', 'SDN-Test7', 'HO-SDN-N2', 'HO-SDN-N3']
     # METHODS_TO_PLOT = ['SDN-Test5']
     # METHODS_TO_PLOT = ["SDN-c_center", "SDN-c_lower_left", 'SDN-Test2.998', "SDN-c_upper_right"]
     # METHODS_TO_PLOT = ['SDN-Test2.998']
     # METHODS_TO_PLOT = ['SDN-fast4_71'] #not fast actually, fyi. name wrong.
-    METHODS_TO_PLOT = ['SDN-c221_m233_standard']
+    # METHODS_TO_PLOT = ['SDN-c221_m233_standard']
 
     COMPARISON_TYPE = 'edc'  # 'edc' is the most common for this
     ERROR_METRIC = 'rmse'
@@ -481,7 +481,7 @@ if __name__ == "__main__":
 
     # --- CONTROL FLAGS ---
     SAVE_FIGURES = False  # Set to True to save the generated figures to disk
-    SHOW_PLOTS = False    # Set to True to display interactive plot windows
+    SHOW_PLOTS = True    # Set to True to display interactive plot windows
     SAVE_SUMMARY_TEXT = False # Set to False to disable saving the summary .txt file
     SHOW_INTERACTIVE_PLOT = False  # Set to True to show unified interactive RIR plot for first receiver
 
