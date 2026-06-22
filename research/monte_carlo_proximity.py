@@ -92,7 +92,7 @@ from analysis.spatial_analysis import (
 # - "mc_fullgrid_perpair": Monte Carlo rooms, Sabine-adaptive duration, per-(src,rx) c*
 # - "legacy_pair_single_mic": legacy Monte Carlo pairs, fixed duration, single receiver
 #PRESET = "legacy_pair_single_mic"
-PRESET = "aes_diagonal3D_8src_fullgrid"
+PRESET = os.environ.get("MC_PRESET", "aes_diagonal3D_8src_fullgrid")
 # Optional: put outputs into `results/experiments/<EXPERIMENT_NAME>/`
 # If None, a descriptive name is auto-generated from the preset + key params.
 EXPERIMENT_NAME: Optional[str] = None
@@ -330,6 +330,24 @@ def _recompute_total_runs() -> int:
 
 # Apply preset at import time (so the rest of the file can keep using MODE/FS/etc).
 _apply_preset(PRESET)
+
+# Per-run absorption override (frequency-independent sweep).
+_abs_env = os.environ.get("MC_ABSORPTION")
+if _abs_env is not None:
+    ABSORPTION = float(_abs_env)
+    print(f"[absorption] {ABSORPTION}")
+
+# Pair mode reads the fixed 60-config geometry so positions are identical across absorptions.
+FIXED_GEOMETRY = None
+if MODE == "pair_single_mic":
+    _fixed_geo_path = os.environ.get("MC_FIXED_GEOMETRY",
+        os.path.join(project_root, "results", "monte_carlo_experiments", "mc60_geometry.json"))
+    if os.path.exists(_fixed_geo_path):
+        _fg = json.load(open(_fixed_geo_path))
+        FIXED_GEOMETRY = {(c["room_idx"], c["pair_idx"]): c for c in _fg["configs"]}
+        NUM_ROOMS, PAIRS_PER_ROOM = int(_fg["num_rooms"]), int(_fg["pairs_per_room"])
+        print(f"[FIXED_GEOMETRY] {len(FIXED_GEOMETRY)} configs from {_fixed_geo_path}")
+
 if EXPERIMENT_NAME is None:
     EXPERIMENT_NAME = _auto_experiment_name()
 TOTAL_RUNS = _recompute_total_runs()
@@ -405,10 +423,10 @@ def _rimpy_cache_paths(cache_dir: str,
                        duration_s: float,
                        Fs: int,
                        reflection_sign: int,
-                       rand_dist: float) -> tuple[str, str]:
+                       rand_dist: float,
+                       absorption: float) -> tuple[str, str]:
     """
-    Compute stable cache paths for a RIMPY RIR *by geometry*, to avoid collisions when
-    (room_idx, src_idx, rx_idx) stay the same but actual positions change (e.g., grid changes).
+    Compute stable cache paths for a RIMPY RIR by geometry + absorption.
     Returns: (npy_path, json_meta_path)
     """
     payload = {
@@ -419,6 +437,7 @@ def _rimpy_cache_paths(cache_dir: str,
         "Fs": int(Fs),
         "reflection_sign": int(reflection_sign),
         "rand_dist": float(rand_dist),
+        "absorption": float(absorption),
     }
     key = json.dumps(payload, sort_keys=True).encode("utf-8")
     h = hashlib.sha1(key).hexdigest()[:12]
@@ -657,10 +676,13 @@ def run_monte_carlo():
     start_time = time.time()
     
     for room_idx in range(NUM_ROOMS):
-        # 4. Generate Random Room
-        w, d, h = generate_random_room()
-        # Round dimensions for cleaner logs
-        w, d, h = round(w, 2), round(d, 2), round(h, 2)
+        # 4. Room dimensions: fixed dataset or random
+        if FIXED_GEOMETRY is not None:
+            w, d, h = [float(x) for x in FIXED_GEOMETRY[(room_idx, 0)]["room_dims"]]
+        else:
+            w, d, h = generate_random_room()
+            # Round dimensions for cleaner logs
+            w, d, h = round(w, 2), round(d, 2), round(h, 2)
         
         room_params = {
             'width': w, 'depth': d, 'height': h,
@@ -697,22 +719,28 @@ def run_monte_carlo():
                     _ensure_derived_metrics(existing)
                     results.append(existing)
                     
-                    # Consume RNG calls to maintain sync with previous run
-                    corner_bias = globals().get('CORNER_BIAS_PROBABILITY', 0.)
-                    src_mode = 'uniform' if corner_bias == 0.0 else 'corner_biased'
-                    _ = generate_random_position(w, d, h, PADDING, mode=src_mode, corner_bias_prob=corner_bias)
-                    _ = generate_random_position(w, d, h, PADDING, mode='uniform')
+                    # Consume RNG to keep sync (RNG mode only)
+                    if FIXED_GEOMETRY is None:
+                        corner_bias = globals().get('CORNER_BIAS_PROBABILITY', 0.)
+                        src_mode = 'uniform' if corner_bias == 0.0 else 'corner_biased'
+                        _ = generate_random_position(w, d, h, PADDING, mode=src_mode, corner_bias_prob=corner_bias)
+                        _ = generate_random_position(w, d, h, PADDING, mode='uniform')
                 else:
                     print(f"  Run {run_key} ({run_id}/{TOTAL_RUNS}): SKIPPING (just added, no RNG consumption)")
                     results.append(existing)
                 
                 continue
             
-            corner_bias = globals().get('CORNER_BIAS_PROBABILITY')
-            # Optimize: if no corner bias, use uniform mode directly (skips redundant RNG call)
-            src_mode = 'uniform' if corner_bias == 0.0 else 'corner_biased'
-            src_pos = generate_random_position(w, d, h, PADDING, mode=src_mode, corner_bias_prob=corner_bias)
-            mic_pos = generate_random_position(w, d, h, PADDING, mode='uniform') # Generate random Z for mic too
+            if FIXED_GEOMETRY is not None:
+                _cfg = FIXED_GEOMETRY[(room_idx, pair_idx)]
+                src_pos = tuple(float(x) for x in _cfg["src_pos"])
+                mic_pos = tuple(float(x) for x in _cfg["mic_pos"])
+            else:
+                corner_bias = globals().get('CORNER_BIAS_PROBABILITY')
+                # Optimize: if no corner bias, use uniform mode directly (skips redundant RNG call)
+                src_mode = 'uniform' if corner_bias == 0.0 else 'corner_biased'
+                src_pos = generate_random_position(w, d, h, PADDING, mode=src_mode, corner_bias_prob=corner_bias)
+                mic_pos = generate_random_position(w, d, h, PADDING, mode='uniform') # Generate random Z for mic too
             
             # Update params for rir_calculators
             room_params['source x'], room_params['source y'], room_params['source z'] = src_pos
@@ -795,6 +823,7 @@ def run_monte_carlo():
                 FS,
                 reflection_sign=-1,
                 rand_dist=0.1,
+                absorption=room_params['absorption'],
             )
             loaded_valid_rir = False
             norm_ref = None
@@ -830,9 +859,10 @@ def run_monte_carlo():
                 # Note: RIMPY seed was set once at startup (line 595)
                 # Don't reset seed here - it would break position generation RNG!
                 
+                _rimpy_seed = (10000 + run_id) if FIXED_GEOMETRY is not None else None
                 ref_rir, _ = calculate_rimpy_rir(
-                    room_params, duration_s, FS, 
-                    reflection_sign=-1, randDist=0.1
+                    room_params, duration_s, FS,
+                    reflection_sign=-1, randDist=0.1, rand_seed=_rimpy_seed
                 )
                 
                 # Verify newly calculated one too
@@ -905,6 +935,7 @@ def run_monte_carlo():
                 'room_dims': (w, d, h),
                 'room_vol': vol,
                 'char_len': char_len,
+                'absorption': float(ABSORPTION),
                 'src_pos': src_pos,
                 'mic_pos': mic_pos,
                 'h_src': h_src,
@@ -1373,6 +1404,7 @@ def run_monte_carlo_fullgrid_sources():
                     Fs_eff,
                     reflection_sign=-1,
                     rand_dist=0.1,
+                    absorption=room_params['absorption'],
                 )
 
                 if os.path.exists(rir_path) and os.path.exists(meta_path):
@@ -1766,8 +1798,9 @@ def plot_results(results):
     plt.grid(True)
     
     plt.tight_layout()
-    plt.savefig(os.path.join(project_root, "results", "monte_carlo_correlations_norm.png"))
-    print("Plots saved to results/monte_carlo_correlations_norm.png")
+    _corr_path = os.path.join(EXPERIMENT_ROOT, "monte_carlo_correlations_norm.png")
+    plt.savefig(_corr_path)
+    print(f"Plots saved to {_corr_path}")
 
     # ------------------------------------------------------------------
     # Extra: compare node-distance metrics (nearest-3 vs all vs harmonic)
@@ -1799,7 +1832,7 @@ def plot_results(results):
     plt.grid(True)
 
     plt.tight_layout()
-    node_plot_path = os.path.join(project_root, "results", "monte_carlo_node_distance_metrics.png")
+    node_plot_path = os.path.join(EXPERIMENT_ROOT, "monte_carlo_node_distance_metrics.png")
     plt.savefig(node_plot_path, dpi=150, bbox_inches='tight')
     print(f"Node-distance comparison plot saved to {node_plot_path}")
 
@@ -1866,7 +1899,7 @@ def plot_results(results):
         ax.grid(True, alpha=0.3)
         plt.colorbar(ax.collections[0], ax=ax, label='Min RMSE')
     plt.tight_layout()
-    out_path = os.path.join(project_root, "results", "monte_carlo_lambda_sweep.png")
+    out_path = os.path.join(EXPERIMENT_ROOT, "monte_carlo_lambda_sweep.png")
     plt.savefig(out_path, dpi=150, bbox_inches='tight')
     print(f"Lambda sweep plot saved to {out_path}")
 
