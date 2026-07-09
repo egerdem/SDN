@@ -55,6 +55,7 @@ After running this script, use validate_c_predictor.py to evaluate
 how well your C predictor model performs on this dataset.
 """
 
+from __future__ import annotations
 import os
 import sys
 import numpy as np
@@ -479,7 +480,8 @@ def choose_duration_for_room(w: float, d: float, h: float, alpha: float) -> floa
     # Heuristic: 1.2x RT60 provides sufficient decay capture
     # Keep within practical bounds for Monte Carlo.
     dur = 1.2 * rt60
-    return float(np.clip(dur, 1.0, 2.5))
+    cap = float(os.environ.get("MC_DURATION_CAP", 2.5))
+    return float(np.clip(dur, 1.0, cap))
 
 
 def apply_outlier_rejection(opt_c: float, min_rmse: float, rmse_at_c1: float, 
