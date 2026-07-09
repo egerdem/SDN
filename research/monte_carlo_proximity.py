@@ -427,9 +427,12 @@ def _rimpy_cache_paths(cache_dir: str,
                        absorption: float) -> tuple[str, str]:
     """
     Compute stable cache paths for a RIMPY RIR by geometry + absorption.
+    Backward-compatible: legacy caches predate the absorption key (each folder uses a
+    single absorption, so a geometry-only match is unambiguous). If the absorption-keyed
+    file is absent but a legacy one exists, reuse it.
     Returns: (npy_path, json_meta_path)
     """
-    payload = {
+    base = {
         "room_dims": [float(x) for x in room_dims],
         "src_pos": [float(x) for x in src_pos],
         "rx_pos": [float(x) for x in rx_pos],
@@ -437,12 +440,18 @@ def _rimpy_cache_paths(cache_dir: str,
         "Fs": int(Fs),
         "reflection_sign": int(reflection_sign),
         "rand_dist": float(rand_dist),
-        "absorption": float(absorption),
     }
-    key = json.dumps(payload, sort_keys=True).encode("utf-8")
-    h = hashlib.sha1(key).hexdigest()[:12]
-    base = f"rimpy_{h}"
-    return (os.path.join(cache_dir, f"{base}.npy"), os.path.join(cache_dir, f"{base}.json"))
+
+    def _p(payload):
+        h = hashlib.sha1(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+        return (os.path.join(cache_dir, f"rimpy_{h}.npy"), os.path.join(cache_dir, f"rimpy_{h}.json"))
+
+    new = _p({**base, "absorption": float(absorption)})
+    if not os.path.exists(new[0]):
+        legacy = _p(base)  # pre-absorption key
+        if os.path.exists(legacy[0]):
+            return legacy
+    return new
 
 def _euclidean_distance(a, b):
     ax, ay, az = a
@@ -656,7 +665,29 @@ def run_monte_carlo():
     print(f"Experiment folder: {EXPERIMENT_ROOT}")
     print(f"RIR cache: {RIR_CACHE_DIR}")
     print(f"Global RNG seed: 42 (affects rooms, positions, RIMPY)")
-    
+
+    # Persist run configuration for traceability
+    _rooms = sorted({tuple(c["room_dims"]) for c in FIXED_GEOMETRY.values()}) if FIXED_GEOMETRY else []
+    _rts = [estimate_rt60_sabine(w, d, h, ABSORPTION) for (w, d, h) in _rooms]
+    _write_experiment_config(EXPERIMENT_ROOT, {
+        "experiment_id": EXPERIMENT_ID,
+        "preset": PRESET,
+        "absorption": float(ABSORPTION),
+        "num_rooms": int(NUM_ROOMS),
+        "pairs_per_room": int(PAIRS_PER_ROOM),
+        "total_pairs": int(TOTAL_RUNS),
+        "seed": 42,
+        "fs": int(FS),
+        "err_duration_ms": int(ERR_DURATION_MS),
+        "optimize_scope": "per_pair",
+        "fixed_geometry": FIXED_GEOMETRY is not None,
+        "geometry_source": globals().get("_fixed_geo_path"),
+        "rt60_sabine_stats_s": {
+            "mean": round(float(np.mean(_rts)), 3), "std": round(float(np.std(_rts)), 3),
+            "min": round(float(np.min(_rts)), 3), "max": round(float(np.max(_rts)), 3),
+        } if _rts else None,
+    })
+
     # 3. Load Existing Results (keyed by run_key for readability/stability)
     existing_results_map = {}
     if os.path.exists(OUTPUT_FILE):
@@ -1718,190 +1749,22 @@ def run_monte_carlo_fullgrid_sources():
     print(f"Plots saved to {out}")
 
 def plot_results(results):
-    h_srcs_norm = [r['h_src_norm'] for r in results]
-    combined_scores = [r['combined_score'] for r in results]
-    node_dists_norm = [r['mean_node_dist_norm'] for r in results]
-    opt_cs = [r['optimal_c'] for r in results]
-    rmses = [r['min_rmse'] for r in results]
-
-    # Robustness: support older cached JSON entries (compute derived metrics if missing)
     for r in results:
         _ensure_derived_metrics(r)
-
-    src_mic_dists_norm = [r.get('src_mic_dist_norm', np.nan) for r in results]
-    h_minus_d_norm = [r.get('h_minus_d_norm', np.nan) for r in results]
-    h_over_d_norm = [r.get('h_over_d_norm', np.nan) for r in results]
-
-    # Node-distance variants (all nodes / harmonic mean)
-    mean_node_dist_all_norm = [r.get('mean_node_dist_all_norm', np.nan) for r in results]
-    hmean_node_dist_norm = [r.get('hmean_node_dist_norm', np.nan) for r in results]
-
-    # Convert to numpy for stats
-    h_srcs_norm_np = np.asarray(h_srcs_norm, dtype=float)
-    d_sm_norm_np = np.asarray(src_mic_dists_norm, dtype=float)
-    opt_cs_np = np.asarray(opt_cs, dtype=float)
-    
-    plt.figure(figsize=(18, 10))
-    
-    # 1. Normalized Harmonic Mean Source vs Opt C
-    plt.subplot(2, 3, 1)
-    plt.scatter(h_srcs_norm, opt_cs, alpha=0.7, c=rmses, cmap='viridis')
+    h = [r['h_src_norm'] for r in results]
+    c = [r['optimal_c'] for r in results]
+    rmse = [r['min_rmse'] for r in results]
+    plt.figure(figsize=(7, 6))
+    plt.scatter(h, c, alpha=0.7, c=rmse, cmap='viridis')
     plt.xlabel('Normalized H_src (H_src / V^(1/3)) [Lower=Corner]')
     plt.ylabel('Optimal C')
-    plt.title('Normalized Source Proximity vs Optimal C')
+    plt.title('Source Proximity vs Optimal C')
     plt.colorbar(label='Min RMSE')
     plt.grid(True)
-    
-    # 2. Combined Score vs Opt C
-    plt.subplot(2, 3, 2)
-    plt.scatter(combined_scores, opt_cs, alpha=0.7, c=rmses, cmap='viridis')
-    plt.xlabel('Combined Proximity Score (1/Hs + 1/Hr)')
-    plt.ylabel('Optimal C')
-    plt.title('Total Geometric Confinement vs Optimal C')
-    plt.colorbar(label='Min RMSE')
-    plt.grid(True)
-    
-    # 3. Normalized Node Distance vs Opt C
-    plt.subplot(2, 3, 3)
-    plt.scatter(node_dists_norm, opt_cs, alpha=0.7, c=rmses, cmap='viridis')
-    plt.xlabel('Normalized Mean 3-Nearest Node Dist (Dist / V^(1/3))')
-    plt.ylabel('Optimal C')
-    plt.title('Normalized Image Source Density vs Optimal C')
-    plt.colorbar(label='Min RMSE')
-    plt.grid(True)
-
-    # 4. H_src_norm vs Opt C, color-coded by normalized src–mic distance
-    plt.subplot(2, 3, 4)
-    sc = plt.scatter(h_srcs_norm, opt_cs, alpha=0.7, c=src_mic_dists_norm, cmap='plasma')
-    plt.xlabel('Normalized H_src (H_src / V^(1/3))')
-    plt.ylabel('Optimal C')
-    plt.title('H_src_norm vs Optimal C (Color = d_sm_norm)')
-    plt.colorbar(sc, label='d_sm_norm = ||x_s - x_m|| / V^(1/3)')
-    plt.grid(True)
-
-    # 5. Composite metric: H + d (dimensionless)
-    plt.subplot(2, 3, 5)
-    plt.scatter(h_minus_d_norm, opt_cs, alpha=0.7, c=rmses, cmap='viridis')
-    plt.xlabel('H_src_norm - d_sm_norm')
-    plt.ylabel('Optimal C')
-    plt.title('Composite (H - d) vs Optimal C')
-    plt.colorbar(label='Min RMSE')
-    plt.grid(True)
-
-    # 6. Composite metric: H / d (dimensionless)
-    plt.subplot(2, 3, 6)
-    plt.scatter(h_over_d_norm, opt_cs, alpha=0.7, c=rmses, cmap='viridis')
-    plt.xlabel('H_src_norm / (d_sm_norm + ε)')
-    plt.ylabel('Optimal C')
-    plt.title('Composite (H / d) vs Optimal C')
-    plt.colorbar(label='Min RMSE')
-    plt.grid(True)
-    
     plt.tight_layout()
-    _corr_path = os.path.join(EXPERIMENT_ROOT, "monte_carlo_correlations_norm.png")
-    plt.savefig(_corr_path)
-    print(f"Plots saved to {_corr_path}")
-
-    # ------------------------------------------------------------------
-    # Extra: compare node-distance metrics (nearest-3 vs all vs harmonic)
-    # ------------------------------------------------------------------
-    plt.figure(figsize=(18, 5))
-
-    plt.subplot(1, 3, 1)
-    plt.scatter(node_dists_norm, opt_cs, alpha=0.7, c=rmses, cmap='viridis')
-    plt.xlabel('mean(3 nearest nodes) / V^(1/3)')
-    plt.ylabel('Optimal C')
-    plt.title('Node Dist Metric: mean-3')
-    plt.colorbar(label='Min RMSE')
-    plt.grid(True)
-
-    plt.subplot(1, 3, 2)
-    plt.scatter(mean_node_dist_all_norm, opt_cs, alpha=0.7, c=rmses, cmap='viridis')
-    plt.xlabel('mean(all nodes) / V^(1/3)')
-    plt.ylabel('Optimal C')
-    plt.title('Node Dist Metric: mean-all')
-    plt.colorbar(label='Min RMSE')
-    plt.grid(True)
-
-    plt.subplot(1, 3, 3)
-    plt.scatter(hmean_node_dist_norm, opt_cs, alpha=0.7, c=rmses, cmap='viridis')
-    plt.xlabel('hmean(all nodes) / V^(1/3)')
-    plt.ylabel('Optimal C')
-    plt.title('Node Dist Metric: harmonic-mean')
-    plt.colorbar(label='Min RMSE')
-    plt.grid(True)
-
-    plt.tight_layout()
-    node_plot_path = os.path.join(EXPERIMENT_ROOT, "monte_carlo_node_distance_metrics.png")
-    plt.savefig(node_plot_path, dpi=150, bbox_inches='tight')
-    print(f"Node-distance comparison plot saved to {node_plot_path}")
-
-    # ------------------------------------------------------------------
-    # Extra: lambda sweep for metric m_lambda = H_src_norm - lambda * d_sm_norm
-    # This matches hypothesis: larger d_sm_norm -> lower optimal C.
-    # ------------------------------------------------------------------
-    # Auto lambda 1: variance matching so terms have comparable spread.
-    # (If std(d) is large, lambda shrinks, and vice versa.)
-    valid = np.isfinite(h_srcs_norm_np) & np.isfinite(d_sm_norm_np) & np.isfinite(opt_cs_np)
-    h_v = h_srcs_norm_np[valid]
-    d_v = d_sm_norm_np[valid]
-    c_v = opt_cs_np[valid]
-
-    std_h = float(np.std(h_v))
-    std_d = float(np.std(d_v))
-    lambda_var = (std_h / std_d) if std_d > 1e-12 else 1.0
-
-    # Auto lambda 2: 2D linear regression c ≈ a + b*h + g*d (least squares),
-    # then collapse to 1D metric h - lambda*d where lambda = -g/b.
-    # This tells you how many "d units" compensate one "h unit" in the fitted plane.
-    X = np.column_stack([np.ones_like(h_v), h_v, d_v])  # [1, h, d]
-    try:
-        a_hat, b_hat, g_hat = np.linalg.lstsq(X, c_v, rcond=None)[0]
-        lambda_reg = (-g_hat / b_hat) if abs(b_hat) > 1e-12 else lambda_var
-    except Exception:
-        lambda_reg = lambda_var
-
-    print("\n--- Lambda suggestions for metric: m = H_src_norm - λ * d_sm_norm ---")
-    print(f"std(H_src_norm)={std_h:.4f}, std(d_sm_norm)={std_d:.4f}")
-    print(f"λ_var (variance-match) = {lambda_var:.3f}")
-    print(f"λ_reg (2D fit collapse) = {lambda_reg:.3f}")
-
-    # Sweep around suggested lambdas + a few simple baselines
-    lambdas = [
-        0.0,
-        0.5,
-        1.0,
-        2.0,
-        float(lambda_var),
-        float(lambda_reg),
-    ]
-    # De-duplicate while preserving order
-    lambdas_unique = []
-    for lam in lambdas:
-        lam_r = float(np.round(lam, 3))
-        if lam_r not in lambdas_unique:
-            lambdas_unique.append(lam_r)
-
-    # Make a small multi-panel plot for quick visual inspection
-    n = len(lambdas_unique)
-    cols = min(3, n)
-    rows = int(np.ceil(n / cols))
-    plt.figure(figsize=(6 * cols, 4.5 * rows))
-    for i, lam in enumerate(lambdas_unique, start=1):
-        m = h_v - lam * d_v
-        ax = plt.subplot(rows, cols, i)
-        ax.scatter(m, c_v, alpha=0.7, c=np.asarray(rmses)[valid], cmap='viridis')
-        ax.set_xlabel(f'H_src_norm - {lam:.3f}·d_sm_norm')
-        ax.set_ylabel('Optimal C')
-        # Pearson r as a quick "linearity" indicator (not a full model score)
-        r = np.corrcoef(m, c_v)[0, 1] if len(m) > 2 else np.nan
-        ax.set_title(f'λ={lam:.3f}, r={r:.3f}')
-        ax.grid(True, alpha=0.3)
-        plt.colorbar(ax.collections[0], ax=ax, label='Min RMSE')
-    plt.tight_layout()
-    out_path = os.path.join(EXPERIMENT_ROOT, "monte_carlo_lambda_sweep.png")
-    plt.savefig(out_path, dpi=150, bbox_inches='tight')
-    print(f"Lambda sweep plot saved to {out_path}")
+    out = os.path.join(EXPERIMENT_ROOT, "hsrc_vs_optimal_c.png")
+    plt.savefig(out, dpi=150, bbox_inches='tight')
+    print(f"Plot saved to {out}")
 
 if __name__ == "__main__":
     # Ensure results dir exists

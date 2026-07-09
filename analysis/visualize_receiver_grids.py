@@ -414,15 +414,19 @@ if __name__ == "__main__":
         print(f"Room dimensions: W={width:.2f}m, D={depth:.2f}m, H={height:.2f}m")
         print(f"Characteristic length: {char_length:.3f}m\n")
         
-        # Generate dense source grid using the existing function
+        # Dense FULL 2D grid for the contour field (z = mid height).
+        # NOTE: must NOT be diagonals="3d" — that returns collinear points and
+        # Delaunay triangulation fails ("singular input data"). The diagonal
+        # experiment sources are overlaid separately as markers below.
         contour_source_positions = generate_fixed_source_grid(
-            active_room, 
-            padding=0.5, 
-            n_x=15,
-            n_y=15,
-            z_mode="fixed_1p5",
-            include_corners=True, 
-            corner_offset=0.5
+            active_room,
+            padding=0.5,
+            n_x=20,
+            n_y=20,
+            z_mode="mid",
+            include_corners=True,
+            corner_offset=0.5,
+            diagonals=False,
         )
 
         
@@ -492,10 +496,9 @@ if __name__ == "__main__":
         # Save the figure
         output_dir = os.path.join(project_root, 'results', 'visualizations')
         os.makedirs(output_dir, exist_ok=True)
-        output_path = os.path.join(output_dir, f'hsrc_contour_normalized_{room_name.replace(" ", "_")}.png')
+        output_path = os.path.join(output_dir, f'hsrc_contour_normalized_{room_name.replace(" ", "_")}_3ddiag.png')
         plt.savefig(output_path, dpi=150, bbox_inches='tight')
         print(f"\nContour plot saved to: {output_path}")
-        
         plt.show()
 
 

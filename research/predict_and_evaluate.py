@@ -62,15 +62,15 @@ EXPERIMENT_CONFIGS = {
 
 GRID_FILES = {
     'fullgrid': [
-        # "aes_FULLGRID_center_source.npz",
-        # "aes_FULLGRID_top_middle_source.npz",
-        # "aes_FULLGRID_upper_right_source.npz",
-        # "aes_FULLGRID_lower_left_source.npz",
+        "aes_FULLGRID_center_source.npz",
+        "aes_FULLGRID_top_middle_source.npz",
+        "aes_FULLGRID_upper_right_source.npz",
+        "aes_FULLGRID_lower_left_source.npz",
         # "aes_FULLGRID_corner_sourcev3.npz",
-        "journal_FULLGRID_center_source.npz",
-        "journal_FULLGRID_top_middle_source.npz",
-        "journal_FULLGRID_upper_right_source.npz",
-        "journal_FULLGRID_lower_left_source.npz",
+        # "journal_FULLGRID_center_source.npz",
+        # "journal_FULLGRID_top_middle_source.npz",
+        # "journal_FULLGRID_upper_right_source.npz",
+        # "journal_FULLGRID_lower_left_source.npz",
     ],
     'quarter': [
         "aes_quarter_center_source.npz",
@@ -110,7 +110,8 @@ def main():
         # default='10x60_seed42_25cornerplacement_big',
         # default='10x60_seed42_0cornerplacement_big',
         # default='10x60_seed42_0cornerplacement_big_V2',
-        default='7src_3Ddiagonal',
+        # default='7src_3Ddiagonal',
+        default="mcfix_a0.2",
         choices=list(EXPERIMENT_CONFIGS.keys()),
         help='Experiment to use for model parameters (fit equation)'
     )

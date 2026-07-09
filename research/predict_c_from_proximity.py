@@ -76,11 +76,14 @@ SAVE_FIGURE = True          # Save the plotted figure to experiment folder
 #RESULTS_FILE = os.path.join(project_root, "results", "monte_carlo_experiments",
 #                            "10x60_seed42_0cornerplacement_big_V2", "results.json")
 
-RESULTS_FILE = os.path.join(project_root, "results", "paper_data",
-                            "aes_fullgrid_7src_3Ddiagonal", "results.json")
+# RESULTS_FILE = os.path.join(project_root, "results", "paper_data",
+#                             "aes_fullgrid_7src_3Ddiagonal", "results.json")
 
 # RESULTS_FILE = os.path.join(project_root, "results", "monte_carlo_experiments",
 #                             "10x60_seed42_25cornerplacement_big", "results.json")
+
+RESULTS_FILE = os.path.join(project_root, "results", "monte_carlo_experiments",
+                            "mcfix_a0.1", "results.json")
 
 # Option 2: Default experiment (current, with seed=42)
 # RESULTS_FILE = os.path.join(project_root, "results", "monte_carlo_experiments", 

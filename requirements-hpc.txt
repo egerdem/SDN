@@ -1,0 +1,7 @@
+# Minimal dependencies for the Monte Carlo absorption sweep (research/monte_carlo_proximity.py).
+# Subset of the full requirements.txt; versions match the working local environment.
+# If HPC has an older Python (<3.10), relax the numpy pin.
+numpy==2.1.0
+scipy==1.15.2
+matplotlib==3.9.0
+pyroomacoustics==0.8.3

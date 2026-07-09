@@ -98,15 +98,19 @@ def _rimpy_cache_paths(cache_dir: str,
                        duration_s: float,
                        Fs: int,
                        reflection_sign: int,
-                       rand_dist: float) -> tuple:
+                       rand_dist: float,
+                       absorption: float) -> tuple:
     """
-    Compute stable cache paths for a RIMPY RIR by geometry.
+    Compute stable cache paths for a RIMPY RIR by geometry + absorption.
+    Backward-compatible: legacy caches predate the absorption key (each folder uses a
+    single absorption, so a geometry-only match is unambiguous). If the absorption-keyed
+    file is absent but a legacy one exists, reuse it.
     Returns: (npy_path, json_meta_path)
-    
+
     NOTE: This must match the implementation in monte_carlo_proximity.py
     """
     import hashlib
-    payload = {
+    base = {
         "room_dims": [float(x) for x in room_dims],
         "src_pos": [float(x) for x in src_pos],
         "rx_pos": [float(x) for x in rx_pos],
@@ -115,10 +119,17 @@ def _rimpy_cache_paths(cache_dir: str,
         "reflection_sign": int(reflection_sign),
         "rand_dist": float(rand_dist),
     }
-    key = json.dumps(payload, sort_keys=True).encode("utf-8")
-    h = hashlib.sha1(key).hexdigest()[:12]
-    base = f"rimpy_{h}"
-    return (os.path.join(cache_dir, f"{base}.npy"), os.path.join(cache_dir, f"{base}.json"))
+
+    def _p(payload):
+        h = hashlib.sha1(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+        return (os.path.join(cache_dir, f"rimpy_{h}.npy"), os.path.join(cache_dir, f"rimpy_{h}.json"))
+
+    new = _p({**base, "absorption": float(absorption)})
+    if not os.path.exists(new[0]):
+        legacy = _p(base)  # pre-absorption key
+        if os.path.exists(legacy[0]):
+            return legacy
+    return new
 
 
 # ============================================================================
@@ -248,7 +259,7 @@ def validate_predictor(
         # Need to: 1) get reference RIR, 2) run SDN with c_predicted, 3) compute EDC RMSE
         
         # Setup room
-        absorption = mc_run.get('room_params', {}).get('absorption', 0.2)
+        absorption = mc_run.get('absorption', mc_run.get('room_params', {}).get('absorption', 0.2))
         if isinstance(absorption, dict):  # Handle old format
             absorption = 0.2
         
@@ -295,7 +306,8 @@ def validate_predictor(
                 duration,
                 Fs,
                 reflection_sign=-1,
-                rand_dist=0.1
+                rand_dist=0.1,
+                absorption=absorption,
             )
         
         ref_rir = None
@@ -632,9 +644,9 @@ C Prediction Error:
   MAE:  {summary['c_error']['mae']:.3f}
 
 RMSE Performance:
-  Baseline (c=1):   {summary['rmse_baseline']['mean']:.4f}
-  Predicted:        {summary['rmse_predicted']['mean']:.4f}
-  Optimal (c*):     {summary['rmse_optimal']['mean']:.4f}
+  Baseline (c=1):   {summary['rmse_baseline']['mean']:.4f} ± {summary['rmse_baseline']['std']:.4f}
+  Predicted:        {summary['rmse_predicted']['mean']:.4f} ± {summary['rmse_predicted']['std']:.4f}
+  Optimal (c*):     {summary['rmse_optimal']['mean']:.4f} ± {summary['rmse_optimal']['std']:.4f}
 
 vs Baseline (c=1):
   Improvement: {summary['improvement_vs_baseline']['mean']:+.4f}
@@ -683,6 +695,7 @@ def run_validation_example():
     experiment = '7src_3Ddiagonal'   # Which C predictor model: '8src_diagonal', '13src_grid', '7src_3Ddiagonal' etc.
     model_type = 'linear'          # Model type: 'linear', 'polynomial', 'power'
     mc_experiment_id = '10x60_seed42_0cornerplacement_big'   # MC experiment folder: 'default', 'mc_generic', 'seed_42', etc.
+    mc_experiment_id = "mcfix_a0.2"   # MC experiment folder: 'default', 'mc_generic', 'seed_42', etc.
     max_runs = None                # None = all runs, or set to 10 for quick test
     
     print(f"C Predictor Model: {experiment} ({model_type})")
@@ -718,9 +731,9 @@ def run_validation_example():
     print(f"  MAE:  {summary['c_error']['mae']:.3f}")
     print(f"  Std:  {summary['c_error']['std']:.3f}")
     print(f"\nRMSE Performance:")
-    print(f"  Baseline (c=1):   {summary['rmse_baseline']['mean']:.4f}")
-    print(f"  Predicted:        {summary['rmse_predicted']['mean']:.4f}")
-    print(f"  Optimal (c*):     {summary['rmse_optimal']['mean']:.4f}")
+    print(f"  Baseline (c=1):   {summary['rmse_baseline']['mean']:.4f} ± {summary['rmse_baseline']['std']:.4f}")
+    print(f"  Predicted:        {summary['rmse_predicted']['mean']:.4f} ± {summary['rmse_predicted']['std']:.4f}")
+    print(f"  Optimal (c*):     {summary['rmse_optimal']['mean']:.4f} ± {summary['rmse_optimal']['std']:.4f}")
     print(f"\nImprovement vs Baseline (c=1):")
     print(f"  Mean: {summary['improvement_vs_baseline']['mean']:+.4f} ({summary['improvement_vs_baseline']['mean_pct']:+.1f}%)")
     print(f"  Median: {summary['improvement_vs_baseline']['median']:+.4f} ({summary['improvement_vs_baseline']['median_pct']:+.1f}%)")
@@ -751,7 +764,57 @@ def run_validation_example():
     return validation_data
 
 
-if __name__ == "__main__":
-    # Run the example validation
-    run_validation_example()
+def build_absorption_table(main_predictor: str = "mcfix_a0.4",
+                           datasets=("mcfix_a0.1", "mcfix_a0.2", "mcfix_a0.3", "mcfix_a0.4", "mcfix_a0.5", "mcfix_a0.6"),
+                           model_type: str = "linear",
+                           save: bool = True) -> List[Dict]:
+    """
+    3-way RMSE table across absorption datasets (reuses validate_predictor):
+      Col1 = single `main_predictor` (e.g. alpha=0.2) applied to each dataset
+      Col2 = each dataset's own alpha-specific predictor
+      Col3 = baseline c=1
+      optimal = per-pair optimum (tightest ceiling, free from min_rmse)
+    """
+    import io
+    import contextlib
+    rows = []
+    for ds in datasets:
+        with contextlib.redirect_stdout(io.StringIO()):  # silence per-run chatter
+            r1 = validate_predictor(experiment=main_predictor, model_type=model_type,
+                                    mc_experiment_id=ds, verbose=False)
+            r2 = validate_predictor(experiment=ds, model_type=model_type,
+                                    mc_experiment_id=ds, verbose=False)
+        s1, s2 = r1["summary"], r2["summary"]
+        rows.append({
+            "dataset": ds,
+            "rmse_main_predictor": s1["rmse_predicted"]["mean"],
+            "rmse_alpha_specific": s2["rmse_predicted"]["mean"],
+            "rmse_baseline_c1": s1["rmse_baseline"]["mean"],
+            "rmse_optimal": s1["rmse_optimal"]["mean"],
+        })
 
+    main_alpha = main_predictor.split("_a")[-1]
+    h2 = f"with α={main_alpha} predictor"
+    header = (f"{'α':>6}{'c=1 (original SDN)':>22}{h2:>24}"
+              f"{'with α-specific predictor':>29}{'optimum c':>14}")
+    print("=" * len(header))
+    print(f"ABSORPTION RMSE (displmodel={model_type}, main predictor={main_predictor})")
+    print(header)
+    print("-" * len(header))
+    for r in rows:
+        a = r["dataset"].split("_a")[-1]
+        print(f"{a:>6}{r['rmse_baseline_c1']:>22.2f}{r['rmse_main_predictor']:>24.2f}"
+              f"{r['rmse_alpha_specific']:>29.2f}{r['rmse_optimal']:>14.2f}")
+    print("=" * len(header))
+
+    if save:
+        out = os.path.join(MC_EXPERIMENT_ROOT, f"absorption_table_{main_predictor}_{model_type}.json")
+        with open(out, "w") as f:
+            json.dump({"main_predictor": main_predictor, "model_type": model_type, "rows": rows}, f, indent=2)
+        print(f"Saved {out}")
+    return rows
+
+
+if __name__ == "__main__":
+    # build_absorption_table()
+    run_validation_example()

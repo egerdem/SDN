@@ -91,14 +91,14 @@ def plot_single_error_map(ax, data, vmin, vmax, interpolated, error_metric, room
     
     # Use ax.text for precise title placement inside the figure.
     # Coordinates are in 'axes fraction' (0,0 is bottom-left, 1,1 is top-right).
-    ax.text(0.5, 0.92, f'{test_display_name}',
-            transform=ax.transAxes,
-            ha='center', va='top',  # Horizontal alignment: center, Vertical alignment: top
-            fontsize=14, # text of title
-            bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', boxstyle='round,pad=0.2'))
+    # ax.text(0.5, 0.92, f'{test_display_name}',
+    #         transform=ax.transAxes,
+    #         ha='center', va='top',  # Horizontal alignment: center, Vertical alignment: top
+    #         fontsize=14, # text of title
+    #         bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', boxstyle='round,pad=0.2'))
 
     # Add mean error text to the plot, with configurable location.
-    ax.text(0.94, 0.07, f'Mean Err: {mean_error:.3f}',
+    ax.text(0.98, 0.17, f'Mean Err: {mean_error:.2f}',
             transform=ax.transAxes,
             ha='right', va='bottom',
             fontsize=14, # text of mean error
@@ -109,7 +109,7 @@ def plot_single_error_map(ax, data, vmin, vmax, interpolated, error_metric, room
     
     # Use bbox_to_anchor for precise legend placement to avoid overflow.
     # (x, y) coordinates are in 'axes fraction'.
-    ax.legend(loc='upper left', bbox_to_anchor=(0.01, 0.94),
+    ax.legend(loc='upper left', bbox_to_anchor=(0.01, 0.86),
               fancybox=True, shadow=False, ncol=1, fontsize=12, #size of legend text
               bbox_transform=ax.transAxes)
 
@@ -465,11 +465,11 @@ if __name__ == "__main__":
     # REFERENCE_METHOD = 'ISM-pra-rand10'
     # REFERENCE_METHOD = 'ISM'
     # Specify which methods to plot. Leave empty or set to None to plot all.
-    METHODS_TO_PLOT = ['SDN-Test_3', 'SDN-Test_2', 'SDN-Test1', 'SDN-Test2', 'SDN-Test3', 'SDN-Test4','SDN-Test5',
-                       'SDN-Test6', 'SDN-Test7', 'HO-SDN-N2', 'HO-SDN-N3']
+    # METHODS_TO_PLOT = ['SDN-Test_3', 'SDN-Test_2', 'SDN-Test1', 'SDN-Test2', 'SDN-Test3', 'SDN-Test4','SDN-Test5',
+    #                    'SDN-Test6', 'SDN-Test7', 'HO-SDN-N2', 'HO-SDN-N3']
     # METHODS_TO_PLOT = ['SDN-Test-3', 'SDN-Test-2', 'SDN-Test1', 'SDN-Test2', 'SDN-Test3', 'SDN-Test4','SDN-Test5',
     #                    'SDN-Test6', 'SDN-Test7', 'HO-SDN-N2', 'HO-SDN-N3']
-    # METHODS_TO_PLOT = ['SDN-Test5']
+    METHODS_TO_PLOT = ['SDN-Test1']
     # METHODS_TO_PLOT = ["SDN-c_center", "SDN-c_lower_left", 'SDN-Test2.998', "SDN-c_upper_right"]
     # METHODS_TO_PLOT = ['SDN-Test2.998']
     # METHODS_TO_PLOT = ['SDN-fast4_71'] #not fast actually, fyi. name wrong.
@@ -480,7 +480,7 @@ if __name__ == "__main__":
     ERROR_DURATION_MS = 50  # Analyze the first 50ms of the EDC
 
     # --- CONTROL FLAGS ---
-    SAVE_FIGURES = False  # Set to True to save the generated figures to disk
+    SAVE_FIGURES = True  # Set to True to save the generated figures to disk
     SHOW_PLOTS = True    # Set to True to display interactive plot windows
     SAVE_SUMMARY_TEXT = False # Set to False to disable saving the summary .txt file
     SHOW_INTERACTIVE_PLOT = False  # Set to True to show unified interactive RIR plot for first receiver

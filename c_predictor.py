@@ -255,7 +255,50 @@ EXPERIMENT_MODELS = {
             'mae': 0.47782192508652377
         }
     },
-    
+
+    # --- Absorption sweep: MC 60 pairs, fixed geometry (mc60_geometry.json) ---
+    'mcfix_a0.1': {
+        'description': 'MC 60 pairs, fixed geometry, absorption 0.1',
+        'n_samples': 60, 'outliers_removed': 0,
+        'linear': {'intercept': -3.360572, 'coefficient': 17.630091, 'r2_score': 0.762744, 'mae': 0.439244},
+        'polynomial': {'intercept': -3.782250, 'coef_h': 19.967290, 'coef_h2': -3.159171, 'r2_score': 0.762855, 'mae': 0.435758},
+        'power': {'a': 32.006975, 'b': 2.394940, 'r2_score': 0.735387, 'mae': 0.508248},
+    },
+    'mcfix_a0.2': {
+        'description': 'MC 60 pairs, fixed geometry, absorption 0.2',
+        'n_samples': 60, 'outliers_removed': 0,
+        'linear': {'intercept': -2.723231, 'coefficient': 16.006260, 'r2_score': 0.760729, 'mae': 0.393245},
+        'polynomial': {'intercept': -4.628710, 'coef_h': 26.567593, 'coef_h2': -14.275663, 'r2_score': 0.763457, 'mae': 0.372702},
+        'power': {'a': 25.475769, 'b': 2.139907, 'r2_score': 0.730120, 'mae': 0.446949},
+    },
+    'mcfix_a0.3': {
+        'description': 'MC 60 pairs, fixed geometry, absorption 0.3',
+        'n_samples': 60, 'outliers_removed': 0,
+        'linear': {'intercept': -2.392042, 'coefficient': 15.104736, 'r2_score': 0.771349, 'mae': 0.353940},
+        'polynomial': {'intercept': -4.710216, 'coef_h': 27.953475, 'coef_h2': -17.367530, 'r2_score': 0.775946, 'mae': 0.331444},
+        'power': {'a': 22.310818, 'b': 1.998658, 'r2_score': 0.742909, 'mae': 0.400358},
+    },
+    'mcfix_a0.4': {
+        'description': 'MC 60 pairs, fixed geometry, absorption 0.4',
+        'n_samples': 60, 'outliers_removed': 0,
+        'linear': {'intercept': -1.804152, 'coefficient': 13.538325, 'r2_score': 0.769083, 'mae': 0.305970},
+        'polynomial': {'intercept': -3.177133, 'coef_h': 21.148226, 'coef_h2': -10.286239, 'r2_score': 0.771085, 'mae': 0.294920},
+        'power': {'a': 16.807053, 'b': 1.696724, 'r2_score': 0.756711, 'mae': 0.328148},
+    },
+    'mcfix_a0.5': {
+        'description': 'MC 60 pairs, fixed geometry, absorption 0.5',
+        'n_samples': 60, 'outliers_removed': 0,
+        'linear': {'intercept': -1.255311, 'coefficient': 12.052888, 'r2_score': 0.810935, 'mae': 0.250645},
+        'polynomial': {'intercept': -2.841334, 'coef_h': 20.843599, 'coef_h2': -11.882329, 'r2_score': 0.814488, 'mae': 0.241009},
+        'power': {'a': 13.543226, 'b': 1.466214, 'r2_score': 0.803512, 'mae': 0.261656},
+    },
+    'mcfix_a0.6': {
+        'description': 'MC 60 pairs, fixed geometry, absorption 0.6',
+        'n_samples': 60, 'outliers_removed': 0,
+        'linear': {'intercept': -0.829538, 'coefficient': 10.809908, 'r2_score': 0.811375, 'mae': 0.222677},
+        'polynomial': {'intercept': -2.498064, 'coef_h': 20.057899, 'coef_h2': -12.500431, 'r2_score': 0.816266, 'mae': 0.219403},
+        'power': {'a': 11.607502, 'b': 1.316719, 'r2_score': 0.806075, 'mae': 0.227318},
+    },
 }
 
 
@@ -420,6 +463,7 @@ def load_fitted_model_params(model_file=None):
     Returns:
         dict: model parameters including type, coefficients, and performance metrics
     """
+
     if model_file is None:
         # Try default location
         script_dir = os.path.dirname(os.path.abspath(__file__))

@@ -214,10 +214,10 @@ if __name__ == "__main__":
         padding=0.5,
         n_x=15,
         n_y=15,
-        z_mode="fixed_1p5",
+        z_mode="mid", #or "fixed_1p5"
         include_corners=True,
         corner_offset=0.5,
-        diagonals=True
+        diagonals="3d"
     )
 
     analyze_wall_proximity(source_positions, receiver_positions, active_room)

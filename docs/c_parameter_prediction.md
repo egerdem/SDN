@@ -157,4 +157,4 @@ for source_config in source_positions:
 
 The resulting linear model provides a simple, interpretable rule for setting C based on source proximity to walls.
 
--
+
