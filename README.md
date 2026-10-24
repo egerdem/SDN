@@ -2,7 +2,7 @@
 
 Investigating why SDN exhibits energy drop after first-order reflections despite good perceptual performance. Comparing path lengths, energy distribution, and echo density between SDN and ISM methods, different injection and scattering variants
 
-## 📁 Project Structure (NOT READY YET - contact me)
+## 📁 Project Structure (NOT Finalized - pls contact me for urgent needs)
 
 ```
 SDN-EGE/
